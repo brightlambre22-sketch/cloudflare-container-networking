@@ -63,8 +63,15 @@ window.onload=function(){
     status.textContent='Tiny Core command-line mode ready; starting node bootstrap...';
     // Keep keyboard input short. v86/Tiny Core can truncate very long pasted
     // shell commands, which was causing the command to arrive without its prefix.
-    const command='wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId;
-    window.emulator.keyboard_send_text(command+'\n');
+    // Configure Tiny Core's emulated NIC before attempting any DNS/HTTP.
+    // The bootstrap cannot download anything until DHCP has supplied a route
+    // and DNS server.
+    window.emulator.keyboard_send_text('ip link set eth0 up 2>/dev/null || true; udhcpc -n -q -i eth0\n');
+
+    setTimeout(function(){
+      const command='wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId;
+      window.emulator.keyboard_send_text(command+'\n');
+    },5000);
 
     // Once the bootstrap has installed the pinned scripts, start them with
     // separate short commands so the VM executes the real Linux processes.
@@ -91,6 +98,10 @@ window.onload=function(){
       cdrom:{url:'/boot/TinyCore-11.0.iso'},
       // Give Tiny Core a real emulated NIC. The relay provides the browser-side
       // bridge to the outside network so wget/DNS can reach the bootstrap.
+      // Current v86 API:
+      net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
+      // Keep the legacy option for the bundled v86 build if it predates
+      // net_device.
       network_relay_url:'wss://relay.widgetry.org/',
       autostart:true
     });
