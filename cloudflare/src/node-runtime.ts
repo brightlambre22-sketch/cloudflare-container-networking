@@ -26,6 +26,18 @@ export class NodeRuntime extends DurableObject {
     await this.ctx.storage.put("runtime", state);
   }
 
+  private async withRunnerLiveness(state: RuntimeState): Promise<RuntimeState> {
+    if (state.runner_status === "online" && state.runner_seen_at) {
+      const age = Date.now() - Date.parse(state.runner_seen_at);
+      if (!Number.isFinite(age) || age > 30_000) {
+        const offline = { ...state, runner_status: "offline" as const };
+        await this.persist(offline);
+        return offline;
+      }
+    }
+    return state;
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const current = await this.state();
