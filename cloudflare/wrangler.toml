@@ -13,4 +13,8 @@ class_name = "NodeRegistry"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["TunnelHub", "NodeRegistry"]
+new_sqlite_classes = ["TunnelHub"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["NodeRegistry"]
