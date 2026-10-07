@@ -1,6 +1,10 @@
-# Project status: framed TCP tunnel proof
+# Project status: virtual-node control plane + framed TCP tunnel proof
 
 ## Implemented
+
+- Authenticated virtual-node control plane with a Durable Object registry.
+- Stable overlay address allocation from 10.240.0.0/16 and explicit lifecycle/egress/health metadata.
+- POST/GET/PATCH /v1/nodes API for provisioning metadata without pretending that an overlay address is a native network interface.
 
 - Private GitHub repository with a Wrangler Worker and SQLite-backed Durable Object configuration.
 - Public GET /health, bearer-protected GET /v1/nodes, and authenticated /tunnel WebSocket route.
@@ -23,10 +27,11 @@ Cloudflare documents HTTP/WebSocket ingress and outbound TCP sockets, while inbo
 
 ## Next milestones
 
-1. Harden stream lifecycle: half-close, per-stream sequence checks, idle deadlines, and bounded send queues/backpressure.
-2. Add UDP associations only after selecting and testing an actual UDP-capable gateway/proxy path.
-3. Add isolated Docker workloads, unique private addresses, fail-closed egress enforcement, proxy adapters, and public-IP verification on Oracle Linux.
-4. Add signed per-component identities, nonce replay defense, key rotation, operations metrics, and deployment/recovery tests before production use.
+1. Validate the virtual-node control plane with Wrangler dry-run and deployed smoke tests.
+2. Harden stream lifecycle: half-close, per-stream sequence checks, idle deadlines, and bounded send queues/backpressure.
+3. Add UDP associations only after selecting and testing an actual UDP-capable gateway/proxy path.
+4. Add isolated Docker workloads, unique private addresses, fail-closed egress enforcement, proxy adapters, and public-IP verification on Oracle Linux.
+5. Add signed per-component identities, nonce replay defense, key rotation, operations metrics, and deployment/recovery tests before production use.
 
 ## Plan constraint
 

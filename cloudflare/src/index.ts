@@ -1,9 +1,13 @@
 import { TunnelHub } from "./tunnel-hub";
+import { NodeRegistry } from "./node-registry";
+import { NodeRuntime } from "./node-runtime";
 
-export { TunnelHub };
+export { TunnelHub, NodeRegistry, NodeRuntime };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
+  NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
+  NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
   ADMIN_TOKEN: string;
@@ -28,9 +32,10 @@ function json(data: unknown, status = 200): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
     if (url.pathname === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-      return json({ status: "ok", service: "cloudflare-container-networking" });
+      return json({ status: "ok", service: "cloudflare-container-networking", virtual_nodes: "control-plane" });
     }
 
     if (url.pathname === "/tunnel") {
@@ -46,10 +51,67 @@ export default {
     }
 
     if (url.pathname === "/v1/nodes") {
-      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
-      const hub = env.TUNNEL_HUB.get(env.TUNNEL_HUB.idFromName("global"));
-      return hub.fetch("https://tunnel-hub.internal/nodes");
+      const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+
+      if (request.method === "GET") {
+        return registry.fetch("https://node-registry.internal/list");
+      }
+
+      if (request.method === "POST") {
+        return registry.fetch(new Request("https://node-registry.internal/create", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: await request.text(),
+        }));
+      }
+
+      return json({ error: "method_not_allowed" }, 405);
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime/start") && request.method === "POST") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime/start".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/start", { method: "POST" });
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime/stop") && request.method === "POST") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime/stop".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/stop", { method: "POST" });
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime") && request.method === "GET") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/status");
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime/probe") && request.method === "GET") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime/probe".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/probe");
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/")) {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length);
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+
+      const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+      return registry.fetch(new Request(`https://node-registry.internal/node/${encodeURIComponent(nodeId)}`, {
+        method: request.method,
+        headers: request.headers,
+        body: request.method === "PATCH" ? await request.text() : undefined,
+      }));
     }
 
     return json({ error: "not_found" }, 404);
