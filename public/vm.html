@@ -42,11 +42,32 @@ window.onload=function(){
       autostart:true
     });
     status.textContent='Linux VM starting...';
-    window.emulator.wait_until_vga_screen_contains(/tc@box|tc@/,{timeout_msec:120000})
-      .then(function(found){
-        if(found) startBrowserBootstrap();
-        else status.textContent='Tiny Core prompt not detected.';
-      })
+    function tinyCorePromptVisible(){
+      const textScreen=document.querySelector('#screen_container > div');
+      const text=(textScreen && textScreen.textContent) || '';
+      return /tc@box|tc@/.test(text);
+    }
+
+    function waitForTinyCorePrompt(timeoutMs){
+      return new Promise(function(resolve,reject){
+        const started=Date.now();
+        function check(){
+          if(tinyCorePromptVisible()){
+            resolve(true);
+            return;
+          }
+          if(Date.now()-started >= timeoutMs){
+            reject(new Error('Tiny Core prompt not detected within '+Math.round(timeoutMs/1000)+' seconds'));
+            return;
+          }
+          setTimeout(check,500);
+        }
+        check();
+      });
+    }
+
+    waitForTinyCorePrompt(120000)
+      .then(function(){ startBrowserBootstrap(); })
       .catch(function(error){
         console.error(error);
         status.textContent='VM bootstrap wait failed: '+error.message;
