@@ -1,0 +1,12 @@
+name = "cloudflare-container-networking"
+main = "src/index.ts"
+compatibility_date = "2026-10-07"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "TUNNEL_HUB"
+class_name = "TunnelHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TunnelHub"]
