@@ -1,13 +1,15 @@
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
+import { DurableNodeRuntime } from "./durable-node-runtime";
 
-export { TunnelHub, NodeRegistry, NodeRuntime };
+export { TunnelHub, NodeRegistry, NodeRuntime, DurableNodeRuntime };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
+  DURABLE_NODE_RUNTIME: DurableObjectNamespace<DurableNodeRuntime>;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
 }
