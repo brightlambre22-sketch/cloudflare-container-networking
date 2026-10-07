@@ -18,7 +18,9 @@ export class NodeRuntime extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     if (ctx.container.running) {
-      void ctx.blockConcurrencyWhile(() => ctx.container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS));
+      void ctx.blockConcurrencyWhile(async () => {
+        await ctx.container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
+      });
     }
   }
 
