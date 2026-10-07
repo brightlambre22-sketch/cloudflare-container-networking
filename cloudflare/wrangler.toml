@@ -7,6 +7,10 @@ workers_dev = true
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
 
+[[durable_objects.bindings]]
+name = "NODE_REGISTRY"
+class_name = "NodeRegistry"
+
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["TunnelHub"]
+new_sqlite_classes = ["TunnelHub", "NodeRegistry"]
