@@ -30,7 +30,7 @@ On a development machine with Node.js, clone this repository, then run:
    npm run deploy
    ~~~
 
-Use three independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN, the smoke-test client uses CLIENT_TOKEN, and the node listing uses ADMIN_TOKEN.
+Use two independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN and the smoke-test client uses CLIENT_TOKEN. The node registry is temporarily unauthenticated while we finish the node lifecycle implementation.
 
 ## Run the TCP proof on the Oracle gateway
 
