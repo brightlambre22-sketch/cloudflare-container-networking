@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mysterium Browser VM</title>
+</head>
+<body>
+<div id="status">Starting Linux VM...</div>
+<div id="screen_container"><div></div><canvas></canvas></div>
+<script src="/v86/libv86.js"></script>
+<script>
+window.onload=function(){
+  const status=document.getElementById('status');
+  status.textContent='Loading v86...';
+  try {
+    window.emulator=new V86({
+      wasm_path:'/v86/v86.wasm',
+      memory_size:128*1024*1024,
+      vga_memory_size:8*1024*1024,
+      screen_container:document.getElementById('screen_container'),
+      bios:{url:'/bios/seabios.bin'},
+      vga_bios:{url:'/bios/vgabios.bin'},
+      cdrom:{url:'/boot/TinyCore-11.0.iso'},
+      autostart:true
+    });
+    status.textContent='Linux VM starting...';
+  } catch(e) {
+    console.error(e);
+    status.textContent='VM ERROR: '+e.message;
+  }
+};
+</script>
+</body>
+</html>
