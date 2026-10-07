@@ -5,6 +5,8 @@ interface RuntimeState {
   status: "stopped" | "starting" | "running" | "error";
   started_at: string | null;
   last_error: string | null;
+  runner_seen_at: string | null;
+  runner_status: "offline" | "online";
 }
 
 export class NodeRuntime extends DurableObject {
@@ -14,6 +16,8 @@ export class NodeRuntime extends DurableObject {
       status: "stopped",
       started_at: null,
       last_error: null,
+      runner_seen_at: null,
+      runner_status: "offline",
     };
   }
 
@@ -36,7 +40,7 @@ export class NodeRuntime extends DurableObject {
     if (url.pathname === "/start" && request.method === "POST") {
       const next: RuntimeState = {
         ...current,
-        status: "running",
+        status: "starting",
         started_at: current.started_at ?? new Date().toISOString(),
         last_error: null,
       };
@@ -52,6 +56,7 @@ export class NodeRuntime extends DurableObject {
       const next: RuntimeState = {
         ...current,
         status: "stopped",
+        runner_status: current.runner_status,
       };
       await this.persist(next);
       return Response.json({
@@ -67,6 +72,23 @@ export class NodeRuntime extends DurableObject {
         status: current.status,
         runtime: "external-runner",
         container_running: false,
+        runner_status: current.runner_status,
+        runner_seen_at: current.runner_seen_at,
+      });
+    }
+
+    if (url.pathname === "/heartbeat" && request.method === "POST") {
+      const next: RuntimeState = {
+        ...current,
+        runner_status: "online",
+        runner_seen_at: new Date().toISOString(),
+      };
+      await this.persist(next);
+      return Response.json({
+        node_id: next.node_id,
+        desired_status: next.status,
+        runner_status: next.runner_status,
+        runner_seen_at: next.runner_seen_at,
       });
     }
 
