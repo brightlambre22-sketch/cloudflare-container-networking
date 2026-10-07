@@ -7,6 +7,7 @@ export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
+  ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
 }
@@ -164,6 +165,6 @@ export default {
       return json({ error: "method_not_allowed" }, 405);
     }
 
-    return json({ error: "not_found" }, 404);
+    return env.ASSETS.fetch(request);
   },
 };
