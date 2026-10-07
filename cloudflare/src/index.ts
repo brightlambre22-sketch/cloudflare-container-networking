@@ -102,7 +102,7 @@ export default {
 
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
 
-      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      const runtime = env.DURABLE_NODE_RUNTIME.get(env.DURABLE_NODE_RUNTIME.idFromName(nodeId));
 
       if (!action && request.method === "GET") {
         return runtime.fetch("https://node-runtime.internal/status");
