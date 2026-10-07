@@ -6,10 +6,6 @@ main = "cloudflare/src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
-[[containers]]
-class_name = "NodeRuntime"
-scheduling_policy = "durable_object"
-
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
@@ -22,14 +18,14 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["TunnelHub"]
+[exports.TunnelHub]
+type = "durable-object"
+storage = "sqlite"
 
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["NodeRegistry"]
+[exports.NodeRegistry]
+type = "durable-object"
+storage = "sqlite"
 
-[[migrations]]
-tag = "v3"
-new_sqlite_classes = ["NodeRuntime"]
+[exports.NodeRuntime]
+type = "durable-object"
+storage = "sqlite"
