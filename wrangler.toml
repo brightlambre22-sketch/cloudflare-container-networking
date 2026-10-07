@@ -6,6 +6,10 @@ main = "cloudflare/src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
+[[containers]]
+class_name = "NodeRuntime"
+scheduling_policy = "durable_object"
+
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
