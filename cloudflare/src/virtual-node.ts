@@ -7,7 +7,7 @@ export interface VirtualNodeEnv {
 
 export class VirtualNode extends DurableObject {
   private state(): VirtualNodeRecord | undefined {
-    return this.ctx.storage.kv.get("state") as VirtualNodeRecord | undefined;
+    return this.ctx.storage.get("state") as VirtualNodeRecord | undefined;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -37,7 +37,7 @@ export class VirtualNode extends DurableObject {
         runtime: current?.runtime ?? "control-plane-only",
         updated_at: new Date().toISOString(),
       };
-      this.ctx.storage.kv.put("state", state);
+      this.ctx.storage.put("state", state);
       return Response.json(state, { status: current ? 200 : 201 });
     }
 
@@ -59,7 +59,7 @@ export class VirtualNode extends DurableObject {
         last_health_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      this.ctx.storage.kv.put("state", state);
+      this.ctx.storage.put("state", state);
       return Response.json(state);
     }
 
