@@ -16,16 +16,3 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["TunnelHub"]
-
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["NodeRegistry"]
-
-[[migrations]]
-tag = "v3"
-new_sqlite_classes = ["NodeRuntime"]
-
