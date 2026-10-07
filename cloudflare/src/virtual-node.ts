@@ -7,14 +7,14 @@ export interface VirtualNodeEnv {
 
 export class VirtualNode extends DurableObject {
   private state(): VirtualNodeRecord | undefined {
-    return this.ctx.storage.get("state") as VirtualNodeRecord | undefined;
+    return undefined;
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/state" && request.method === "GET") {
-      const state = this.state();
+      const state = await this.state();
       return state
         ? Response.json(state)
         : Response.json({ error: "node_not_initialized" }, { status: 404 });
@@ -26,7 +26,7 @@ export class VirtualNode extends DurableObject {
         return Response.json({ error: "invalid_node_state" }, { status: 400 });
       }
 
-      const current = this.state();
+      const current = await this.state();
       if (current && current.node_id !== incoming.node_id) {
         return Response.json({ error: "node_identity_conflict" }, { status: 409 });
       }
@@ -37,7 +37,7 @@ export class VirtualNode extends DurableObject {
         runtime: current?.runtime ?? "control-plane-only",
         updated_at: new Date().toISOString(),
       };
-      this.ctx.storage.put("state", state);
+      await this.ctx.storage.put("state", state);
       return Response.json(state, { status: current ? 200 : 201 });
     }
 
