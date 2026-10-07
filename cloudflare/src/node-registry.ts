@@ -16,6 +16,7 @@ export interface VirtualNodeRecord {
 
 const NODE_KEY_PREFIX = "node:";
 const NEXT_HOST_KEY = "network:next_host";
+const FIRST_HOST = 2;
 const MAX_HOST = 65534;
 
 export class NodeRegistry extends DurableObject {
@@ -38,7 +39,7 @@ export class NodeRegistry extends DurableObject {
         return Response.json({ error: "node_exists" }, { status: 409 });
       }
 
-      const nextHost = Number((await this.ctx.storage.get<number>(NEXT_HOST_KEY)) ?? 1);
+      const nextHost = Number((await this.ctx.storage.get<number>(NEXT_HOST_KEY)) ?? FIRST_HOST);
       if (!Number.isInteger(nextHost) || nextHost > MAX_HOST) {
         return Response.json({ error: "private_address_pool_exhausted" }, { status: 503 });
       }
