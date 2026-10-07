@@ -11,7 +11,7 @@ A Cloudflare-first control and tunnel foundation for the larger networking desig
 - Local TCP echo service and a two-stream end-to-end smoke-test client.
 - Wrangler SQLite-backed Durable Object configuration and local secret template.
 
-Still not implemented: UDP datagram transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
+Still not implemented: UDP datagram transport, actual container lifecycle management, host-level network attachment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. The new virtual-node API is a control-plane allocator only; its 10.240.0.0/16 addresses are overlay metadata, not native Cloudflare/container interfaces. See docs/STATUS.md before relying on this for workloads.
 
 ## Architecture boundary
 
@@ -64,7 +64,7 @@ Start three terminals on the Oracle host:
 
 The echo target binds only to 127.0.0.1:9000. The gateway client defaults to allowing only that exact TCP destination. The smoke test opens two TCP streams across the same WebSocket and verifies echoed payloads. No inbound port on Oracle is needed for this proof; the gateway opens outbound TLS/WebSocket traffic to Cloudflare. Set TCP_ALLOWLIST only to explicit host:port destinations you intend to permit.
 
-Check GET /health on the deployed URL. To list active roles, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>.
+Check GET /health on the deployed URL. To list tunnel roles, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>. To allocate a virtual node, POST /v1/nodes with the same admin token and an optional JSON body such as {"node_id":"node-a8f42"}. The response contains a stable overlay address such as 10.240.0.1 and status=provisioning. GET /v1/nodes lists allocated virtual nodes; PATCH /v1/nodes/<node_id> updates lifecycle/health metadata. These addresses do not claim to be directly routable Cloudflare or public IP interfaces.
 
 For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, set disposable local-only secrets, and run npm run dev. The Python clients must be able to reach Wrangler's local WebSocket endpoint.
 
