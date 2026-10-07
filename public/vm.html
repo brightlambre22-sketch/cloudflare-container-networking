@@ -63,7 +63,7 @@ window.onload=function(){
     status.textContent='Tiny Core ready; running startup steps...';
 
     const commands=[
-      'udhcpc -n -q -i eth0',
+      'sudo -n udhcpc -n -q -i eth0',
       'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
       'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh',
       'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId,
