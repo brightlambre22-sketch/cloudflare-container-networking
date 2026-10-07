@@ -6,7 +6,7 @@ export interface VirtualNodeRecord {
   node_id: string;
   private_ip: string;
   status: NodeStatus;
-  runtime: "control-plane-only" | "container-pending" | "external-gateway";
+  runtime: "control-plane-only" | "container-pending" | "external-gateway" | "tinycore-persistent";
   created_at: string;
   updated_at: string;
   egress_ip: string | null;
