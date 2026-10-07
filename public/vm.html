@@ -72,7 +72,7 @@ window.onload=function(){
       // Tiny Core extensions are fetched over the HTTP mirror, so this step
       // does not depend on HTTPS already working. openssl-1.1.1 supplies the
       // TLS runtime needed by the base wget.
-      window.emulator.keyboard_send_text('sudo -n tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz\n');
+      window.emulator.keyboard_send_text('tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz\n');
     },5000);
 
     setTimeout(function(){
