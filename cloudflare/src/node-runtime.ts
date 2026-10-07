@@ -45,7 +45,7 @@ export class NodeRuntime extends DurableObject {
     if (url.pathname === "/status" && request.method === "GET") {
       return Response.json({
         ...current,
-        runtime: "external-runner",
+        runtime: "tinycore-persistent",
         container_running: false,
       });
     }
@@ -60,7 +60,7 @@ export class NodeRuntime extends DurableObject {
       await this.persist(next);
       return Response.json({
         ...next,
-        runtime: "external-runner",
+        runtime: "tinycore-persistent",
         container_running: false,
       }, { status: 202 });
     }
@@ -74,7 +74,7 @@ export class NodeRuntime extends DurableObject {
       await this.persist(next);
       return Response.json({
         ...next,
-        runtime: "external-runner",
+        runtime: "tinycore-persistent",
         container_running: false,
       });
     }
@@ -83,7 +83,7 @@ export class NodeRuntime extends DurableObject {
       return Response.json({
         node_id: current.node_id,
         status: current.status,
-        runtime: "external-runner",
+        runtime: "tinycore-persistent",
         container_running: false,
         runner_status: current.runner_status,
         runner_seen_at: current.runner_seen_at,
