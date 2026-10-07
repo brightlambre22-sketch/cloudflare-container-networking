@@ -16,6 +16,10 @@ api() {
   curl -fsS "${API_URL}/v1/nodes/${NODE_ID}/runtime"
 }
 
+heartbeat() {
+  curl -fsS -X POST "${API_URL}/v1/nodes/${NODE_ID}/runtime/heartbeat" >/dev/null 2>&1 || true
+}
+
 patch_node() {
   status="$1"
   error="${2:-}"
@@ -57,6 +61,7 @@ stop_myst() {
 }
 
 while :; do
+  heartbeat
   desired="$(api | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' | head -n 1 || true)"
 
   case "$desired" in
