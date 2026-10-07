@@ -66,6 +66,8 @@ The echo target binds only to 127.0.0.1:9000. The gateway client defaults to all
 
 Check GET /health on the deployed URL. To list active roles, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>.
 
+To create virtual-node metadata in a browser, open `https://YOUR-WORKER.workers.dev/admin`, enter the Cloudflare `ADMIN_TOKEN` secret, and optionally choose a node ID. The page sends the token only in the authenticated `POST /v1/nodes` request and does not save it in browser storage. This creates a control-plane record only; it does not provision or start a container or VPS.
+
 For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, set disposable local-only secrets, and run npm run dev. The Python clients must be able to reach Wrangler's local WebSocket endpoint.
 
 ## Replit and Cloudflare cost
