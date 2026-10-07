@@ -10,7 +10,6 @@ export interface Env {
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
-  ADMIN_TOKEN: string;
 }
 
 function authorized(header: string | null, expected: string | undefined): boolean {
@@ -36,14 +35,6 @@ function json(data: unknown, status = 200): Response {
 
 function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
-}
-
-function adminConfigured(env: Env): boolean {
-  return typeof env.ADMIN_TOKEN === "string" && env.ADMIN_TOKEN.length > 0;
-}
-
-function adminAuthorized(request: Request, env: Env): boolean {
-  return adminConfigured(env) && authorized(request.headers.get("authorization"), env.ADMIN_TOKEN);
 }
 
 export default {
@@ -83,12 +74,6 @@ export default {
       if (request.method !== "GET" && request.method !== "POST") {
         return json({ error: "method_not_allowed" }, 405);
       }
-      if (!adminConfigured(env)) {
-        return json({ error: "admin_token_not_configured" }, 503);
-      }
-      if (!adminAuthorized(request, env)) {
-        return json({ error: "unauthorized" }, 401);
-      }
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
 
@@ -114,12 +99,6 @@ export default {
       const action = runtimeMatch[2];
 
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
-      if (!adminConfigured(env)) {
-        return json({ error: "admin_token_not_configured" }, 503);
-      }
-      if (!adminAuthorized(request, env)) {
-        return json({ error: "unauthorized" }, 401);
-      }
 
       const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
 
@@ -150,12 +129,6 @@ export default {
     if (nodeMatch) {
       const nodeId = nodeMatch[1];
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
-      if (!adminConfigured(env)) {
-        return json({ error: "admin_token_not_configured" }, 503);
-      }
-      if (!adminAuthorized(request, env)) {
-        return json({ error: "unauthorized" }, 401);
-      }
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
 
