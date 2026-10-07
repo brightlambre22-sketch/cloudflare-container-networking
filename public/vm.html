@@ -60,25 +60,32 @@ window.onload=function(){
   function startBrowserBootstrap(){
     if (window.__browserBootstrapStarted) return;
     window.__browserBootstrapStarted=true;
-    status.textContent='Tiny Core ready; starting node bootstrap...';
+    status.textContent='Tiny Core ready; running startup steps...';
 
-    // Keep every keyboard injection short. A fixed, conservative delay avoids
-    // depending on v86's DOM text representation of the shell prompt.
-    const steps=[
-      {cmd:'sudo -n ip link set eth0 up',wait:2000},
-      {cmd:'sudo -n udhcpc -n -q -i eth0',wait:5000},
-      {cmd:'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',wait:12000},
-      {cmd:'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh',wait:8000},
-      {cmd:'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId,wait:5000},
-      {cmd:'test -x /opt/cloudflare-node/myst-supervisor.sh',wait:1000},
-      {cmd:'test -x /opt/cloudflare-node/cloudflare-runner.sh',wait:1000},
-      {cmd:'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &',wait:1500},
-      {cmd:'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &',wait:3000}
+    const commands=[
+      'udhcpc -n -q -i eth0',
+      'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
+      'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh',
+      'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId,
+      'test -x /opt/cloudflare-node/myst-supervisor.sh',
+      'test -x /opt/cloudflare-node/cloudflare-runner.sh',
+      'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &',
+      'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &'
     ];
 
-    let i=0;
-    function next(){
-      if(i>=steps.length){
+    function terminalText(){
+      const screen=document.querySelector('#screen_container > div');
+      return ((screen && screen.textContent)||'');
+    }
+
+    function promptCount(text){
+      const matches=text.match(/tc@box:~\$/g);
+      return matches ? matches.length : 0;
+    }
+
+    let index=0;
+    function sendNext(){
+      if(index>=commands.length){
         window.emulator.keyboard_send_text('clear\n');
         setTimeout(function(){
           window.emulator.keyboard_send_text('echo Mysterium live console\n');
@@ -88,12 +95,41 @@ window.onload=function(){
         },1000);
         return;
       }
-      const step=steps[i++];
-      status.textContent='Running startup step '+i+'/'+steps.length+'...';
-      window.emulator.keyboard_send_text(step.cmd+'\n');
-      setTimeout(next,step.wait);
+
+      const before=terminalText();
+      const beforePrompts=promptCount(before);
+      const command=commands[index++];
+      status.textContent='Running startup step '+index+'/'+commands.length+'...';
+      window.emulator.keyboard_send_text(command+'\n');
+
+      let elapsed=0;
+      function waitForNewPrompt(){
+        const now=terminalText();
+        const prompts=promptCount(now);
+        if(prompts>beforePrompts){
+          setTimeout(sendNext,500);
+          return;
+        }
+        elapsed+=500;
+        if(elapsed>180000){
+          status.textContent='Startup step '+index+' timed out; check terminal output.';
+          return;
+        }
+        setTimeout(waitForNewPrompt,500);
+      }
+      setTimeout(waitForNewPrompt,1000);
     }
-    next();
+
+    // Wait for the initial shell prompt, then serialize each command by
+    // waiting for a NEW prompt after it completes.
+    function waitForInitialPrompt(){
+      if(promptCount(terminalText())>0){
+        sendNext();
+        return;
+      }
+      setTimeout(waitForInitialPrompt,500);
+    }
+    waitForInitialPrompt();
   }
 
   status.textContent='Loading v86...';
