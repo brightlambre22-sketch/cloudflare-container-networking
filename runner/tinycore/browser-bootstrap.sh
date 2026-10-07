@@ -6,7 +6,7 @@ set -eu
 
 API_URL="${1:-}"
 NODE_ID="${2:-}"
-PINNED_REF="8ee542e32906aaf196f76c221e902410aa066e45"
+PINNED_REF="c052da1b750198d96a6b2149191e62c4848fc948"
 RAW_BASE="https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/$PINNED_REF/runner/tinycore"
 
 [ -n "$API_URL" ] && [ -n "$NODE_ID" ] || { echo "Usage: browser-bootstrap.sh <https-worker-url> <node-id>" >&2; exit 1; }
@@ -32,9 +32,9 @@ fetch_verified() {
 }
 
 # SHA-256 values for the exact pinned files.
-fetch_verified configure-node-ips.sh 8ee542e32906aaf196f76c221e902410aa066e45
-fetch_verified myst-supervisor.sh 89dd406bc68cec684f4e556d9a5fef91e80b9867
-fetch_verified cloudflare-runner.sh f3686a8d25de2cb16ba8ab28fb72e24e7cc51624
+fetch_verified configure-node-ips.sh 517a07914d213d7c1e5b7b77b5fe10a3bf8f996f1600eaad515f82374429f5d4
+fetch_verified myst-supervisor.sh 717c3100ca11e525912cd422701174d0cad9cf7db5fc5e92d16cf2a5f67db56a
+fetch_verified cloudflare-runner.sh 09fd7c7d4a4b91e31b85420c840172d640e83e674b6f3236615ec5bfe247b6d9
 
 cat >"$ENV/node.env" <<EOF
 NODE_ID=$NODE_ID
