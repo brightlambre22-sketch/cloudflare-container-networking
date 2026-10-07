@@ -15,8 +15,10 @@ https://www.tinycorelinux.net/17.x/x86_64/release/CorePure64-17.1.iso
 Distribution files:
 https://www.tinycorelinux.net/17.x/x86_64/release/distribution_files/
 
-Do not commit the ISO into Git. The repository contains the deterministic
-bootstrap/configuration instead.
+The ISO is a boot asset, not part of the persistent-node source code. Do not
+commit the ISO to Git unless there is a specific reason to accept the large
+binary in repository history. For the browser/v86 PoC, place the working ISO
+under `public/boot/` when using repository-hosted assets. See `public/README.md`.
 
 ## Persistence
 
