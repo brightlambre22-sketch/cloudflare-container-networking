@@ -1,5 +1,7 @@
 import { TunnelHub } from "./tunnel-hub";
 
+export { TunnelHub };
+
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   TUNNEL_TOKEN: string;
