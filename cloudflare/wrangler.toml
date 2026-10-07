@@ -3,7 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
-
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
@@ -16,3 +15,14 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
+[exports.TunnelHub]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.NodeRegistry]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.NodeRuntime]
+type = "durable-object"
+storage = "sqlite"
