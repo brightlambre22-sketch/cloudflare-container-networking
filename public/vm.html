@@ -82,9 +82,14 @@ window.onload=function(){
       return matches ? matches.length : 0;
     }
 
+    // v86's terminal text buffer can replace/trim old lines, so counting
+    // prompts is not a reliable completion signal. Use conservative per-step
+    // delays instead; the commands themselves remain serialized.
+    const delays=[10000,30000,30000,240000,5000,5000,5000];
     let index=0;
     function sendNext(){
       if(index>=commands.length){
+        status.textContent='Startup complete; showing Mysterium logs.';
         window.emulator.keyboard_send_text('clear\n');
         setTimeout(function(){
           window.emulator.keyboard_send_text('echo Mysterium live console\n');
@@ -95,32 +100,23 @@ window.onload=function(){
         return;
       }
 
-      const before=terminalText();
-      const beforePrompts=promptCount(before);
+      const step=index;
       const command=commands[index++];
       status.textContent='Running startup step '+index+'/'+commands.length+'...';
       window.emulator.keyboard_send_text(command+'\n');
 
-      let elapsed=0;
-      function waitForNewPrompt(){
-        const now=terminalText();
-        const prompts=promptCount(now);
-        if(prompts>beforePrompts){
-          setTimeout(sendNext,500);
-          return;
+      const total=delays[step];
+      let remaining=total;
+      const timer=setInterval(function(){
+        remaining-=1000;
+        status.textContent='Running startup step '+(step+1)+'/'+commands.length+'... '+Math.max(0,Math.ceil(remaining/1000))+'s';
+        if(remaining<=0){
+          clearInterval(timer);
+          sendNext();
         }
-        elapsed+=500;
-        if(elapsed>180000){
-          status.textContent='Startup step '+index+' timed out; check terminal output.';
-          return;
-        }
-        setTimeout(waitForNewPrompt,500);
-      }
-      setTimeout(waitForNewPrompt,1000);
+      },1000);
     }
 
-    // Wait for the initial shell prompt, then serialize each command by
-    // waiting for a NEW prompt after it completes.
     function waitForInitialPrompt(){
       if(promptCount(terminalText())>0){
         sendNext();
