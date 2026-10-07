@@ -1,53 +1,72 @@
 # Cloudflare Container Networking
 
-A Cloudflare-first control and tunnel foundation for the larger networking design. The initial milestone proves an authenticated, persistent WebSocket from the Oracle gateway to a Durable Object and automatic reconnects. It is intentionally not presented as a finished TCP/UDP VPN or container platform.
+A Cloudflare-first control and tunnel foundation for the larger networking design. The current milestone proves two separately authenticated WebSocket roles, binary framing, multi-stream TCP relay through the Oracle gateway, and automatic reconnect for the gateway.
 
-## First slice
+## Implemented
 
-- Worker routes for health, authenticated gateway WebSocket, and authenticated live-node listing.
-- Hibernatable Durable Object WebSocket endpoint with application-level PING/PONG and live connection metadata.
-- Python gateway client with TLS WebSocket, structured logs, heartbeat, and exponential reconnect with jitter.
-- Cloudflare SQLite-backed Durable Object configuration compatible with Workers Free.
+- Worker health route, authenticated gateway/client tunnel route, and authenticated live-session listing.
+- Hibernatable Durable Object that brokers bounded binary frames between a gateway and client for the same node.
+- Versioned frame codec shared by TypeScript and Python.
+- Python gateway client that opens allowlisted TCP connections and multiplexes stream IDs over one WebSocket.
+- Local TCP echo service and a two-stream end-to-end smoke-test client.
+- Wrangler SQLite-backed Durable Object configuration and local secret template.
 
-Not implemented yet: TCP stream forwarding, UDP datagram transport, multiplexed data frames, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
+Still not implemented: UDP datagram transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
 
 ## Architecture boundary
 
 Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
 
-## Fast start
+## Deploy the Worker
 
-1. Install Node.js and Python 3.10+ on a development machine, clone this repository, then run:
+On a development machine with Node.js, clone this repository, then run:
 
    ~~~sh
    cd cloudflare
    npm install
    npx wrangler login
    npx wrangler secret put TUNNEL_TOKEN
+   npx wrangler secret put CLIENT_TOKEN
    npx wrangler secret put ADMIN_TOKEN
    npm run deploy
    ~~~
 
-   Use two independently generated random values for the secrets. Never commit them. Wrangler prints the deployed Workers URL.
+Use three independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN, the smoke-test client uses CLIENT_TOKEN, and the node listing uses ADMIN_TOKEN.
 
-2. On the Oracle gateway, install the Python dependency and start the client (substitute the deployed workers.dev or custom-domain URL):
+## Run the TCP proof on the Oracle gateway
+
+On the Oracle host, install the Python dependency:
 
    ~~~sh
    cd gateway
    python -m venv .venv
    . .venv/bin/activate
    pip install -r requirements.txt
-   export TUNNEL_URL=wss://YOUR-WORKER.workers.dev/tunnel
-   export TUNNEL_TOKEN='the-same-TUNNEL_TOKEN-set-in-Cloudflare'
-   export NODE_ID=oracle-gateway
-   python client.py
    ~~~
 
-   The gateway only opens outbound TLS/WebSocket traffic to Cloudflare; this milestone does not require opening an inbound port on Oracle. Keep the token in an environment/secret manager, not shell history or a checked-in file.
+Set these environment values in the gateway shell (use the actual Workers URL; keep tokens out of files and chat):
 
-3. Check GET /health on the deployed URL. To list live tunnel sessions, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>.
+   ~~~sh
+   export TUNNEL_URL=wss://YOUR-WORKER.workers.dev/tunnel
+   export TUNNEL_TOKEN='gateway-token-set-in-Cloudflare'
+   export CLIENT_TOKEN='test-client-token-set-in-Cloudflare'
+   export ADMIN_TOKEN='admin-token-set-in-Cloudflare'
+   export NODE_ID=oracle-gateway
+   ~~~
 
-For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, fill in disposable local-only secrets, and run npm run dev. The gateway can connect to the local Wrangler WebSocket endpoint if the machine running it can reach that endpoint.
+Start three terminals on the Oracle host:
+
+   ~~~sh
+   cd gateway && python echo_server.py
+   cd gateway && python client.py
+   cd gateway && python tcp_smoke.py
+   ~~~
+
+The echo target binds only to 127.0.0.1:9000. The gateway client defaults to allowing only that exact TCP destination. The smoke test opens two TCP streams across the same WebSocket and verifies echoed payloads. No inbound port on Oracle is needed for this proof; the gateway opens outbound TLS/WebSocket traffic to Cloudflare. Set TCP_ALLOWLIST only to explicit host:port destinations you intend to permit.
+
+Check GET /health on the deployed URL. To list active roles, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>.
+
+For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, set disposable local-only secrets, and run npm run dev. The Python clients must be able to reach Wrangler's local WebSocket endpoint.
 
 ## Replit and Cloudflare cost
 
@@ -58,6 +77,6 @@ This source repository and deployment flow do not require a Replit plan upgrade.
 - cd cloudflare && npm run dev - local Worker development.
 - cd cloudflare && npm run check - Wrangler dry-run bundle/config check.
 - cd cloudflare && npm run deploy - deploy to the Cloudflare account logged into Wrangler.
-- cd gateway && python client.py - connect the gateway client after setting its environment variables.
+- cd gateway && python -m unittest -v - run Python frame codec tests.
 
-See docs/STATUS.md for scope, known limits, and the next build stage.
+See docs/STATUS.md and protocol/frame-v1.md for scope and wire format.
