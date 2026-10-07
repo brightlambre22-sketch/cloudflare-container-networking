@@ -1,5 +1,5 @@
 export function adminPageResponse(): Response {
-  const nonce = crypto.randomUUID().replaceAll("-", "");
+  const nonce = crypto.randomUUID().replace(/-/g, "");
   const html = [
     "<!doctype html>",
     "<html lang='en'>",
@@ -30,7 +30,7 @@ export function adminPageResponse(): Response {
     "      <button id='create-button' type='submit'>Create node</button>",
     "    </form>",
     "    <pre id='result' role='status' aria-live='polite'></pre>",
-    "    <p class='security'>The token is sent over HTTPS for this request only. This page does not save it in browser storage.</p>",
+    "    <p class='security'>This creates a control-plane node record only; it does not start a container or VPS. The token is sent over HTTPS for this request and is not saved by this page.</p>",
     "  </main>",
     "  <script nonce='__NONCE__'>",
     "    const form = document.getElementById('create-form');",
