@@ -236,6 +236,5 @@ export class NodeRuntime extends DurableObject {
         this.monitoring = undefined;
       });
 
-    this.ctx.waitUntil(this.monitoring);
   }
 }
