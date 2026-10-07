@@ -63,15 +63,22 @@ window.onload=function(){
     status.textContent='Tiny Core command-line mode ready; starting node bootstrap...';
     // Keep keyboard input short. v86/Tiny Core can truncate very long pasted
     // shell commands, which was causing the command to arrive without its prefix.
-    // Configure Tiny Core's emulated NIC before attempting any DNS/HTTP.
-    // The bootstrap cannot download anything until DHCP has supplied a route
-    // and DNS server.
-    window.emulator.keyboard_send_text('ip link set eth0 up 2>/dev/null || true; udhcpc -n -q -i eth0\n');
+    // Tiny Core's login shell is unprivileged. DHCP needs root privileges,
+    // and the base wget in Core 11 needs the OpenSSL extension for HTTPS.
+    // Do both automatically before fetching the node bootstrap.
+    window.emulator.keyboard_send_text('sudo -n ip link set eth0 up 2>/dev/null || true; sudo -n udhcpc -n -q -i eth0\n');
+
+    setTimeout(function(){
+      // Tiny Core extensions are fetched over the HTTP mirror, so this step
+      // does not depend on HTTPS already working. openssl-1.1.1 supplies the
+      // TLS runtime needed by the base wget.
+      window.emulator.keyboard_send_text('sudo -n tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz\n');
+    },5000);
 
     setTimeout(function(){
       const command='wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId;
       window.emulator.keyboard_send_text(command+'\n');
-    },5000);
+    },15000);
 
     // Once the bootstrap has installed the pinned scripts, start them with
     // separate short commands so the VM executes the real Linux processes.
