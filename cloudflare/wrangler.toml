@@ -16,9 +16,6 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
-[[durable_objects.bindings]]
-name = "DURABLE_NODE_RUNTIME"
-class_name = "DurableNodeRuntime"
 
 [[migrations]]
 tag = "v1"
@@ -32,6 +29,3 @@ new_sqlite_classes = ["NodeRegistry"]
 tag = "v3"
 new_sqlite_classes = ["NodeRuntime"]
 
-[[migrations]]
-tag = "v4"
-new_sqlite_classes = ["DurableNodeRuntime"]
