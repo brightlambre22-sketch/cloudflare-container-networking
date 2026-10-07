@@ -120,6 +120,17 @@ export default {
         return runtime.fetch("https://node-runtime.internal/probe");
       }
 
+      if (action === "heartbeat") {
+        if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+        return runtime.fetch(
+          new Request("https://node-runtime.internal/heartbeat", {
+            method: "POST",
+            headers: request.headers,
+            body: request.body,
+          }),
+        );
+      }
+
       return json({ error: "method_not_allowed" }, 405);
     }
 
