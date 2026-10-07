@@ -34,11 +34,11 @@ export class NodeRegistry extends DurableObject {
         return Response.json({ error: "invalid_node_id" }, { status: 400 });
       }
 
-      if (this.ctx.storage.kv.get(this.nodeKey(nodeId))) {
+      if (this.ctx.storage.get(this.nodeKey(nodeId))) {
         return Response.json({ error: "node_exists" }, { status: 409 });
       }
 
-      const nextHost = Number(this.ctx.storage.kv.get(NEXT_HOST_KEY) ?? 1);
+      const nextHost = Number(this.ctx.storage.get(NEXT_HOST_KEY) ?? 1);
       if (!Number.isInteger(nextHost) || nextHost > MAX_HOST) {
         return Response.json({ error: "private_address_pool_exhausted" }, { status: 503 });
       }
@@ -58,15 +58,15 @@ export class NodeRegistry extends DurableObject {
 
       // SQLite-backed DO KV operations are synchronous. Keeping allocation in one
       // Durable Object makes the read/modify/write sequence atomic to this object.
-      this.ctx.storage.kv.put(this.nodeKey(nodeId), record);
-      this.ctx.storage.kv.put(NEXT_HOST_KEY, nextHost + 1);
+      this.ctx.storage.put(this.nodeKey(nodeId), record);
+      this.ctx.storage.put(NEXT_HOST_KEY, nextHost + 1);
 
       return Response.json(record, { status: 201 });
     }
 
     if (url.pathname === "/list" && request.method === "GET") {
       const nodes: VirtualNodeRecord[] = [];
-      for (const [key, value] of this.ctx.storage.kv.list({ prefix: NODE_KEY_PREFIX })) {
+      for (const [key, value] of this.ctx.storage.list({ prefix: NODE_KEY_PREFIX })) {
         if (key.startsWith(NODE_KEY_PREFIX)) nodes.push(value as VirtualNodeRecord);
       }
       nodes.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -80,7 +80,7 @@ export class NodeRegistry extends DurableObject {
       }
 
       const key = this.nodeKey(nodeId);
-      const existing = this.ctx.storage.kv.get(key) as VirtualNodeRecord | undefined;
+      const existing = this.ctx.storage.get(key) as VirtualNodeRecord | undefined;
       if (!existing) return Response.json({ error: "node_not_found" }, { status: 404 });
 
       if (request.method === "GET") return Response.json(existing);
@@ -95,7 +95,7 @@ export class NodeRegistry extends DurableObject {
           created_at: existing.created_at,
           updated_at: new Date().toISOString(),
         };
-        this.ctx.storage.kv.put(key, updated);
+        this.ctx.storage.put(key, updated);
         return Response.json(updated);
       }
     }
