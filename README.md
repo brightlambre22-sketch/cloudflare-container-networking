@@ -62,7 +62,7 @@ Start three terminals on the Oracle host:
 
 The echo target binds only to 127.0.0.1:9000. The gateway client defaults to allowing only that exact TCP destination. The smoke test opens two TCP streams across the same WebSocket and verifies echoed payloads. No inbound port on Oracle is needed for this proof; the gateway opens outbound TLS/WebSocket traffic to Cloudflare. Set TCP_ALLOWLIST only to explicit host:port destinations you intend to permit.
 
-Check GET /health on the deployed URL. To list active roles, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>.
+Check GET /health on the deployed URL. Node registry endpoints are temporarily unauthenticated during this PoC phase.
 
 For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, set disposable local-only secrets, and run npm run dev. The Python clients must be able to reach Wrangler's local WebSocket endpoint.
 
