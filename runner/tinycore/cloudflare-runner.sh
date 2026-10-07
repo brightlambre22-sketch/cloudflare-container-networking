@@ -11,6 +11,8 @@ DATA_DIR="${MYST_DATA_DIR:-/var/lib/mysterium-node}"
 LOG_FILE="${MYST_LOG_FILE:-/var/log/mysterium-node.log}"
 POLL_SECONDS="${RUNNER_POLL_SECONDS:-5}"
 PID_FILE="${MYST_PID_FILE:-/var/run/mysterium-node.pid}"
+DESIRED_FILE="${MYST_DESIRED_FILE:-/var/run/mysterium.desired}"
+SUPERVISOR="${MYST_SUPERVISOR:-/opt/cloudflare-node/myst-supervisor.sh}"
 
 api() {
   curl -fsS "${API_URL}/v1/nodes/${NODE_ID}/runtime"
@@ -23,7 +25,7 @@ heartbeat() {
 patch_node() {
   status="$1"
   error="${2:-}"
-  payload="{\"status\":\"$status\",\"runtime\":\"external-gateway\",\"error\":${error:+\"$error\"}${error:-null}}"
+  payload="{\"status\":\"$status\",\"runtime\":\"tinycore-persistent\",\"error\":${error:+\"$error\"}${error:-null}}"
   curl -fsS -X PATCH     -H "content-type: application/json"     --data "$payload"     "${API_URL}/v1/nodes/${NODE_ID}" >/dev/null || true
 }
 
@@ -33,31 +35,14 @@ running() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
-start_myst() {
-  mkdir -p "$DATA_DIR" "$(dirname "$LOG_FILE")" "$(dirname "$PID_FILE")"
-  if running; then return 0; fi
-
-  "$MYST_BIN" service --agreed-terms-and-conditions \
-    --data-dir="$DATA_DIR" >>"$LOG_FILE" 2>&1 &
-  echo $! >"$PID_FILE"
-  sleep 2
-
-  if running; then
-    patch_node online
-  else
-    patch_node error "mysterium_process_failed_to_start"
-    return 1
-  fi
+set_desired() {
+  printf "%s\n" "$1" >"$DESIRED_FILE"
 }
 
-stop_myst() {
-  if running; then
-    pid="$(cat "$PID_FILE")"
-    kill "$pid" 2>/dev/null || true
-    sleep 2
+ensure_supervisor() {
+  if ! pgrep -f "$SUPERVISOR" >/dev/null 2>&1; then
+    nohup "$SUPERVISOR" >>"$(dirname "$LOG_FILE")/myst-supervisor.log" 2>&1 &
   fi
-  rm -f "$PID_FILE"
-  patch_node offline
 }
 
 while :; do
@@ -66,10 +51,15 @@ while :; do
 
   case "$desired" in
     running|starting)
-      start_myst || true
+      set_desired running
+      ensure_supervisor
+      patch_node online || true
       ;;
     stopped)
-      stop_myst
+      set_desired stopped
+      if running; then kill "$(cat "$PID_FILE")" 2>/dev/null || true; fi
+      rm -f "$PID_FILE"
+      patch_node offline
       ;;
     error)
       patch_node error "cloudflare_requested_error_state"
