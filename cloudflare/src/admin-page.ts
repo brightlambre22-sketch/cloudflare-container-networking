@@ -69,7 +69,7 @@ export function adminPageResponse(): Response {
     "  </script>",
     "</body>",
     "</html>"
-  ].join("\\n").replace("__NONCE__", nonce);
+  ].join("\n").replace("__NONCE__", nonce);
 
   return new Response(html, {
     headers: {
