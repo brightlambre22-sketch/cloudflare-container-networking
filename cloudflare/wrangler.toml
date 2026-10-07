@@ -35,3 +35,7 @@ new_sqlite_classes = ["NodeRegistry"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["NodeRuntime"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["DurableNodeRuntime"]
