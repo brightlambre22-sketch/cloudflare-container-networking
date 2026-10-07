@@ -61,18 +61,22 @@ window.onload=function(){
     if (window.__browserBootstrapStarted) return;
     window.__browserBootstrapStarted=true;
     status.textContent='Tiny Core command-line mode ready; starting node bootstrap...';
-    const command='echo '+bootstrapB64+' | base64 -d >/tmp/cloudflare-browser-bootstrap.sh && ' +
-      'echo "[browser] running bootstrap" && ' +
-      'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' && ' +
-      'echo "[myst] configuring network" && ' +
-      '/opt/cloudflare-node/configure-node-ips.sh eth0 && ' +
-      'echo "[myst] starting supervisor" && ' +
-      'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & ' +
-      'echo "[myst] starting Cloudflare runner" && ' +
-      'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & ' +
-      'echo "[myst] processes started; following live logs" && ' +
-      '(tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null &)'; 
+    // Keep keyboard input short. v86/Tiny Core can truncate very long pasted
+    // shell commands, which was causing the command to arrive without its prefix.
+    const command='echo '+bootstrapB64+' | base64 -d >/tmp/cloudflare-browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId;
     window.emulator.keyboard_send_text(command+'\n');
+
+    // Once the bootstrap has installed the pinned scripts, start them with
+    // separate short commands so the VM executes the real Linux processes.
+    setTimeout(function(){
+      window.emulator.keyboard_send_text('nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &\n');
+    },9000);
+    setTimeout(function(){
+      window.emulator.keyboard_send_text('nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &\n');
+    },10000);
+    setTimeout(function(){
+      window.emulator.keyboard_send_text('clear; echo "Mysterium live console"; tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null\n');
+    },11000);
   }
 
   status.textContent='Loading v86...';
