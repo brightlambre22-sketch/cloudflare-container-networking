@@ -18,48 +18,66 @@ const NODE_KEY_PREFIX = "node:";
 const NEXT_HOST_KEY = "network:next_host";
 const FIRST_HOST = 2;
 const MAX_HOST = 65534;
+const MAX_BATCH = 100;
 
 export class NodeRegistry extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/create" && request.method === "POST") {
-      const body = await request.json().catch(() => ({})) as { node_id?: string };
-      const nodeId = body.node_id ?? crypto.randomUUID();
+      const body = await request.json().catch(() => ({})) as {
+        node_id?: string;
+        count?: number;
+      };
+      const count = body.count === undefined ? 1 : Number(body.count);
 
-      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) {
-        return Response.json({ error: "invalid_node_id" }, { status: 400 });
+      if (!Number.isInteger(count) || count < 1 || count > MAX_BATCH) {
+        return Response.json({ error: "invalid_count", max: MAX_BATCH }, { status: 400 });
       }
-
-      const key = NODE_KEY_PREFIX + nodeId;
-      if (await this.ctx.storage.get(key)) {
-        return Response.json({ error: "node_exists" }, { status: 409 });
+      if (body.node_id !== undefined && count !== 1) {
+        return Response.json({ error: "node_id_requires_count_1" }, { status: 400 });
       }
 
       const nextHost = Number(
         (await this.ctx.storage.get<number>(NEXT_HOST_KEY)) ?? FIRST_HOST,
       );
 
-      if (!Number.isInteger(nextHost) || nextHost > MAX_HOST) {
+      if (!Number.isInteger(nextHost) || nextHost < FIRST_HOST || nextHost + count - 1 > MAX_HOST) {
         return Response.json({ error: "private_address_pool_exhausted" }, { status: 503 });
       }
 
       const now = new Date().toISOString();
-      const record: VirtualNodeRecord = {
-        node_id: nodeId,
-        private_ip: hostToIp(nextHost),
-        status: "provisioning",
-        runtime: "control-plane-only",
-        created_at: now,
-        updated_at: now,
-        egress_ip: null,
-        last_health_at: null,
-        error: null,
-      };
+      const records: VirtualNodeRecord[] = [];
 
-      await this.ctx.storage.put(key, record);
-      await this.ctx.storage.put(NEXT_HOST_KEY, nextHost + 1);
-      return Response.json(record, { status: 201 });
+      for (let i = 0; i < count; i += 1) {
+        const nodeId = body.node_id ?? crypto.randomUUID();
+        if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) {
+          return Response.json({ error: "invalid_node_id" }, { status: 400 });
+        }
+
+        const key = NODE_KEY_PREFIX + nodeId;
+        if (await this.ctx.storage.get(key)) {
+          return Response.json({ error: "node_exists", node_id: nodeId }, { status: 409 });
+        }
+
+        const record: VirtualNodeRecord = {
+          node_id: nodeId,
+          private_ip: hostToIp(nextHost + i),
+          status: "provisioning",
+          runtime: "control-plane-only",
+          created_at: now,
+          updated_at: now,
+          egress_ip: null,
+          last_health_at: null,
+          error: null,
+        };
+
+        records.push(record);
+        await this.ctx.storage.put(key, record);
+      }
+
+      await this.ctx.storage.put(NEXT_HOST_KEY, nextHost + count);
+      return Response.json(count === 1 ? records[0] : { nodes: records }, { status: 201 });
     }
 
     if (url.pathname === "/list" && request.method === "GET") {
