@@ -13,7 +13,8 @@ export class NodeRuntime extends DurableObject {
   private async state(): Promise<RuntimeState> {
     return (await this.ctx.storage.get<RuntimeState>("runtime")) ?? {
       node_id: this.ctx.id.toString(),
-      status: "stopped",
+      // A persistent Tiny Core runner should start the node as soon as it boots.
+      status: "starting",
       started_at: null,
       last_error: null,
       runner_seen_at: null,
