@@ -37,12 +37,12 @@ export class VirtualNode extends DurableObject {
         runtime: current?.runtime ?? "control-plane-only",
         updated_at: new Date().toISOString(),
       };
-      await this.ctx.storage.put("state", state);
+      await await this.ctx.storage.put("state", state);
       return Response.json(state, { status: current ? 200 : 201 });
     }
 
     if (url.pathname === "/health" && request.method === "POST") {
-      const current = this.state();
+      const current = await this.state();
       if (!current) return Response.json({ error: "node_not_initialized" }, { status: 404 });
 
       const body = await request.json().catch(() => ({})) as {
