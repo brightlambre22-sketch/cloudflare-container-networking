@@ -1,6 +1,9 @@
 import unittest
 
-from protocol import CLOSE, MAX_PAYLOAD_BYTES, OPEN_TCP, decode_frame, encode_frame
+from protocol import (
+    CLOSE, INGRESS_TCP_OPEN, MAX_PAYLOAD_BYTES, OPEN_TCP, UDP_DATA,
+    decode_frame, encode_frame,
+)
 
 
 class ProtocolTests(unittest.TestCase):
@@ -41,6 +44,13 @@ class ProtocolTests(unittest.TestCase):
     def test_rejects_invalid_node_id(self):
         with self.assertRaisesRegex(ValueError, "invalid_node_id"):
             encode_frame(CLOSE, "bad node")
+
+    def test_udp_and_ingress_types_round_trip(self):
+        for frame_type in (UDP_DATA, INGRESS_TCP_OPEN):
+            with self.subTest(frame_type=frame_type):
+                frame = decode_frame(encode_frame(frame_type, "node-001", 99, 1, b"datagram"))
+                self.assertEqual(frame.frame_type, frame_type)
+                self.assertEqual(frame.payload, b"datagram")
 
 
 if __name__ == "__main__":

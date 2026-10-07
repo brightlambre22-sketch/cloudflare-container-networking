@@ -1,21 +1,24 @@
 # Cloudflare Container Networking
 
-A Cloudflare-first control and tunnel foundation for the larger networking design. The current milestone proves two separately authenticated WebSocket roles, binary framing, multi-stream TCP relay through the Oracle gateway, and automatic reconnect for the gateway.
+A Cloudflare-first control and tunnel foundation for per-node networking. The current milestone supports authenticated, multiplexed TCP and UDP over one role-specific WebSocket per node, with an Oracle gateway for explicit public ingress and FineProxy SOCKS5 for outbound TCP/UDP.
 
 ## Implemented
 
 - Worker health route, authenticated gateway/client tunnel route, and authenticated live-session listing.
 - Hibernatable Durable Object that brokers bounded binary frames between a gateway and client for the same node.
 - Versioned frame codec shared by TypeScript and Python.
-- Python gateway client that opens allowlisted TCP connections and multiplexes stream IDs over one WebSocket.
+- Python Oracle gateway that uses FineProxy SOCKS5 CONNECT and UDP ASSOCIATE for allowlisted outbound traffic.
+- Node-side agent with a loopback-only SOCKS5 endpoint and allowlisted TCP/UDP public-ingress targets.
+- Explicit, optional Oracle TCP/UDP ingress listeners mapped to a per-node tunnel identity.
 - Local TCP echo service and a two-stream end-to-end smoke-test client.
+- Standard-library SOCKS5 packet/handshake tests; no additional Python runtime dependency.
 - Wrangler SQLite-backed Durable Object configuration and local secret template.
 
-Still not implemented: UDP datagram transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
+Still not implemented: Docker lifecycle management, automatic container IP assignment, public-IP verification, dashboard, provider-specific live validation, and production key rotation. See docs/STATUS.md before relying on this for workloads.
 
 ## Architecture boundary
 
-Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
+Cloudflare is the authenticated WebSocket control/tunnel layer. The Oracle Linux gateway at 141.148.53.68 is the separate public ingress endpoint; its explicitly configured TCP/UDP listeners forward over the tunnel to one node identity at a time. Each node agent maintains its own authenticated tunnel and local service allowlists. Outbound node traffic takes the reverse path to the Oracle gateway, then uses that process's FineProxy SOCKS5 identity. FineProxy is not used for inbound port forwarding, and Cloudflare Workers/Containers are not treated as arbitrary public TCP/UDP listeners. No IP spoofing is used.
 
 ## Deploy the Worker
 
@@ -33,7 +36,7 @@ On a development machine with Node.js, clone this repository, then run:
 
 Use three independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN, the smoke-test client uses CLIENT_TOKEN, and the node listing uses ADMIN_TOKEN.
 
-## Run the TCP proof on the Oracle gateway
+## Run the TCP proof
 
 On the Oracle host, install the Python dependency:
 
@@ -44,13 +47,12 @@ On the Oracle host, install the Python dependency:
    pip install -r requirements.txt
    ~~~
 
-Set these environment values in the gateway shell (use the actual Workers URL; keep tokens out of files and chat):
+For the existing loopback echo proof, set these values in the Oracle gateway shell:
 
    ~~~sh
    export TUNNEL_URL=wss://YOUR-WORKER.workers.dev/tunnel
    export TUNNEL_TOKEN='gateway-token-set-in-Cloudflare'
-   export CLIENT_TOKEN='test-client-token-set-in-Cloudflare'
-   export ADMIN_TOKEN='admin-token-set-in-Cloudflare'
+   export CLIENT_TOKEN='node-token-set-in-Cloudflare'
    export NODE_ID=oracle-gateway
    ~~~
 
@@ -62,7 +64,11 @@ Start three terminals on the Oracle host:
    cd gateway && python tcp_smoke.py
    ~~~
 
-The echo target binds only to 127.0.0.1:9000. The gateway client defaults to allowing only that exact TCP destination. The smoke test opens two TCP streams across the same WebSocket and verifies echoed payloads. No inbound port on Oracle is needed for this proof; the gateway opens outbound TLS/WebSocket traffic to Cloudflare. Set TCP_ALLOWLIST only to explicit host:port destinations you intend to permit.
+The echo target binds only to 127.0.0.1:9000. The default `TCP_DIRECT_ALLOWLIST` is limited to this loopback fixture. Other allowed TCP destinations use FineProxy SOCKS5. Set `TCP_ALLOWLIST` and `UDP_DESTINATION_ALLOWLIST` to exact `host:port` values; set `TCP_DIRECT_ALLOWLIST=` explicitly in production to prevent direct egress. The smoke test opens two TCP streams and verifies echoes.
+
+## UDP egress and public ingress
+
+See [docs/NETWORKING.md](docs/NETWORKING.md) for per-node deployment configuration. FineProxy's SOCKS5 hostname, port, rotated username, and rotated password are runtime environment values on the Oracle gateway only. Do not put proxy credentials in GitHub, `.dev.vars`, or source files. Configure only the Oracle listener ports you intend to expose, open those same ports in the host/cloud firewall, and keep the node-side ingress allowlists exact.
 
 Check GET /health on the deployed URL. To list active roles, send GET /v1/nodes with Authorization: Bearer <ADMIN_TOKEN>.
 
@@ -77,6 +83,6 @@ This source repository and deployment flow do not require a Replit plan upgrade.
 - cd cloudflare && npm run dev - local Worker development.
 - cd cloudflare && npm run check - Wrangler dry-run bundle/config check.
 - cd cloudflare && npm run deploy - deploy to the Cloudflare account logged into Wrangler.
-- cd gateway && python -m unittest -v - run Python frame codec tests.
+- cd gateway && python -m unittest -v - run Python protocol and SOCKS5 tests.
 
-See docs/STATUS.md and protocol/frame-v1.md for scope and wire format.
+See docs/STATUS.md, docs/NETWORKING.md, and protocol/frame-v1.md for scope, routing, and wire format.

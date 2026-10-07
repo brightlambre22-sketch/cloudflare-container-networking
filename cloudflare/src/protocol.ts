@@ -7,6 +7,12 @@ export const FrameType = {
   ERROR: 6,
   PING: 7,
   PONG: 8,
+  INGRESS_TCP_OPEN: 9,
+  UDP_OPEN: 10,
+  UDP_OPENED: 11,
+  UDP_DATA: 12,
+  UDP_CLOSE: 13,
+  INGRESS_UDP_OPEN: 14,
 } as const;
 
 export type FrameTypeValue = (typeof FrameType)[keyof typeof FrameType];

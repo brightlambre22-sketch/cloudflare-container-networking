@@ -1,4 +1,4 @@
-# Project status: framed TCP tunnel proof
+# Project status: per-node TCP/UDP tunnel integration
 
 ## Implemented
 
@@ -7,7 +7,12 @@
 - Separate gateway and test-client tokens and session roles.
 - Version 1 binary frame codec in TypeScript and Python with size, version, node ID, and length validation.
 - Durable Object routing of bounded frames between the matching client/gateway roles for a node.
-- Python gateway client with reconnect, heartbeat, up to 32 TCP streams, and an exact TCP_ALLOWLIST. Default allowlist is only 127.0.0.1:9000.
+- Python gateway client with reconnect, heartbeat, up to 32 outbound TCP streams, exact egress allowlists, and optional Oracle TCP/UDP ingress maps.
+- FineProxy SOCKS5 TCP CONNECT and UDP ASSOCIATE helpers; credentials come from Oracle runtime environment variables.
+- Node-side agent with loopback-only SOCKS5 TCP CONNECT/UDP ASSOCIATE and separate exact allowlists for inbound TCP and UDP services.
+- Optional Oracle public TCP and UDP listeners, each mapping one explicitly configured public port to an allowlisted node target over that node's authenticated tunnel.
+- UDP session expiry and bounded TCP/UDP association counts.
+- Local SOCKS5 packet/handshake tests using a fake proxy; no live FineProxy endpoint was exercised.
 - Loopback TCP echo service, two-stream smoke-test client, and Python codec unit tests.
 - Oracle gateway public IP supplied for this project: 141.148.53.68.
 
@@ -17,16 +22,16 @@ Deploy the Worker, start gateway/echo_server.py and gateway/client.py on the Ora
 
 ## Not production-ready / not implemented
 
-This is a bounded TCP tunnel proof, not a VPS replacement. There is no UDP datagram transport; no Docker lifecycle manager, container IP assignment, per-container enforcement, proxy adapter, public-IP verification, internet ingress, admin UI, reconnect-safe stream resumption, robust half-close handling, production token provisioning/rotation, or end-to-end test automation. The smoke-test destination is intentionally loopback-only. Do not widen the gateway allowlist casually: it controls where a client with CLIENT_TOKEN can make the gateway connect.
+This is an integration prototype, not a VPS replacement. There is no Docker lifecycle manager, automatic private-IP assignment, OS-level network isolation, public-IP verification, admin UI, reconnect-safe stream resumption, robust TCP half-close handling, production token provisioning/rotation, or live end-to-end validation against FineProxy and the Oracle firewall. The default smoke-test destination is intentionally loopback-only. Do not widen the gateway or node allowlists casually: they control where authenticated tunnel peers can connect.
 
-Cloudflare documents HTTP/WebSocket ingress and outbound TCP sockets, while inbound direct TCP is not yet supported. The Linux gateway remains necessary for raw networking. This project does not claim arbitrary UDP support on a Worker HTTP/WebSocket path, does not spoof IP addresses, does not expose Docker remotely, and does not provide arbitrary shell execution.
+Public TCP/UDP ingress terminates on the Oracle gateway, not Cloudflare or FineProxy. FineProxy must have UDP ASSOCIATE enabled for UDP egress. SOCKS5 UDP is used for outbound datagrams and their replies; it does not provide unsolicited inbound port forwarding. Ingress listeners bind only when their explicit `TCP_INGRESS_MAP` or `UDP_INGRESS_MAP` entry is configured, and node-side allowlists must match the mapped target. This project does not spoof IP addresses, expose Docker remotely, or provide arbitrary shell execution.
 
 ## Next milestones
 
-1. Harden stream lifecycle: half-close, per-stream sequence checks, idle deadlines, and bounded send queues/backpressure.
-2. Add UDP associations only after selecting and testing an actual UDP-capable gateway/proxy path.
-3. Add isolated Docker workloads, unique private addresses, fail-closed egress enforcement, proxy adapters, and public-IP verification on Oracle Linux.
-4. Add signed per-component identities, nonce replay defense, key rotation, operations metrics, and deployment/recovery tests before production use.
+1. Run live TCP and UDP tests against the rotated FineProxy credentials and confirm the provider plan has UDP enabled.
+2. Configure and test each Oracle ingress mapping against its node-local service; expose only required ports in both Oracle and cloud firewalls.
+3. Add isolated Docker workloads, unique private addresses, OS-level fail-closed egress enforcement, and public-IP verification.
+4. Harden stream lifecycle (half-close, per-stream sequencing, bounded queues/backpressure), signed per-component identities, key rotation, metrics, and deployment/recovery tests before production use.
 
 ## Plan constraint
 

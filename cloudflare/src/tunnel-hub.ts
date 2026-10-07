@@ -95,8 +95,17 @@ export class TunnelHub extends DurableObject {
     }
     if (frame.type === FrameType.PONG) return;
 
-    const allowedFromClient = [FrameType.OPEN_TCP, FrameType.TCP_DATA, FrameType.CLOSE];
-    const allowedFromGateway = [FrameType.TCP_OPENED, FrameType.TCP_DATA, FrameType.CLOSE, FrameType.ERROR];
+    // TCP opens normally originate at the node; ingress opens originate at the
+    // Oracle gateway. Data and lifecycle frames flow in both directions.
+    const allowedFromClient = [
+      FrameType.OPEN_TCP, FrameType.TCP_OPENED, FrameType.TCP_DATA, FrameType.CLOSE, FrameType.ERROR,
+      FrameType.UDP_OPEN, FrameType.UDP_OPENED, FrameType.UDP_DATA, FrameType.UDP_CLOSE,
+    ];
+    const allowedFromGateway = [
+      FrameType.INGRESS_TCP_OPEN, FrameType.INGRESS_UDP_OPEN,
+      FrameType.TCP_OPENED, FrameType.TCP_DATA, FrameType.CLOSE, FrameType.ERROR,
+      FrameType.UDP_OPENED, FrameType.UDP_DATA, FrameType.UDP_CLOSE,
+    ];
     const allowed = session.role === "client" ? allowedFromClient : allowedFromGateway;
     if (!allowed.includes(frame.type)) {
       socket.send(errorFrame(session.nodeId, frame.streamId, "direction_not_allowed"));
