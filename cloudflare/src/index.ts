@@ -90,7 +90,7 @@ export default {
     }
 
     const runtimeMatch = url.pathname.match(
-      /^\/v1\/nodes\/([^/]+)\/runtime(?:\/(start|stop|probe))?$/,
+      /^\/v1\/nodes\/([^/]+)\/runtime(?:\/(start|stop|probe|heartbeat))?$/,
     );
 
     if (runtimeMatch) {
