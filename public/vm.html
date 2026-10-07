@@ -7,11 +7,20 @@
 <style>
   body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
   #status { padding: 8px; }
+  #toolbar { padding: 8px; background: #181818; display: flex; gap: 8px; align-items: center; }
+  button { font: inherit; padding: 6px 10px; cursor: pointer; }
+  #copy-status { color: #8f8; }
+  #myst-log { margin: 0; padding: 8px; height: 220px; overflow: auto; white-space: pre-wrap; user-select: text; background: #000; color: #ddd; border-top: 1px solid #333; }
   #screen_container { width: 100%; min-height: 480px; }
 </style>
 </head>
 <body>
 <div id="status">Starting Linux VM...</div>
+<div id="toolbar">
+  <button id="copy-errors" type="button">Copy terminal text</button>
+  <span id="copy-status"></span>
+</div>
+<pre id="myst-log">Waiting for Tiny Core...</pre>
 <div id="screen_container"><div></div><canvas></canvas></div>
 <script src="/v86/libv86.js"></script>
 <script>
@@ -19,12 +28,39 @@ window.onload=function(){
   const status=document.getElementById('status');
   const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840';
   const apiUrl=window.location.origin;
+  const mystLog=document.getElementById('myst-log');
+  const copyStatus=document.getElementById('copy-status');
+  document.getElementById('copy-errors').addEventListener('click',async function(){
+    const text=(mystLog.textContent || '').trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      copyStatus.textContent='Copied.';
+      setTimeout(function(){ copyStatus.textContent=''; },1500);
+    } catch(e) {
+      const area=document.createElement('textarea');
+      area.value=text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+      copyStatus.textContent='Copied.';
+      setTimeout(function(){ copyStatus.textContent=''; },1500);
+    }
+  });
+  function mirrorTerminal(){
+    const screen=document.querySelector('#screen_container > div');
+    const text=(screen && screen.textContent || '').trim();
+    if(text) {
+      mystLog.textContent=text;
+      mystLog.scrollTop=mystLog.scrollHeight;
+    }
+  }
   const bootstrapB64='IyEvYmluL3NoCnNldCAtZXUKQVBJX1VSTD0iX19BUElfVVJMX18iCk5PREVfSUQ9IjdjYmVlMGU5LWRhNmItNDgwOC05MmE3LTRhM2MyYTQ1YTg0MCIKCmlmIGNvbW1hbmQgLXYgdWRoY3BjID4vZGV2L251bGwgMj4mMTsgdGhlbgogIGlwIGxpbmsgc2V0IGV0aDAgdXAgMj4vZGV2L251bGwgfHwgdHJ1ZQogIHVkaGNwYyAtbiAtcSAtaSBldGgwIDI+L2Rldi9udWxsIHx8IHRydWUKZmkKCmlmICEgY29tbWFuZCAtdiB3Z2V0ID4vZGV2L251bGwgMj4mMTsgdGhlbgogIGVjaG8gIndnZXQgdW5hdmFpbGFibGUiCiAgZXhpdCAxCmZpCgplY2hvICJbY2xvdWRmbGFyZV0gcmVxdWVzdGluZyBleHRlcm5hbCBydW50aW1lIHN0YXJ0Igp3Z2V0IC1xIC1PIC90bXAvcnVudGltZS1zdGFydC5qc29uIC0tcG9zdC1kYXRhPScnICIkQVBJX1VSTC92MS9ub2Rlcy8kTk9ERV9JRC9ydW50aW1lL3N0YXJ0IiB8fCB0cnVlCgplY2hvICJbY2xvdWRmbGFyZV0gbW9uaXRvcmluZyBleHRlcm5hbCBydW50aW1lIgppPTAKd2hpbGUgWyAiJGkiIC1sdCAzMCBdOyBkbwogIGlmIHdnZXQgLXEgLU8gL3RtcC9ydW50aW1lLXByb2JlLmpzb24gIiRBUElfVVJML3YxL25vZGVzLyROT0RFX0lEL3J1bnRpbWUvcHJvYmUiOyB0aGVuCiAgICBjYXQgL3RtcC9ydW50aW1lLXByb2JlLmpzb24KICBmaQogIHNsZWVwIDIKICBpPSQoKGkgKyAxKSkKZG9uZQoKZWNobyAiQ0xPVURGTEFSRV9CUk9XU0VSX0JPT1RTVFJBUF9DT01QTEVURSIK';
 
   function startBrowserBootstrap(){
     if (window.__browserBootstrapStarted) return;
     window.__browserBootstrapStarted=true;
-    status.textContent='Tiny Core ready; starting node control bootstrap...';
+    status.textContent='Tiny Core command-line mode ready; starting node bootstrap...';
     const command='echo '+bootstrapB64+' | base64 -d >/tmp/cloudflare-browser-bootstrap.sh && ' +
       'echo "[browser] running bootstrap" && ' +
       'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' && ' +
@@ -52,6 +88,25 @@ window.onload=function(){
       autostart:true
     });
     status.textContent='Linux VM starting...';
+    let commandLineModeStarted=false;
+    function sendCommandLineBoot(){
+      if(commandLineModeStarted) return;
+      commandLineModeStarted=true;
+      // TinyCore 11's CD menu places "Core (command line only)" after the
+      // graphical TinyCore entries. Select it automatically.
+      setTimeout(function(){
+        try {
+          if(window.emulator && typeof window.emulator.keyboard_send_scancodes==='function'){
+            window.emulator.keyboard_send_scancodes([0x50,0x50,0x1c]);
+          } else if(window.emulator && typeof window.emulator.keyboard_send_keys==='function'){
+            window.emulator.keyboard_send_keys(['ARROWDOWN','ARROWDOWN','ENTER']);
+          }
+        } catch(e) {
+          console.error(e);
+        }
+      },1500);
+    }
+
     function tinyCorePromptVisible(){
       const textScreen=document.querySelector('#screen_container > div');
       const text=(textScreen && textScreen.textContent) || '';
@@ -75,6 +130,12 @@ window.onload=function(){
         check();
       });
     }
+
+    // Try the boot-menu selection automatically; if the ISO is already past
+    // the menu, these keystrokes are harmless.
+    sendCommandLineBoot();
+
+    setInterval(mirrorTerminal,500);
 
     waitForTinyCorePrompt(120000)
       .then(function(){ startBrowserBootstrap(); })
