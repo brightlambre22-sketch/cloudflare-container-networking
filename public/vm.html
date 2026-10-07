@@ -60,12 +60,11 @@ window.onload=function(){
   function startBrowserBootstrap(){
     if (window.__browserBootstrapStarted) return;
     window.__browserBootstrapStarted=true;
-    status.textContent='Tiny Core ready; configuring network and starting node...';
+    status.textContent='Tiny Core ready; running startup steps...';
 
-    // Run one sequential shell script. Do not use fixed timers: package
-    // loading and HTTPS bootstrap can take longer than expected.
-    const script=[
-      'set -e',
+    // v86 keyboard input can truncate long pasted strings. Send only short
+    // commands and wait for the shell prompt before sending the next one.
+    const commands=[
       'sudo -n ip link set eth0 up',
       'sudo -n udhcpc -n -q -i eth0',
       'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
@@ -74,13 +73,52 @@ window.onload=function(){
       'test -x /opt/cloudflare-node/myst-supervisor.sh',
       'test -x /opt/cloudflare-node/cloudflare-runner.sh',
       'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &',
-      'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &',
-      'sleep 2',
-      'clear',
-      'echo "Mysterium live console"',
-      'tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null'
-    ].join('; ');
-    window.emulator.keyboard_send_text(script+'\n');
+      'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &'
+    ];
+    let index=0;
+    let lastText='';
+    let stable=0;
+
+    function terminalText(){
+      const screen=document.querySelector('#screen_container > div');
+      return ((screen && screen.textContent)||'');
+    }
+
+    function sendNext(){
+      if(index>=commands.length){
+        window.emulator.keyboard_send_text('clear\n');
+        setTimeout(function(){
+          window.emulator.keyboard_send_text('echo Mysterium live console\n');
+          setTimeout(function(){
+            window.emulator.keyboard_send_text('tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null\n');
+          },1500);
+        },1000);
+        return;
+      }
+      status.textContent='Running startup step '+(index+1)+'/'+commands.length+'...';
+      window.emulator.keyboard_send_text(commands[index]+'\n');
+      index++;
+      stable=0;
+      lastText='';
+    }
+
+    function waitForPrompt(){
+      const text=terminalText();
+      const prompt=/tc@box:~\\$\\s*$/.test(text);
+      if(prompt){
+        const tail=text.slice(-200);
+        if(tail===lastText) stable++;
+        else { lastText=tail; stable=0; }
+        if(stable>=2){
+          sendNext();
+          return;
+        }
+      }
+      setTimeout(waitForPrompt,500);
+    }
+
+    // Start only after the prompt is visible.
+    waitForPrompt();
   }
 
   status.textContent='Loading v86...';
