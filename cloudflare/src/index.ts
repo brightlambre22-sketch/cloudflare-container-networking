@@ -1,6 +1,7 @@
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
+import { adminPageResponse } from "./admin-page";
 
 export { TunnelHub, NodeRegistry, NodeRuntime };
 
@@ -41,6 +42,11 @@ function validNodeId(nodeId: string): boolean {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/admin") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return adminPageResponse();
+    }
 
     if (url.pathname === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
