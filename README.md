@@ -27,7 +27,6 @@ On a development machine with Node.js, clone this repository, then run:
    npx wrangler login
    npx wrangler secret put TUNNEL_TOKEN
    npx wrangler secret put CLIENT_TOKEN
-   npx wrangler secret put ADMIN_TOKEN
    npm run deploy
    ~~~
 
