@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
+[[containers]]
+name = "node-runtime-durable"
+class_name = "DurableNodeRuntime"
+scheduling_policy = "durable_object"
+
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
