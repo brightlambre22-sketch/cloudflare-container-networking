@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mysterium Browser VM</title>
+<style>
+  body { margin: 0; background: #111; color: #ddd; font-family: monospace; }
+  #status { padding: 8px; }
+  #screen_container { width: 100%; min-height: 480px; }
+</style>
 </head>
 <body>
 <div id="status">Starting Linux VM...</div>
@@ -12,6 +17,18 @@
 <script>
 window.onload=function(){
   const status=document.getElementById('status');
+  const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840';
+  const apiUrl=window.location.origin;
+  const bootstrapB64='IyEvYmluL3NoCnNldCAtZXUKQVBJX1VSTD0iX19BUElfVVJMX18iCk5PREVfSUQ9IjdjYmVlMGU5LWRhNmItNDgwOC05MmE3LTRhM2MyYTQ1YTg0MCIKCmlmIGNvbW1hbmQgLXYgdWRoY3BjID4vZGV2L251bGwgMj4mMTsgdGhlbgogIGlwIGxpbmsgc2V0IGV0aDAgdXAgMj4vZGV2L251bGwgfHwgdHJ1ZQogIHVkaGNwYyAtbiAtcSAtaSBldGgwIDI+L2Rldi9udWxsIHx8IHRydWUKZmkKCmlmICEgY29tbWFuZCAtdiB3Z2V0ID4vZGV2L251bGwgMj4mMTsgdGhlbgogIGVjaG8gIndnZXQgdW5hdmFpbGFibGUiCiAgZXhpdCAxCmZpCgplY2hvICJbY2xvdWRmbGFyZV0gcmVxdWVzdGluZyBleHRlcm5hbCBydW50aW1lIHN0YXJ0Igp3Z2V0IC1xIC1PIC90bXAvcnVudGltZS1zdGFydC5qc29uIC0tcG9zdC1kYXRhPScnICIkQVBJX1VSTC92MS9ub2Rlcy8kTk9ERV9JRC9ydW50aW1lL3N0YXJ0IiB8fCB0cnVlCgplY2hvICJbY2xvdWRmbGFyZV0gbW9uaXRvcmluZyBleHRlcm5hbCBydW50aW1lIgppPTAKd2hpbGUgWyAiJGkiIC1sdCAzMCBdOyBkbwogIGlmIHdnZXQgLXEgLU8gL3RtcC9ydW50aW1lLXByb2JlLmpzb24gIiRBUElfVVJML3YxL25vZGVzLyROT0RFX0lEL3J1bnRpbWUvcHJvYmUiOyB0aGVuCiAgICBjYXQgL3RtcC9ydW50aW1lLXByb2JlLmpzb24KICBmaQogIHNsZWVwIDIKICBpPSQoKGkgKyAxKSkKZG9uZQoKZWNobyAiQ0xPVURGTEFSRV9CUk9XU0VSX0JPT1RTVFJBUF9DT01QTEVURSIK';
+
+  function startBrowserBootstrap(){
+    if (window.__browserBootstrapStarted) return;
+    window.__browserBootstrapStarted=true;
+    status.textContent='Tiny Core ready; starting node control bootstrap...';
+    const command='echo '+bootstrapB64+' | base64 -d >/tmp/cloudflare-browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl;
+    window.emulator.keyboard_send_text(command+'\n');
+  }
+
   status.textContent='Loading v86...';
   try {
     window.emulator=new V86({
@@ -25,6 +42,15 @@ window.onload=function(){
       autostart:true
     });
     status.textContent='Linux VM starting...';
+    window.emulator.wait_until_vga_screen_contains(/tc@box|tc@/,{timeout_msec:120000})
+      .then(function(found){
+        if(found) startBrowserBootstrap();
+        else status.textContent='Tiny Core prompt not detected.';
+      })
+      .catch(function(error){
+        console.error(error);
+        status.textContent='VM bootstrap wait failed: '+error.message;
+      });
   } catch(e) {
     console.error(e);
     status.textContent='VM ERROR: '+e.message;
