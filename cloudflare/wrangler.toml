@@ -3,9 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
-[secrets]
-required = ["ADMIN_TOKEN"]
-
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
