@@ -49,7 +49,6 @@ Set these environment values in the gateway shell (use the actual Workers URL; k
    export TUNNEL_URL=wss://YOUR-WORKER.workers.dev/tunnel
    export TUNNEL_TOKEN='gateway-token-set-in-Cloudflare'
    export CLIENT_TOKEN='test-client-token-set-in-Cloudflare'
-   export ADMIN_TOKEN='admin-token-set-in-Cloudflare'
    export NODE_ID=oracle-gateway
    ~~~
 
