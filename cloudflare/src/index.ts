@@ -1,15 +1,12 @@
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
-import { DurableNodeRuntime } from "./durable-node-runtime";
-
-export { TunnelHub, NodeRegistry, NodeRuntime, DurableNodeRuntime };
+export { TunnelHub, NodeRegistry, NodeRuntime };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
-  DURABLE_NODE_RUNTIME: DurableObjectNamespace<DurableNodeRuntime>;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
 }
@@ -102,7 +99,7 @@ export default {
 
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
 
-      const runtime = env.DURABLE_NODE_RUNTIME.get(env.DURABLE_NODE_RUNTIME.idFromName(nodeId));
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
 
       if (!action && request.method === "GET") {
         return runtime.fetch("https://node-runtime.internal/status");
