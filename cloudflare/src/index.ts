@@ -1,11 +1,13 @@
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
+import { NodeRuntime } from "./node-runtime";
 
-export { TunnelHub, NodeRegistry };
+export { TunnelHub, NodeRegistry, NodeRuntime };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
+  NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
   ADMIN_TOKEN: string;
@@ -65,6 +67,38 @@ export default {
       }
 
       return json({ error: "method_not_allowed" }, 405);
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime/start") && request.method === "POST") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime/start".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/start", { method: "POST" });
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime/stop") && request.method === "POST") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime/stop".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/stop", { method: "POST" });
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime") && request.method === "GET") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/status");
+    }
+
+    if (url.pathname.startsWith("/v1/nodes/") && url.pathname.endsWith("/runtime/probe") && request.method === "GET") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const nodeId = url.pathname.slice("/v1/nodes/".length, -"/runtime/probe".length).replace(/\/$/, "");
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      return runtime.fetch("https://node-runtime.internal/probe");
     }
 
     if (url.pathname.startsWith("/v1/nodes/")) {
