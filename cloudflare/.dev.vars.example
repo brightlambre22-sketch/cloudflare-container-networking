@@ -1,3 +1,4 @@
-# Copy this file to .dev.vars for local-only testing. Never commit real secrets.
-TUNNEL_TOKEN=replace-with-local-random-token
-ADMIN_TOKEN=replace-with-a-different-local-random-token
+# Copy to .dev.vars for local-only testing. Never commit real secrets.
+TUNNEL_TOKEN=replace-with-random-gateway-token
+CLIENT_TOKEN=replace-with-a-different-random-client-token
+ADMIN_TOKEN=replace-with-a-third-random-admin-token
