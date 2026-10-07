@@ -63,20 +63,20 @@ window.onload=function(){
     status.textContent='Tiny Core command-line mode ready; starting node bootstrap...';
     // Keep keyboard input short. v86/Tiny Core can truncate very long pasted
     // shell commands, which was causing the command to arrive without its prefix.
-    const command='echo '+bootstrapB64+' | base64 -d >/tmp/cloudflare-browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId;
+    const command='wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId;
     window.emulator.keyboard_send_text(command+'\n');
 
     // Once the bootstrap has installed the pinned scripts, start them with
     // separate short commands so the VM executes the real Linux processes.
     setTimeout(function(){
       window.emulator.keyboard_send_text('nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &\n');
-    },9000);
+    },20000);
     setTimeout(function(){
       window.emulator.keyboard_send_text('nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &\n');
-    },10000);
+    },21000);
     setTimeout(function(){
       window.emulator.keyboard_send_text('clear; echo "Mysterium live console"; tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null\n');
-    },11000);
+    },22000);
   }
 
   status.textContent='Loading v86...';
