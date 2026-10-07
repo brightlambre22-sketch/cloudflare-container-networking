@@ -11,6 +11,10 @@ class_name = "TunnelHub"
 name = "NODE_REGISTRY"
 class_name = "NodeRegistry"
 
+[[durable_objects.bindings]]
+name = "NODE_RUNTIME"
+class_name = "NodeRuntime"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TunnelHub"]
@@ -18,3 +22,6 @@ new_sqlite_classes = ["TunnelHub"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["NodeRegistry"]
+
+tag = "v3"
+new_sqlite_classes = ["NodeRuntime"]
