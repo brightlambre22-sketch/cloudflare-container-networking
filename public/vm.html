@@ -89,9 +89,12 @@ window.onload=function(){
       bios:{url:'/bios/seabios.bin'},
       vga_bios:{url:'/bios/vgabios.bin'},
       cdrom:{url:'/boot/TinyCore-11.0.iso'},
+      // Give Tiny Core a real emulated NIC. The relay provides the browser-side
+      // bridge to the outside network so wget/DNS can reach the bootstrap.
+      network_relay_url:'wss://relay.widgetry.org/',
       autostart:true
     });
-    status.textContent='Linux VM starting...';
+    status.textContent='Linux VM starting with network...';
     let commandLineModeStarted=false;
     function sendCommandLineBoot(){
       if(commandLineModeStarted) return;
