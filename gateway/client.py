@@ -103,7 +103,7 @@ async def relay_tcp_reader(socket, lock: asyncio.Lock, streams: dict[int, Stream
                 pass
 
 
-async def open_tcp(socket, lock: asyncio.Lock, streams: dict[int, Stream>, frame: Frame,
+async def open_tcp(socket, lock: asyncio.Lock, streams: dict[int, Stream], frame: Frame,
                    allowed: set[tuple[str, int]]) -> None:
     if frame.stream_id == 0 or frame.stream_id in streams:
         await send_error(socket, lock, frame.stream_id, "invalid_or_duplicate_stream")
