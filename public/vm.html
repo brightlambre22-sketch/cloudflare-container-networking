@@ -60,65 +60,40 @@ window.onload=function(){
   function startBrowserBootstrap(){
     if (window.__browserBootstrapStarted) return;
     window.__browserBootstrapStarted=true;
-    status.textContent='Tiny Core ready; running startup steps...';
+    status.textContent='Tiny Core ready; starting node bootstrap...';
 
-    // v86 keyboard input can truncate long pasted strings. Send only short
-    // commands and wait for the shell prompt before sending the next one.
-    const commands=[
-      'sudo -n ip link set eth0 up',
-      'sudo -n udhcpc -n -q -i eth0',
-      'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
-      'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh',
-      'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId,
-      'test -x /opt/cloudflare-node/myst-supervisor.sh',
-      'test -x /opt/cloudflare-node/cloudflare-runner.sh',
-      'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &',
-      'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &'
+    // Keep every keyboard injection short. A fixed, conservative delay avoids
+    // depending on v86's DOM text representation of the shell prompt.
+    const steps=[
+      {cmd:'sudo -n ip link set eth0 up',wait:2000},
+      {cmd:'sudo -n udhcpc -n -q -i eth0',wait:5000},
+      {cmd:'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',wait:12000},
+      {cmd:'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh',wait:8000},
+      {cmd:'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId,wait:5000},
+      {cmd:'test -x /opt/cloudflare-node/myst-supervisor.sh',wait:1000},
+      {cmd:'test -x /opt/cloudflare-node/cloudflare-runner.sh',wait:1000},
+      {cmd:'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &',wait:1500},
+      {cmd:'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &',wait:3000}
     ];
-    let index=0;
-    let lastText='';
-    let stable=0;
 
-    function terminalText(){
-      const screen=document.querySelector('#screen_container > div');
-      return ((screen && screen.textContent)||'');
-    }
-
-    function sendNext(){
-      if(index>=commands.length){
+    let i=0;
+    function next(){
+      if(i>=steps.length){
         window.emulator.keyboard_send_text('clear\n');
         setTimeout(function(){
           window.emulator.keyboard_send_text('echo Mysterium live console\n');
           setTimeout(function(){
             window.emulator.keyboard_send_text('tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null\n');
-          },1500);
+          },1000);
         },1000);
         return;
       }
-      status.textContent='Running startup step '+(index+1)+'/'+commands.length+'...';
-      window.emulator.keyboard_send_text(commands[index]+'\n');
-      index++;
-      stable=0;
-      lastText='';
+      const step=steps[i++];
+      status.textContent='Running startup step '+i+'/'+steps.length+'...';
+      window.emulator.keyboard_send_text(step.cmd+'\n');
+      setTimeout(next,step.wait);
     }
-
-    function waitForPrompt(){
-      const text=terminalText();
-      const prompt=/tc@box:~\\$\\s*$/.test(text);
-      if(prompt){
-        const tail=text.slice(-200);
-        if(tail===lastText) stable++;
-        else { lastText=tail; stable=0; }
-        if(stable>=2){
-          sendNext();
-          return;
-        }
-      }
-      setTimeout(waitForPrompt,500);
-    }
-
-    // Start only after the prompt is visible.
-    waitForPrompt();
+    next();
   }
 
   status.textContent='Loading v86...';
