@@ -16,8 +16,10 @@ export class DurableNodeRuntime extends DurableObject {
 
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env);
-    if (ctx.container.running) {
-      void ctx.blockConcurrencyWhile(() => ctx.container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS));
+    if (this.ctx.container?.running) {
+      void this.ctx.blockConcurrencyWhile(async () => {
+        await this.ctx.container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
+      });
       this.observeExit();
     }
   }
@@ -40,14 +42,21 @@ export class DurableNodeRuntime extends DurableObject {
 
     if (url.pathname === "/status" && request.method === "GET") {
       const current = await this.state();
-      return Response.json({ ...current, container_running: this.ctx.container.running, health_port: HEALTH_PORT });
+      return Response.json({
+        ...current,
+        container_running: Boolean(this.ctx.container?.running),
+        health_port: HEALTH_PORT,
+      });
     }
 
     if (url.pathname === "/start" && request.method === "POST") {
       try {
         await this.ensureStarted();
         const current = await this.state();
-        return Response.json({ ...current, container_running: this.ctx.container.running }, { status: 202 });
+        return Response.json(
+          { ...current, container_running: Boolean(this.ctx.container?.running) },
+          { status: 202 }
+        );
       } catch (error) {
         const current = await this.state();
         const failed: RuntimeState = {
@@ -61,7 +70,9 @@ export class DurableNodeRuntime extends DurableObject {
     }
 
     if (url.pathname === "/stop" && request.method === "POST") {
-      await this.ctx.container.destroy("virtual node stopped");
+      if (this.ctx.container?.running) {
+        await this.ctx.container.destroy("virtual node stopped");
+      }
       const current = await this.state();
       const stopped: RuntimeState = { ...current, status: "stopped" };
       await this.persist(stopped);
@@ -69,12 +80,17 @@ export class DurableNodeRuntime extends DurableObject {
     }
 
     if (url.pathname === "/probe" && request.method === "GET") {
-      if (!this.ctx.container.running) return Response.json({ error: "container_not_running" }, { status: 409 });
+      if (!this.ctx.container?.running) {
+        return Response.json({ error: "container_not_running" }, { status: 409 });
+      }
       try {
         const response = await this.ctx.container.getTcpPort(HEALTH_PORT).fetch("http://container/health");
         return new Response(response.body, { status: response.status, headers: response.headers });
       } catch (error) {
-        return Response.json({ error: "container_not_ready", detail: error instanceof Error ? error.message : String(error) }, { status: 503 });
+        return Response.json(
+          { error: "container_not_ready", detail: error instanceof Error ? error.message : String(error) },
+          { status: 503 }
+        );
       }
     }
 
@@ -91,7 +107,7 @@ export class DurableNodeRuntime extends DurableObject {
   private async startAndWaitForHealth(): Promise<void> {
     const current = await this.state();
 
-    if (this.ctx.container.running) {
+    if (this.ctx.container?.running) {
       this.observeExit();
       await this.ctx.container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
       await this.waitForHealth();
@@ -109,7 +125,7 @@ export class DurableNodeRuntime extends DurableObject {
     const starting: RuntimeState = { ...current, status: "starting", last_error: null };
     await this.persist(starting);
 
-    this.ctx.container.start({
+    await this.ctx.container.start({
       image: "cloudflare/debian-trixie",
       entrypoint: [
         "node",
@@ -144,7 +160,7 @@ export class DurableNodeRuntime extends DurableObject {
         return;
       } catch (error) {
         lastError = error;
-        await scheduler.wait(200);
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
 
@@ -153,7 +169,8 @@ export class DurableNodeRuntime extends DurableObject {
 
   private observeExit(): void {
     if (this.monitoring) return;
-    this.monitoring = this.ctx.container.monitor()
+    this.monitoring = this.ctx.container
+      .monitor()
       .then(async () => {
         const current = await this.state();
         await this.persist({ ...current, status: "stopped" });
