@@ -56,17 +56,8 @@ setTimeout(()=>copyStatus.textContent='',3000)
 document.getElementById('paste-terminal').onclick=pasteIntoVm;
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
 
-function getVmText(){
-try{
-if(window.emulator&&window.emulator.screen_adapter&&typeof window.emulator.screen_adapter.get_text==='function'){
-const t=window.emulator.screen_adapter.get_text();if(t)return t;
-}
-}catch(e){}
-const s=document.querySelector('#screen_container > div');
-return(s&&s.textContent)||''
-}
 function mirror(){
-const t=getVmText().trim();
+const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent||'').trim();
 if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
@@ -97,7 +88,7 @@ const commands=[
 const markers=[null,null,'__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
 const timeouts=[45000,120000,30000,360000,15000,10000,10000];
 let i=0;
-function terminal(){return getVmText()}
+function terminal(){const s=document.querySelector('#screen_container > div');return(s&&s.textContent)||''}
 function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
@@ -111,12 +102,44 @@ window.emulator.keyboard_send_text(cmd+'\n');
 if(marker){
 const started=Date.now();
 (function wait(){
+if(terminal().indexOf(marker)>=0){next();return}
+if(Date.now()-started>=timeouts[n]){
+report('*** TIMEOUT waiting for '+marker+'; continuing to next step ***\n');
+next();return
+}
+setTimeout(wait,500)
+})()
+}else setTimeout(next,timeouts[n])
+}
+next()
+}
+
+statusText('Loading v86...');
+try{
+window.emulator=new V86({
+wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
+screen_container:document.getElementById('screen_container'),
+bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
+cdrom:{url:'/boot/TinyCore-11.0.iso'},
+net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
+network_relay_url:'wss://relay.widgetry.org/',autostart:true
+});
+statusText('Linux VM starting; full bootstrap will run at Tiny Core prompt.');
+let bootSent=false;
+setTimeout(function(){
+if(bootSent)return;bootSent=true;
+try{
+if(typeof window.emulator.keyboard_send_scancodes==='function')window.emulator.keyboard_send_scancodes([0x50,0x50,0x1c]);
+else if(typeof window.emulator.keyboard_send_keys==='function')window.emulator.keyboard_send_keys(['ARROWDOWN','ARROWDOWN','ENTER'])
+}catch(e){}
+},1500);
+const started=Date.now();
+(function wait(){
 const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||'';
 if(/tc@box|tc@/.test(t)){startBootstrap();return}
 if(Date.now()-started>=120000){statusText('Tiny Core prompt not detected.');return}
 setTimeout(wait,500)
 })()
-
 }catch(e){statusText('VM ERROR: '+e.message)}
 };
 </script>
