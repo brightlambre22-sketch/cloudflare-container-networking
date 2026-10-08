@@ -91,7 +91,7 @@ await new Promise(r=>setTimeout(r,250));
 async function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
 const commands=[
-'echo "--- NETWORK INIT ---"; MODPROBE=/sbin/modprobe; IFCONFIG=/sbin/ifconfig; UDHCPC=/sbin/udhcpc; ROUTE=/sbin/route; echo "===== Tiny Core network initialization ====="; echo "--- kernel ---"; uname -a; echo "--- interfaces before ---"; "$IFCONFIG" -a 2>&1 || true; echo "--- loading NE2000 modules ---"; [ -x "$MODPROBE" ] && "$MODPROBE" 8390 2>&1 || true; [ -x "$MODPROBE" ] && "$MODPROBE" ne2k-pci 2>&1 || true; sleep 1; eth=""; for n in 1 2 3 4 5 6 7 8 9 10; do eth=$("$IFCONFIG" -a 2>/dev/null | sed -n "s/^\(eth[0-9]\).*/\1/p" | head -1); [ -n "$eth" ] && break; sleep 1; done; if [ -z "$eth" ]; then echo "ERROR: no eth interface detected"; "$IFCONFIG" -a 2>&1 || true; printf "__DHCP_READY_DONE:10"; else echo "Detected interface: $eth"; "$IFCONFIG" "$eth" up 2>&1 || true; rc=1; for attempt in 1 2 3; do echo "--- DHCP attempt $attempt/3 ---"; "$UDHCPC" -n -q -i "$eth" 2>&1; rc=$?; [ "$rc" -eq 0 ] && break; sleep 1; done; echo "--- interfaces after DHCP ---"; "$IFCONFIG" -a 2>&1 || true; echo "--- routes ---"; "$ROUTE" -n 2>&1 || true; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1 || true; if [ "$rc" -eq 0 ] && "$ROUTE" -n 2>/dev/null | grep -q "0.0.0.0"; then printf "__DHCP_READY_DONE:0"; else printf "__DHCP_READY_DONE:%s" "$rc"; fi; fi',
+'echo "--- NETWORK INIT ---"; uname -a; echo "--- interfaces before ---"; ifconfig -a; echo "--- load NE2000 ISA driver ---"; modprobe 8390 2>&1; modprobe ne 2>&1; modprobe ne io=0x300 irq=9 2>&1; sleep 1; echo "--- interfaces after driver load ---"; ifconfig -a; echo "--- DHCP ---"; ifconfig eth0 up 2>&1; udhcpc -n -q -i eth0 2>&1; echo "--- final interfaces ---"; ifconfig -a; echo "--- routes ---"; route -n; echo "--- DNS ---"; cat /etc/resolv.conf; echo DHCP_DONE',
 'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz; rc=$?; printf \"__PACKAGES_%s_DONE:%s\" READY \"$rc\"',
 'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/c052da1b750198d96a6b2149191e62c4848fc948/runner/tinycore/browser-bootstrap.sh; rc=$?; printf \"__BOOTSTRAP_DOWNLOAD_%s:%s\" DONE \"$rc\"',
 'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"__BOOTSTRAP_RUN_%s:%s\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
@@ -99,8 +99,8 @@ const commands=[
 'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; printf \"__SUPERVISOR_%s\" DONE',
 'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; printf \"__RUNNER_%s\" DONE'
 ];
-const markers=['__DHCP_READY_DONE:','__PACKAGES_READY_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
-const timeouts=[900000,900000,30000,900000,15000,10000,10000];
+const markers=['DHCP_DONE','__PACKAGES_READY_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
+const timeouts=[30000,900000,30000,900000,15000,10000,10000];
 let i=0;
 function terminal(){return screenText()}
 async function next(){
@@ -116,9 +116,9 @@ await sendVmCommand(cmd+'\n');
 if(marker){
 const started=Date.now();
 (function wait(){
-if(terminal().indexOf(marker)>=0){
+if(terminal().indexOf(marker)>=0 && shellPrompt(terminal())){
 report('----- bootstrap screen snapshot -----\n'+terminal()+'\n----- end bootstrap screen snapshot -----\n');
-if(marker==='__DHCP_READY_DONE:'&&!terminal().includes('__DHCP_READY_DONE:0')){report('*** DHCP completed with a non-zero status. NIC/relay diagnostics were captured; stopping before downloads. ***\n');statusText('DHCP failed; NIC/relay diagnostics captured.');return} if(marker==='__PACKAGES_READY_DONE:'&&!terminal().includes('__PACKAGES_READY_DONE:0')){report('*** Package installation failed; stopping startup. ***\n');statusText('Bootstrap stopped: package setup failed.');return}
+if(marker==='DHCP_DONE'){const t=terminal();const hasEth=/^eth[0-9]+(?:[:\\s]|$)/m.test(t);const hasIp=/inet (?:addr:)?[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/.test(t);const hasDefault=/^0\\.0\\.0\\.0/m.test(t)||/default via /.test(t);if(!hasEth||!hasIp||!hasDefault){report('*** Network initialization failed: '+(!hasEth?'no Ethernet interface detected (tried ne2k ISA driver). ':!hasIp?'no IPv4 address assigned. ':'')+(!hasDefault?'no default route. ':'')+'Stopping before downloads. ***\\n');statusText('Network setup failed; diagnostics captured.');return}} if(marker==='__PACKAGES_READY_DONE:'&&!terminal().includes('__PACKAGES_READY_DONE:0')){report('*** Package installation failed; stopping startup. ***\n');statusText('Bootstrap stopped: package setup failed.');return}
 if(marker==='__BOOTSTRAP_VERIFY_DONE:'&&terminal().includes('__BOOTSTRAP_VERIFY_DONE:failed')){report('*** Required startup files are missing; runner launch aborted. ***\n');statusText('Bootstrap stopped: required files are missing.');return}
 next();return
 }
@@ -133,7 +133,7 @@ setTimeout(wait,500)
 next()
 }
 
-report('\n===== NEW VM RUN =====\n');
+results.value='';save();report('\n===== NEW VM RUN =====\n');
 statusText('Loading v86...');
 try{
 window.emulator=new V86({
