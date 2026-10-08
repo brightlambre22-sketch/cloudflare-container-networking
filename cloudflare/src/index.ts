@@ -1,3 +1,4 @@
+import { connect } from "cloudflare:sockets";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
@@ -61,6 +62,50 @@ export default {
         return json({
           error: "egress_ipv4_lookup_failed",
           detail: error instanceof Error ? error.message : String(error),
+        }, 502);
+      }
+    }
+
+    if (url.pathname === "/debug/fineproxy-tcp") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+
+      const target = { hostname: "104.245.241.241", port: 1085 };
+
+      try {
+        const socket = connect(target);
+        const opened = await socket.opened;
+
+        const writer = socket.writable.getWriter();
+        const greeting = new Uint8Array([0x05, 0x01, 0x00]);
+        await writer.write(greeting);
+
+        const reader = socket.readable.getReader();
+        const result = await Promise.race([
+          reader.read(),
+          new Promise<{ value: undefined; done: true }>((resolve) =>
+            setTimeout(() => resolve({ value: undefined, done: true }), 5000),
+          ),
+        ]);
+
+        reader.releaseLock();
+        writer.releaseLock();
+        await socket.close();
+
+        const bytes = result.value ? Array.from(result.value).map((b) => b.toString(16).padStart(2, "0")) : [];
+
+        return json({
+          target: "104.245.241.241:1085",
+          tcp_connected: true,
+          remote_address: opened.remoteAddress,
+          local_address: opened.localAddress,
+          socks5_greeting_response_hex: bytes.join(" "),
+          socks5_no_auth_accepted: bytes.length >= 2 && bytes[0] === "05" && bytes[1] === "00",
+        });
+      } catch (error) {
+        return json({
+          target: "104.245.241.241:1085",
+          tcp_connected: false,
+          error: error instanceof Error ? error.message : String(error),
         }, 502);
       }
     }
