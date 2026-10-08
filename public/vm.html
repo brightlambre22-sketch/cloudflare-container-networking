@@ -81,7 +81,14 @@ report('----- screen snapshot -----\n'+screenText()+'\n----- end snapshot -----\
 }
 document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
 
-function startBootstrap(){
+async function sendVmCommand(cmd){
+if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('v86 keyboard API unavailable');
+if(typeof window.emulator.keyboard_set_enabled==='function')window.emulator.keyboard_set_enabled(true);
+await window.emulator.keyboard_send_text(cmd,2);
+await new Promise(r=>setTimeout(r,250));
+}
+
+async function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
 const commands=[
 'echo \"--- DHCP DIAGNOSTIC ---\"; echo \"--- id ---\"; id; echo \"--- sudo id ---\"; sudo id 2>&1; echo \"--- interfaces before ---\"; ifconfig -a 2>&1; echo \"--- kernel network ---\"; dmesg | grep -Ei \"eth|ne2k|ne2000|network|nic\" 2>&1; echo \"--- bring eth0 up ---\"; sudo ifconfig eth0 up 2>&1; echo \"--- DHCP ---\"; sudo udhcpc -n -q -i eth0 2>&1; rc=$?; echo \"--- interfaces after ---\"; ifconfig -a 2>&1; echo \"--- routes ---\"; route -n 2>&1; printf \"__DHCP_%s_DONE:%s\" READY \"$rc\"',
@@ -96,16 +103,16 @@ const markers=['__DHCP_READY_DONE:','__PACKAGES_READY_DONE:','__BOOTSTRAP_DOWNLO
 const timeouts=[180000,300000,30000,360000,15000,10000,10000];
 let i=0;
 function terminal(){return screenText()}
-function next(){
+async function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
 report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
-const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/8091661336001148b67b9e9ce25586cfe60e0b83/runner/tinycore/network-test.sh; rc=$?; printf \"__NETWORK_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/network-test.sh; rc=$?; printf \"__NETWORK_TEST_%s:%s\" DONE \"$rc\"','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/33938110e07cddb1a3d0d1ca35132cebddd6c437/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_TEST_%s:%s\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); window.emulator.keyboard_send_text(pc+'\n'); const st=Date.now(); (function w(){const t=screenText(); if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+'; stopping post-boot tests. ***\n');statusText('Post-boot tests stopped: timed out waiting for '+pm+'.');return;} setTimeout(w,500)})()} runPost();
+const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/8091661336001148b67b9e9ce25586cfe60e0b83/runner/tinycore/network-test.sh; rc=$?; printf \"__NETWORK_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/network-test.sh; rc=$?; printf \"__NETWORK_TEST_%s:%s\" DONE \"$rc\"','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/33938110e07cddb1a3d0d1ca35132cebddd6c437/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_TEST_%s:%s\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); await sendVmCommand(pc+'\n'); const st=Date.now(); (function w(){const t=screenText(); if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+'; stopping post-boot tests. ***\n');statusText('Post-boot tests stopped: timed out waiting for '+pm+'.');return;} setTimeout(w,500)})()} runPost();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
 report('\n===== BOOTSTRAP STEP '+(n+1)+'/'+commands.length+' =====\n'+cmd+'\n');
-window.emulator.keyboard_send_text(cmd+'\n');
+await sendVmCommand(cmd+'\n');
 if(marker){
 const started=Date.now();
 (function wait(){
