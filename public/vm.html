@@ -91,7 +91,7 @@ await new Promise(r=>setTimeout(r,250));
 async function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
 const commands=[
-'echo \"--- DHCP DIAGNOSTIC ---\"; echo \"--- id ---\"; id; echo \"--- sudo id ---\"; sudo id 2>&1; echo \"--- interfaces before ---\"; ifconfig -a 2>&1; echo \"--- kernel network ---\"; dmesg | grep -Ei \"eth|ne2k|ne2000|network|nic\" 2>&1; echo \"--- load NIC modules ---\"; sudo modprobe 8390 2>&1; sudo modprobe ne2k-pci 2>&1; sleep 1; echo \"--- interfaces after module load ---\"; ifconfig -a 2>&1; echo \"--- bring eth0 up ---\"; sudo ifconfig eth0 up 2>&1; echo \"--- DHCP ---\"; sudo udhcpc -n -q -i eth0 2>&1; rc=$?; echo \"--- interfaces after ---\"; ifconfig -a 2>&1; echo \"--- routes ---\"; route -n 2>&1; printf \"__DHCP_%s_DONE:%s\" READY \"$rc\"',
+'echo "--- NETWORK INIT ---"; /usr/local/bin/init-network.sh 2>&1; rc=$?; printf "__DHCP_READY_DONE:%s" "$rc"',
 'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz; rc=$?; printf \"__PACKAGES_%s_DONE:%s\" READY \"$rc\"',
 'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/c052da1b750198d96a6b2149191e62c4848fc948/runner/tinycore/browser-bootstrap.sh; rc=$?; printf \"__BOOTSTRAP_DOWNLOAD_%s:%s\" DONE \"$rc\"',
 'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"__BOOTSTRAP_RUN_%s:%s\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
