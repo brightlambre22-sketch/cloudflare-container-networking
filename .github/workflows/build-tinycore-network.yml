@@ -1,14 +1,5 @@
 name: Build Tiny Core Pure64 network-enabled image
-
-on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/build-tinycore-network.yml"
-      - "runner/tinycore/init-network.sh"
-      - "public/vm.html"
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 permissions:
   contents: write
@@ -17,36 +8,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install image tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xorriso cpio kmod libarchive-tools
+        run: sudo apt-get update && sudo apt-get install -y xorriso cpio kmod libarchive-tools
 
       - name: Download Tiny Core 11.0 files
-        shell: bash
         run: |
           set -euxo pipefail
           mkdir -p work/iso work/pure public/boot
-          curl -fL --retry 5 --retry-all-errors -o work/base.iso "https://distro.ibiblio.org/tinycorelinux/11.x/x86/archive/11.0/TinyCore-11.0.iso"
-          curl -fL --retry 5 --retry-all-errors -o work/pure/vmlinuz64 "https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/vmlinuz64"
-          curl -fL --retry 5 --retry-all-errors -o work/pure/corepure64.gz "https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/corepure64.gz"
-          curl -fL --retry 5 --retry-all-errors -o work/pure/modules64.gz "https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/modules64.gz"
-          test "$(stat -c%s work/base.iso)" -gt 1000000
-          test "$(stat -c%s work/pure/vmlinuz64)" -gt 1000000
-          test "$(stat -c%s work/pure/corepure64.gz)" -gt 1000000
-          test "$(stat -c%s work/pure/modules64.gz)" -gt 1000000
+          curl -fL --retry 5 --retry-all-errors -o work/base.iso https://distro.ibiblio.org/tinycorelinux/11.x/x86/archive/11.0/TinyCore-11.0.iso
+          curl -fL --retry 5 --retry-all-errors -o work/pure/vmlinuz64 https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/vmlinuz64
+          curl -fL --retry 5 --retry-all-errors -o work/pure/corepure64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/corepure64.gz
+          curl -fL --retry 5 --retry-all-errors -o work/pure/modules64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/modules64.gz
+          test $(stat -c%s work/base.iso) -gt 1000000
+          test $(stat -c%s work/pure/vmlinuz64) -gt 1000000
+          test $(stat -c%s work/pure/corepure64.gz) -gt 1000000
+          test $(stat -c%s work/pure/modules64.gz) -gt 1000000
           bsdtar -xf work/base.iso -C work/iso
           test -s work/iso/boot/isolinux/isolinux.bin
 
-      - name: Build network-enabled Pure64 initrd
-        shell: bash
+      - name: Build network-enabled initrd and ISO
         run: |
           set -euxo pipefail
-          rm -rf work/root work/repacked
-          mkdir -p work/root/usr/local/bin work/repacked/boot
+          rm -rf work/root work/repacked verify
+          mkdir -p work/root/usr/local/bin work/repacked/boot verify
           gzip -dc work/pure/corepure64.gz | (cd work/root && cpio -idmu)
           gzip -dc work/pure/modules64.gz | (cd work/root && cpio -idmu)
           install -m 0755 runner/tinycore/init-network.sh work/root/usr/local/bin/init-network.sh
@@ -64,31 +50,17 @@ LABEL tinycore
   KERNEL /boot/vmlinuz64
   APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap
 EOF
-          xorriso -as mkisofs \
-            -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET \
-            -eltorito-boot boot/isolinux/isolinux.bin \
-            -boot-load-size 4 \
-            -eltorito-catalog boot/isolinux/boot.cat \
-            -boot-info-table -no-emul-boot \
-            -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
-          test "$(stat -c%s public/boot/TinyCore_Pure64-11.0.iso)" -gt 1000000
+          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
+          test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
           sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
-
-      - name: Verify generated ISO contains network bootstrap
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf verify
-          mkdir verify
           bsdtar -xf public/boot/TinyCore_Pure64-11.0.iso -C verify
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx "usr/local/bin/init-network.sh"
+          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx usr/local/bin/init-network.sh
 
       - name: Commit generated image
-        shell: bash
         run: |
           set -euxo pipefail
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot].noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/boot/TinyCore_Pure64-11.0.iso public/boot/TinyCore_Pure64-11.0.iso.sha256
           git diff --cached --quiet && exit 0
           git commit -m "Build Pure64 11.0 with network bootstrap"
