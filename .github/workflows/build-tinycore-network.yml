@@ -73,6 +73,13 @@ jobs:
             curl -fL --retry 5 --retry-all-errors -o work/kernel/config-5.4.3-tinycore64 https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/src/kernel/config-5.4.3-tinycore64
             tar -xf work/kernel/linux-5.4.3-patched.txz -C work/kernel
             cp work/kernel/config-5.4.3-tinycore64 work/kernel/linux-5.4.3/.config
+            # Tiny Core's patched source tree can omit the PCI NE2000 source even when
+            # its Kconfig entry is enabled. Restore the unchanged upstream 5.4.3 driver
+            # source before building so Kbuild has the source file it expects.
+            if [ ! -f work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c ]; then
+              curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c https://raw.githubusercontent.com/torvalds/linux/v5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
+            fi
+            test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
             make -C work/kernel/linux-5.4.3 olddefconfig
             make -C work/kernel/linux-5.4.3 -j2 M=drivers/net/ethernet/8390 modules
             mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
