@@ -94,7 +94,7 @@ jobs:
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.c
             make -C work/kernel/linux-5.4.3 olddefconfig
             grep -q '^CONFIG_NE2K_PCI=m$' work/kernel/linux-5.4.3/.config
-            make -C work/kernel/linux-5.4.3 -j2 M=drivers/net/ethernet/8390 modules
+            make -C work/kernel/linux-5.4.3 -j2 M="$PWD/work/kernel/linux-5.4.3/drivers/net/ethernet/8390" modules
             mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
             cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
             cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
