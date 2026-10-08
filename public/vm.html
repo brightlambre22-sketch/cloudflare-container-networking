@@ -19,7 +19,6 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <div id="status">Starting Linux VM...</div>
 <div id="toolbar">
 <button id="run-network-test" type="button">Run network test</button>
-<button id="run-fineproxy-test" type="button">Run FineProxy test</button>
 <button id="copy-results" type="button">Copy test results</button>
 <button id="paste-terminal" type="button">Paste into VM</button>
 <button id="clear-results" type="button">Clear results</button>
@@ -36,14 +35,9 @@ const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origi
 let reportTimer=null,bootstrapStarted=false;
 
 function statusText(t){status.textContent=t}
-const MAX_RESULTS_CHARS=120000;
 function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
-function report(t){
-results.value+=(results.value?'\n':'')+t;
-if(results.value.length>MAX_RESULTS_CHARS)results.value=results.value.slice(-MAX_RESULTS_CHARS);
-results.scrollTop=results.scrollHeight;save()
-}
-try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s.slice(-MAX_RESULTS_CHARS)}catch(e){}
+function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
+try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
 
 document.getElementById('clear-results').onclick=function(){results.value='';save()};
 document.getElementById('copy-results').onclick=async function(){
@@ -68,31 +62,17 @@ if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
 
-const diagnosticCommand='wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/network-test.sh; rc=$?; echo NETWORK_SCRIPT_DOWNLOAD:$rc; if [ $rc -eq 0 ]; then sh /tmp/network-test.sh; fi';
+const diagnosticCommand='echo "===== NETWORK REPORT $(date) ====="; echo "--- id ---"; id; echo "--- interfaces ---"; ifconfig -a 2>&1; echo "--- ipv4 routes ---"; route -n 2>&1; echo "--- ipv6 routes ---"; route -A inet6 -n 2>&1; echo "--- kernel NIC ---"; dmesg | grep -Ei "eth|ne2k|ne2000|network|nic" 2>&1; echo "--- modules ---"; lsmod | grep -Ei "ne|8390|ether" 2>&1; echo "--- sockets ---"; netstat -lnptu 2>&1; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1; echo "--- hostname ---"; hostname 2>&1; echo "--- busybox network ---"; busybox | grep -E "ifconfig|route|udhcpc|ping|ping6|netstat" 2>&1; echo "--- addresses via /proc ---"; cat /proc/net/dev 2>&1; echo "===== END NETWORK REPORT ====="';
 
 function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
-report('\\n\\n===== '+label+' =====\\n'+diagnosticCommand+'\\n');
-window.emulator.keyboard_send_text(diagnosticCommand+'\\n');
+report('\n\n===== '+label+' =====\n'+diagnosticCommand+'\n');
+window.emulator.keyboard_send_text(diagnosticCommand+'\n');
 setTimeout(function(){
-const s=document.querySelector('#screen_container > div');report('----- screen snapshot -----\\n'+((s&&s.textContent)||'')+'\\n----- end snapshot -----\\n')
-},12000)
-}
-function runFineProxyAfterNetwork(){
-const cmd="wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/fineproxy-test.sh; rc=$?; echo FINEPROXY_SCRIPT_DOWNLOAD:$rc; if [ $rc -eq 0 ]; then sh /tmp/fineproxy-test.sh; fi";
-report('\\n===== FINEPROXY MYSTERIUM TEST =====\\n');
-window.emulator.keyboard_send_text(cmd+'\\n');
-statusText('FineProxy test running.');
-setTimeout(function(){const s=document.querySelector('#screen_container > div');const t=(s&&s.textContent)||'';report(t.slice(-30000));statusText('FineProxy test output captured.');},30000);
+const s=document.querySelector('#screen_container > div');report('----- screen snapshot -----\n'+((s&&s.textContent)||'')+'\n----- end snapshot -----\n')
+},9000)
 }
 document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
-document.getElementById('run-fineproxy-test').onclick=function(){
-if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM not ready.');return}
-statusText('Running network test first; FineProxy will start automatically after it finishes.');
-runDiagnostic('NETWORK TEST BEFORE FINEPROXY');
-setTimeout(runFineProxyAfterNetwork,12500);
-};
-
 
 function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
