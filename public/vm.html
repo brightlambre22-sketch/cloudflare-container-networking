@@ -77,23 +77,23 @@ document.getElementById('run-network-test').onclick=function(){runDiagnostic('MA
 function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
 const commands=[
-'sudo udhcpc -n -q -i eth0',
-'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
-'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/c052da1b750198d96a6b2149191e62c4848fc948/runner/tinycore/browser-bootstrap.sh; rc=$?; echo __BOOTSTRAP_DOWNLOAD_DONE:$rc',
-'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; echo __BOOTSTRAP_RUN_DONE:$rc; else echo __BOOTSTRAP_RUN_DONE:download_failed; fi',
-'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; else echo "__BOOTSTRAP_VERIFY_DONE:ok"; fi',
-'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; echo __SUPERVISOR_DONE',
-'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; echo __RUNNER_DONE'
+'sudo udhcpc -n -q -i eth0; rc=$?; printf \"__DHCP_%s_DONE:%s\" READY \"$rc\"',
+'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz; rc=$?; printf \"__PACKAGES_%s_DONE:%s\" READY \"$rc\"',
+'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/c052da1b750198d96a6b2149191e62c4848fc948/runner/tinycore/browser-bootstrap.sh; rc=$?; printf \"__BOOTSTRAP_DOWNLOAD_%s:%s\" DONE \"$rc\"',
+'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"__BOOTSTRAP_RUN_%s:%s\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
+'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; printf "__BOOTSTRAP_VERIFY_%s:%s" DONE failed; else printf "__BOOTSTRAP_VERIFY_%s:%s" DONE ok; fi',
+'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; printf \"__SUPERVISOR_%s\" DONE',
+'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; printf \"__RUNNER_%s\" DONE'
 ];
-const markers=[null,null,'__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
-const timeouts=[45000,120000,30000,360000,15000,10000,10000];
+const markers=['__DHCP_READY_DONE:','__PACKAGES_READY_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
+const timeouts=[180000,300000,30000,360000,15000,10000,10000];
 let i=0;
 function terminal(){const s=document.querySelector('#screen_container > div');return(s&&s.textContent)||''}
 function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
 report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
-const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/8091661336001148b67b9e9ce25586cfe60e0b83/runner/tinycore/network-test.sh; echo __NETWORK_DOWNLOAD_DONE:$?','sh /tmp/network-test.sh; echo __NETWORK_TEST_DONE:$?','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/33938110e07cddb1a3d0d1ca35132cebddd6c437/runner/tinycore/fineproxy-test.sh; echo __FINEPROXY_DOWNLOAD_DONE:$?','sh /tmp/fineproxy-test.sh; echo __FINEPROXY_TEST_DONE:$?']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); window.emulator.keyboard_send_text(pc+'\n'); const st=Date.now(); (function w(){const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||''; if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+' ***\n');runPost();return;} setTimeout(w,500)})()} runPost();
+const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/8091661336001148b67b9e9ce25586cfe60e0b83/runner/tinycore/network-test.sh; rc=$?; printf \"__NETWORK_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/network-test.sh; rc=$?; printf \"__NETWORK_TEST_%s:%s\" DONE \"$rc\"','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/33938110e07cddb1a3d0d1ca35132cebddd6c437/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_TEST_%s:%s\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); window.emulator.keyboard_send_text(pc+'\n'); const st=Date.now(); (function w(){const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||''; if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+'; stopping post-boot tests. ***\n');statusText('Post-boot tests stopped: timed out waiting for '+pm+'.');return;} setTimeout(w,500)})()} runPost();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
@@ -102,10 +102,14 @@ window.emulator.keyboard_send_text(cmd+'\n');
 if(marker){
 const started=Date.now();
 (function wait(){
-if(terminal().indexOf(marker)>=0){next();return}
-if(Date.now()-started>=timeouts[n]){
-report('*** TIMEOUT waiting for '+marker+'; continuing to next step ***\n');
+if(terminal().indexOf(marker)>=0){
+if((marker==='__DHCP_READY_DONE:'&&!terminal().includes('__DHCP_READY_DONE:0'))||(marker==='__PACKAGES_READY_DONE:'&&!terminal().includes('__PACKAGES_READY_DONE:0'))){report('*** '+marker+' reported a non-zero status; stopping startup. ***\n');statusText('Bootstrap stopped: a required network/package setup command failed.');return}
+if(marker==='__BOOTSTRAP_VERIFY_DONE:'&&terminal().includes('__BOOTSTRAP_VERIFY_DONE:failed')){report('*** Required startup files are missing; runner launch aborted. ***\n');statusText('Bootstrap stopped: required files are missing.');return}
 next();return
+}
+if(Date.now()-started>=timeouts[n]){
+report('*** TIMEOUT waiting for '+marker+'; stopping startup sequence; no later commands were sent. ***\n');
+statusText('Bootstrap stopped: timed out waiting for '+marker+'. No later commands were sent.');return
 }
 setTimeout(wait,500)
 })()
@@ -126,19 +130,30 @@ network_relay_url:'wss://relay.widgetry.org/',autostart:true
 });
 statusText('Linux VM starting; full bootstrap will run at Tiny Core prompt.');
 const started=Date.now();
-statusText('Tiny Core is booting; no commands will be sent until the shell prompt is detected.');
+let promptCandidate='',promptCandidateSince=0;
+const BOOT_TIMEOUT_MS=15*60*1000,PROMPT_STABLE_MS=2000;
+function shellPrompt(text){
+const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
+const match=normalized.match(/(?:^|\n)\s*(tc@box(?::[^\n]{0,80})?\s*[$#])\s*$/);
+return match?match[1].trim():'';
+}
+statusText('Tiny Core is booting; waiting for a stable shell prompt before sending commands.');
 (function waitForBootComplete(){
 const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||'';
-const promptReady=/tc@box\s*[:][^\n]{0,80}[$#]/.test(t) || /tc@box/.test(t);
-if(promptReady){
+const prompt=shellPrompt(t);
+if(prompt){
+if(prompt===promptCandidate){
+if(Date.now()-promptCandidateSince>=PROMPT_STABLE_MS){
 bootComplete=true;
-statusText('Tiny Core boot complete; shell prompt detected. Starting bootstrap.');
+statusText('Tiny Core shell prompt is stable; starting bootstrap.');
 startBootstrap();
 return;
 }
-if(Date.now()-started>=600000){
-statusText('Tiny Core boot did not reach the shell prompt within 10 minutes. No commands were sent.');
-report('*** BOOT TIMEOUT: Tiny Core shell prompt was not detected; no commands were sent. ***\n');
+}else{promptCandidate=prompt;promptCandidateSince=Date.now();}
+}else{promptCandidate='';promptCandidateSince=0;}
+if(Date.now()-started>=BOOT_TIMEOUT_MS){
+statusText('Tiny Core did not reach a stable shell prompt within 15 minutes. No commands were sent.');
+report('*** BOOT TIMEOUT: no stable Tiny Core shell prompt detected; no commands were sent. ***\n');
 return;
 }
 setTimeout(waitForBootComplete,500);
