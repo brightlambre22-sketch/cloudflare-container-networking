@@ -61,7 +61,13 @@ window.onload=function(){
         throw new Error('VM keyboard is not ready');
       }
       window.emulator.keyboard_send_text(text);
-      copyStatus.textContent='Pasted.';
+      // v86 receives the clipboard as keystrokes; explicitly send Enter so
+      // a pasted shell command is executed instead of merely appearing at
+      // the prompt.
+      if(!/[\r\n]$/.test(text)) {
+        window.emulator.keyboard_send_text('\n');
+      }
+      copyStatus.textContent='Pasted and executed.';
       setTimeout(function(){ copyStatus.textContent=''; },1500);
     } catch(e) {
       copyStatus.textContent='Paste blocked; use the button again and allow clipboard access.';
