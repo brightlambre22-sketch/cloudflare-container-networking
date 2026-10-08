@@ -62,7 +62,7 @@ if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
 
-const diagnosticCommand='echo "===== NETWORK REPORT $(date) ====="; echo "--- id ---"; id; echo "--- interfaces ---"; ifconfig -a 2>&1; echo "--- ipv4 routes ---"; route -n 2>&1; echo "--- ipv6 routes ---"; route -A inet6 -n 2>&1; echo "--- kernel NIC ---"; dmesg | grep -Ei "eth|ne2k|ne2000|network|nic" 2>&1; echo "--- modules ---"; lsmod | grep -Ei "ne|8390|ether" 2>&1; echo "--- sockets ---"; netstat -lnptu 2>&1; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1; echo "--- hostname ---"; hostname 2>&1; echo "--- busybox network ---"; busybox | grep -E "ifconfig|route|udhcpc|ping|ping6|netstat" 2>&1; echo "--- addresses via /proc ---"; cat /proc/net/dev 2>&1; echo "===== END NETWORK REPORT ====="';
+const diagnosticCommand='sh /tmp/network-test.sh';
 
 function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
@@ -79,7 +79,7 @@ if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; ru
 const commands=[
 'sudo udhcpc -n -q -i eth0',
 'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
-'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/browser-bootstrap.sh; rc=$?; echo __BOOTSTRAP_DOWNLOAD_DONE:$rc',
+'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh; rc=$?; echo __BOOTSTRAP_DOWNLOAD_DONE:$rc',
 'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; echo __BOOTSTRAP_RUN_DONE:$rc; else echo __BOOTSTRAP_RUN_DONE:download_failed; fi',
 'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; else echo "__BOOTSTRAP_VERIFY_DONE:ok"; fi',
 'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; echo __SUPERVISOR_DONE',
@@ -93,7 +93,7 @@ function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
 report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
-runDiagnostic('POST-BOOT NETWORK TEST');
+const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/network-test.sh; echo __NETWORK_DOWNLOAD_DONE:$?','sh /tmp/network-test.sh; echo __NETWORK_TEST_DONE:$?','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/fineproxy-test.sh; echo __FINEPROXY_DOWNLOAD_DONE:$?','sh /tmp/fineproxy-test.sh; echo __FINEPROXY_TEST_DONE:$?']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); window.emulator.keyboard_send_text(pc+'\n'); const st=Date.now(); (function w(){const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||''; if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+' ***\n');runPost();return;} setTimeout(w,500)})()} runPost();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
