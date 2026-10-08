@@ -2,7 +2,7 @@
 set +e
 MARKER="__NETWORK_INIT_DONE"
 LOG=/tmp/network-init.log
-exec >"$LOG" 2>&1
+: > "$LOG"
 echo "===== Tiny Core network initialization ====="
 echo "--- kernel ---"; uname -a; uname -r
 echo "--- pci ---"; lspci -nn 2>&1 || true
