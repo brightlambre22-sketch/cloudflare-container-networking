@@ -80,6 +80,11 @@ jobs:
               curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c https://raw.githubusercontent.com/torvalds/linux/v5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
             fi
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
+            # The Tiny Core patch set may also carry an older 8390 Kbuild file.
+            # Restore the matching upstream Kbuild metadata so the restored source
+            # is actually included in the module build.
+            curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile https://raw.githubusercontent.com/torvalds/linux/v5.4.3/drivers/net/ethernet/8390/Makefile
+            test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile
             make -C work/kernel/linux-5.4.3 olddefconfig
             make -C work/kernel/linux-5.4.3 -j2 M=drivers/net/ethernet/8390 modules
             mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
