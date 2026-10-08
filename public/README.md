@@ -1,13 +1,20 @@
 # Tiny Core / v86 boot assets
 
-This directory is reserved for the browser/v86 Tiny Core boot PoC.
+The repository's canonical Tiny Core boot image is the verified custom
+DHCP-enabled Pure64 image:
 
-Expected layout:
+`public/boot/cloudflare-tinycore-dhcp.iso`
+
+It is based on Tiny Core Pure64 11.1 and was remastered from the working
+Pure64 base. Its startup hook brings up `eth0` and requests an IPv4 address
+through DHCP.
+
+Expected boot layout:
 
 ```text
 public/
 ├── boot/
-│   └── TinyCore-17.1.iso
+│   └── cloudflare-tinycore-dhcp.iso
 ├── bios/
 │   ├── seabios.bin
 │   └── vgabios.bin
@@ -16,9 +23,9 @@ public/
     └── v86.wasm
 ```
 
-The ISO and v86 runtime assets are intentionally not committed by the
-persistent-node automation changes. Add the working boot assets here when
-available, or serve them from the existing public asset host.
+The custom ISO is now the source boot asset for this project. Do not add an
+automated workflow that downloads or rebuilds a different Tiny Core release
+over it.
 
-The browser/v86 VM is only a boot/reference PoC. It is not the always-on
+The browser/v86 VM remains a boot/reference PoC. It is not the always-on
 runtime for the persistent Tiny Core node.
