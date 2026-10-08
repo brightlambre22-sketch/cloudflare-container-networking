@@ -55,7 +55,6 @@ window.onload=function(){
       mystLog.scrollTop=mystLog.scrollHeight;
     }
   }
-  const bootstrapB64='IyEvYmluL3NoCnNldCAtZXUKQVBJX1VSTD0iX19BUElfVVJMX18iCk5PREVfSUQ9IjdjYmVlMGU5LWRhNmItNDgwOC05MmE3LTRhM2MyYTQ1YTg0MCIKCmlmIGNvbW1hbmQgLXYgdWRoY3BjID4vZGV2L251bGwgMj4mMTsgdGhlbgogIGlwIGxpbmsgc2V0IGV0aDAgdXAgMj4vZGV2L251bGwgfHwgdHJ1ZQogIHVkaGNwYyAtbiAtcSAtaSBldGgwIDI+L2Rldi9udWxsIHx8IHRydWUKZmkKCmlmICEgY29tbWFuZCAtdiB3Z2V0ID4vZGV2L251bGwgMj4mMTsgdGhlbgogIGVjaG8gIndnZXQgdW5hdmFpbGFibGUiCiAgZXhpdCAxCmZpCgplY2hvICJbY2xvdWRmbGFyZV0gcmVxdWVzdGluZyBleHRlcm5hbCBydW50aW1lIHN0YXJ0Igp3Z2V0IC1xIC1PIC90bXAvcnVudGltZS1zdGFydC5qc29uIC0tcG9zdC1kYXRhPScnICIkQVBJX1VSTC92MS9ub2Rlcy8kTk9ERV9JRC9ydW50aW1lL3N0YXJ0IiB8fCB0cnVlCgplY2hvICJbY2xvdWRmbGFyZV0gbW9uaXRvcmluZyBleHRlcm5hbCBydW50aW1lIgppPTAKd2hpbGUgWyAiJGkiIC1sdCAzMCBdOyBkbwogIGlmIHdnZXQgLXEgLU8gL3RtcC9ydW50aW1lLXByb2JlLmpzb24gIiRBUElfVVJML3YxL25vZGVzLyROT0RFX0lEL3J1bnRpbWUvcHJvYmUiOyB0aGVuCiAgICBjYXQgL3RtcC9ydW50aW1lLXByb2JlLmpzb24KICBmaQogIHNsZWVwIDIKICBpPSQoKGkgKyAxKSkKZG9uZQoKZWNobyAiQ0xPVURGTEFSRV9CUk9XU0VSX0JPT1RTVFJBUF9DT01QTEVURSIK';
 
   function startBrowserBootstrap(){
     if (window.__browserBootstrapStarted) return;
@@ -63,13 +62,13 @@ window.onload=function(){
     status.textContent='Tiny Core ready; running startup steps...';
 
     const commands=[
-      'sudo -n udhcpc -n -q -i eth0',
+      'udhcpc -n -q -i eth0',
       'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
-      'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/main/runner/tinycore/browser-bootstrap.sh',
-      'sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId,
-      'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; exit 1; fi',
-      'nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 &',
-      'nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 &'
+      'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/browser-bootstrap.sh; rc=$?; echo __BOOTSTRAP_DOWNLOAD_DONE:$rc',
+      'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; echo __BOOTSTRAP_RUN_DONE:$rc; else echo __BOOTSTRAP_RUN_DONE:download_failed; fi',
+      'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; else echo "__BOOTSTRAP_VERIFY_DONE:ok"; fi',
+      'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; echo __SUPERVISOR_DONE',
+      'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; echo __RUNNER_DONE'
     ];
 
     function terminalText(){
@@ -77,15 +76,20 @@ window.onload=function(){
       return ((screen && screen.textContent)||'');
     }
 
-    function promptCount(text){
-      const matches=text.match(/tc@box:~\$/g);
-      return matches ? matches.length : 0;
+    function waitForMarker(marker, timeoutMs, callback){
+      const started=Date.now();
+      function check(){
+        if(terminalText().indexOf(marker)>=0){ callback(); return; }
+        if(Date.now()-started >= timeoutMs){
+          status.textContent='Timed out waiting for '+marker;
+          return;
+        }
+        setTimeout(check,500);
+      }
+      check();
     }
 
-    // v86's terminal text buffer can replace/trim old lines, so counting
-    // prompts is not a reliable completion signal. Use conservative per-step
-    // delays instead; the commands themselves remain serialized.
-    const delays=[10000,30000,30000,240000,5000,5000,5000];
+    const timeouts=[60000,120000,30000,360000,15000,10000,10000];
     let index=0;
     function sendNext(){
       if(index>=commands.length){
@@ -100,31 +104,29 @@ window.onload=function(){
         return;
       }
 
-      const step=index;
-      const command=commands[index++];
-      status.textContent='Running startup step '+index+'/'+commands.length+'...';
+      const step=index++;
+      const command=commands[step];
+      const marker=[
+        null,
+        null,
+        '__BOOTSTRAP_DOWNLOAD_DONE:',
+        '__BOOTSTRAP_RUN_DONE:',
+        '__BOOTSTRAP_VERIFY_DONE:',
+        '__SUPERVISOR_DONE',
+        '__RUNNER_DONE'
+      ][step];
+
+      status.textContent='Running startup step '+(step+1)+'/'+commands.length+'...';
       window.emulator.keyboard_send_text(command+'\n');
 
-      const total=delays[step];
-      let remaining=total;
-      const timer=setInterval(function(){
-        remaining-=1000;
-        status.textContent='Running startup step '+(step+1)+'/'+commands.length+'... '+Math.max(0,Math.ceil(remaining/1000))+'s';
-        if(remaining<=0){
-          clearInterval(timer);
-          sendNext();
-        }
-      },1000);
+      if(marker){
+        waitForMarker(marker,timeouts[step],sendNext);
+      } else {
+        setTimeout(sendNext,timeouts[step]);
+      }
     }
 
-    function waitForInitialPrompt(){
-      if(promptCount(terminalText())>0){
-        sendNext();
-        return;
-      }
-      setTimeout(waitForInitialPrompt,500);
-    }
-    waitForInitialPrompt();
+    sendNext();
   }
 
   status.textContent='Loading v86...';
@@ -137,22 +139,16 @@ window.onload=function(){
       bios:{url:'/bios/seabios.bin'},
       vga_bios:{url:'/bios/vgabios.bin'},
       cdrom:{url:'/boot/TinyCore-11.0.iso'},
-      // Give Tiny Core a real emulated NIC. The relay provides the browser-side
-      // bridge to the outside network so wget/DNS can reach the bootstrap.
-      // Current v86 API:
       net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
-      // Keep the legacy option for the bundled v86 build if it predates
-      // net_device.
       network_relay_url:'wss://relay.widgetry.org/',
       autostart:true
     });
     status.textContent='Linux VM starting with network...';
+
     let commandLineModeStarted=false;
     function sendCommandLineBoot(){
       if(commandLineModeStarted) return;
       commandLineModeStarted=true;
-      // TinyCore 11's CD menu places "Core (command line only)" after the
-      // graphical TinyCore entries. Select it automatically.
       setTimeout(function(){
         try {
           if(window.emulator && typeof window.emulator.keyboard_send_scancodes==='function'){
@@ -160,9 +156,7 @@ window.onload=function(){
           } else if(window.emulator && typeof window.emulator.keyboard_send_keys==='function'){
             window.emulator.keyboard_send_keys(['ARROWDOWN','ARROWDOWN','ENTER']);
           }
-        } catch(e) {
-          console.error(e);
-        }
+        } catch(e) { console.error(e); }
       },1500);
     }
 
@@ -176,10 +170,7 @@ window.onload=function(){
       return new Promise(function(resolve,reject){
         const started=Date.now();
         function check(){
-          if(tinyCorePromptVisible()){
-            resolve(true);
-            return;
-          }
+          if(tinyCorePromptVisible()){ resolve(true); return; }
           if(Date.now()-started >= timeoutMs){
             reject(new Error('Tiny Core prompt not detected within '+Math.round(timeoutMs/1000)+' seconds'));
             return;
@@ -190,10 +181,7 @@ window.onload=function(){
       });
     }
 
-    // Try the boot-menu selection automatically; if the ISO is already past
-    // the menu, these keystrokes are harmless.
     sendCommandLineBoot();
-
     setInterval(mirrorTerminal,500);
 
     waitForTinyCorePrompt(120000)
