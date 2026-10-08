@@ -32,7 +32,7 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 window.onload=function(){
 const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('myst-log'),copyStatus=document.getElementById('copy-status');
 const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
-let reportTimer=null,bootstrapStarted=false;
+let reportTimer=null,bootstrapStarted=false,bootComplete=false;
 
 function statusText(t){status.textContent=t}
 function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
@@ -125,20 +125,23 @@ net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
 network_relay_url:'wss://relay.widgetry.org/',autostart:true
 });
 statusText('Linux VM starting; full bootstrap will run at Tiny Core prompt.');
-let bootSent=false;
-setTimeout(function(){
-if(bootSent)return;bootSent=true;
-try{
-if(typeof window.emulator.keyboard_send_scancodes==='function')window.emulator.keyboard_send_scancodes([0x50,0x50,0x1c]);
-else if(typeof window.emulator.keyboard_send_keys==='function')window.emulator.keyboard_send_keys(['ARROWDOWN','ARROWDOWN','ENTER'])
-}catch(e){}
-},1500);
 const started=Date.now();
-(function wait(){
+statusText('Tiny Core is booting; no commands will be sent until the shell prompt is detected.');
+(function waitForBootComplete(){
 const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||'';
-if(/tc@box|tc@/.test(t)){startBootstrap();return}
-if(Date.now()-started>=120000){statusText('Tiny Core prompt not detected.');return}
-setTimeout(wait,500)
+const promptReady=/(^|\n)tc@box(?::[^\n]*)?[$#]\s*$/.test(t.trim()) || /tc@box[:$#]\s*$/.test(t.trim());
+if(promptReady){
+bootComplete=true;
+statusText('Tiny Core boot complete; shell prompt detected. Starting bootstrap.');
+startBootstrap();
+return;
+}
+if(Date.now()-started>=600000){
+statusText('Tiny Core boot did not reach the shell prompt within 10 minutes. No commands were sent.');
+report('*** BOOT TIMEOUT: Tiny Core shell prompt was not detected; no commands were sent. ***\n');
+return;
+}
+setTimeout(waitForBootComplete,500);
 })()
 }catch(e){statusText('VM ERROR: '+e.message)}
 };
