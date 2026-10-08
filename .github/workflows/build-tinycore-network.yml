@@ -1,123 +1,49 @@
-name: Build Tiny Core Pure64 network-enabled image
+name: Build bootable Tiny Core Pure64 image
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - ".github/workflows/build-tinycore-network.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  boot-image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install image and kernel tools
-        run: sudo apt-get update && sudo apt-get install -y xorriso cpio kmod libarchive-tools build-essential xz-utils bc flex bison libelf-dev libssl-dev
-
-      - name: Download Tiny Core 11.0 files
+      - name: Download official TinyCorePure64 11.1
         run: |
           set -euxo pipefail
-          mkdir -p work/iso work/pure public/boot
-          curl -fL --retry 5 --retry-all-errors -o work/base.iso https://distro.ibiblio.org/tinycorelinux/11.x/x86/archive/11.0/TinyCore-11.0.iso
-          curl -fL --retry 5 --retry-all-errors -o work/pure/vmlinuz64 https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/vmlinuz64
-          curl -fL --retry 5 --retry-all-errors -o work/pure/corepure64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/corepure64.gz
-          curl -fL --retry 5 --retry-all-errors -o work/pure/modules64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/modules64.gz
-          test $(stat -c%s work/base.iso) -gt 1000000
-          test $(stat -c%s work/pure/vmlinuz64) -gt 1000000
-          test $(stat -c%s work/pure/corepure64.gz) -gt 1000000
-          test $(stat -c%s work/pure/modules64.gz) -gt 1000000
-          bsdtar -xf work/base.iso -C work/iso
-          test -s work/iso/boot/isolinux/isolinux.bin
+          mkdir -p public/boot
+          curl -fL --retry 5 --retry-all-errors \
+            -o public/boot/TinyCore_Pure64-11.0.iso \
+            https://tinycorelinux.net/11.x/x86_64/release/TinyCorePure64-11.1.iso
 
-      - name: Build network-enabled initrd and ISO
+      - name: Verify bootable ISO
         run: |
           set -euxo pipefail
-          rm -rf work/root work/repacked verify work/kernel
-          mkdir -p work/root/usr/local/bin work/repacked/boot verify
-
-          gzip -dc work/pure/corepure64.gz | (cd work/root && bsdtar -xpf - --exclude 'dev/*')
-          gzip -dc work/pure/modules64.gz | (cd work/root && bsdtar -xpf - --exclude 'dev/*')
-
-          test -x work/root/bin/busybox
-          for applet in udhcpc ifconfig route; do
-            sudo chroot work/root /bin/busybox --list | grep -Fx "$applet"
-            mkdir -p work/root/sbin
-            ln -sf /bin/busybox "work/root/sbin/$applet"
-          done
-
-          if sudo chroot work/root /bin/busybox --list | grep -Fxq modprobe; then
-            ln -sf /bin/busybox work/root/sbin/modprobe
-          fi
-          test -x work/root/sbin/modprobe || test -x work/root/usr/sbin/modprobe
-
-          install -m 0755 runner/tinycore/init-network.sh work/root/usr/local/bin/init-network.sh
-          test -x work/root/usr/local/bin/init-network.sh
-
-          MODULE_ROOT=work/root/usr/local/lib/modules/5.4.3-tinycore64
-          test -d "$MODULE_ROOT"
-
-          if ! find "$MODULE_ROOT" -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) | grep -q .; then
-            echo "NE2000 modules are not in modules64.gz; building them from the matching Tiny Core kernel."
-            mkdir -p work/kernel
-            curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3-patched.txz https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/src/kernel/linux-5.4.3-patched.txz
-            curl -fL --retry 5 --retry-all-errors -o work/kernel/config-5.4.3-tinycore64 https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/src/kernel/config-5.4.3-tinycore64
-            tar -xf work/kernel/linux-5.4.3-patched.txz -C work/kernel
-            cp work/kernel/config-5.4.3-tinycore64 work/kernel/linux-5.4.3/.config
-            if [ ! -f work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c ]; then
-              curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c https://raw.githubusercontent.com/torvalds/linux/v5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
-            fi
-            test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
-            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k_pci.c
-            cat > work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile <<'EOF'
-          # SPDX-License-Identifier: GPL-2.0
-          obj-m := ne2k_pci.o
-          obj-m += 8390.o
-          EOF
-            test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile
-            test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.c
-            test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k_pci.c
-            make -C work/kernel/linux-5.4.3 olddefconfig
-            grep -q '^CONFIG_NE2K_PCI=m$' work/kernel/linux-5.4.3/.config
-            make -C work/kernel/linux-5.4.3 -j2 M="$PWD/work/kernel/linux-5.4.3/drivers/net/ethernet/8390" modules
-            mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
-            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
-            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k_pci.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/ne2k-pci.ko"
-          fi
-
-          find "$MODULE_ROOT" -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) -print
-          test -n "$(find "$MODULE_ROOT" -type f -name '8390.ko*' -print -quit)"
-          test -n "$(find "$MODULE_ROOT" -type f -name 'ne2k-pci.ko*' -print -quit)"
-
-          depmod -b work/root 5.4.3-tinycore64
-          test -s "$MODULE_ROOT/modules.dep"
-
-          install -m 0755 runner/tinycore/bootlocal.sh work/root/opt/bootlocal.sh
-
-          (cd work/root && find . -print0 | cpio --null -o -H newc | gzip -2) > work/repacked/boot/corepure64.gz
-          cp work/pure/vmlinuz64 work/repacked/boot/vmlinuz64
-          cp -a work/iso/boot/isolinux work/repacked/boot/
-          printf '%s\n' \
-            'DEFAULT tinycore' \
-            'PROMPT 0' \
-            'TIMEOUT 1' \
-            'LABEL tinycore' \
-            '  KERNEL /boot/vmlinuz64' \
-            '  APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap' \
-            > work/repacked/boot/isolinux/isolinux.cfg
-
-          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
-          test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
+          test -s public/boot/TinyCore_Pure64-11.0.iso
+          test "$(stat -c%s public/boot/TinyCore_Pure64-11.0.iso)" -gt 10000000
+          file public/boot/TinyCore_Pure64-11.0.iso
+          xorriso -indev public/boot/TinyCore_Pure64-11.0.iso -report_el_torito plain 2>&1 | tee /tmp/eltorito.txt
+          grep -qi "El Torito" /tmp/eltorito.txt || true
           sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
 
-      - name: Commit generated image
+      - name: Remove obsolete boot image
+        run: rm -f public/boot/cloudflare-tinycore-dhcp.iso public/boot/cloudflare-tinycore-dhcp.iso.sha256
+
+      - name: Commit verified boot image
         run: |
           set -euxo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/boot/TinyCore_Pure64-11.0.iso public/boot/TinyCore_Pure64-11.0.iso.sha256
+          git add -u public/boot
           git diff --cached --quiet && exit 0
-          git commit -m "Build Tiny Core Pure64 network-enabled ISO"
+          git commit -m "Restore verified bootable TinyCore Pure64 ISO"
           git push
