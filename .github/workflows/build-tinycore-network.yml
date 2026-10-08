@@ -14,8 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install image tools
-        run: sudo apt-get update && sudo apt-get install -y xorriso cpio kmod libarchive-tools
+      - name: Install image and kernel tools
+        run: sudo apt-get update && sudo apt-get install -y xorriso cpio kmod libarchive-tools build-essential xz-utils bc flex bison libelf-dev libssl-dev
 
       - name: Download Tiny Core 11.0 files
         run: |
@@ -35,7 +35,7 @@ jobs:
       - name: Build network-enabled initrd and ISO
         run: |
           set -euxo pipefail
-          rm -rf work/root work/repacked verify
+          rm -rf work/root work/repacked verify work/kernel
           mkdir -p work/root/usr/local/bin work/repacked/boot verify
 
           # Tiny Core initrd contains device nodes that the unprivileged runner cannot create.
@@ -59,17 +59,37 @@ jobs:
           install -m 0755 runner/tinycore/init-network.sh work/root/usr/local/bin/init-network.sh
           test -x work/root/usr/local/bin/init-network.sh
 
-          # Tiny Core 11.0 must contain the PCI NE2000 driver and its 8390 dependency.
-          test -d work/root/usr/local/lib/modules/5.4.3-tinycore64
-          find work/root/usr/local/lib/modules/5.4.3-tinycore64 -type f -name '8390.ko*' | grep -q .
-          find work/root/usr/local/lib/modules/5.4.3-tinycore64 -type f -name 'ne2k-pci.ko*' | grep -q .
+          MODULE_ROOT=work/root/usr/local/lib/modules/5.4.3-tinycore64
+          test -d "$MODULE_ROOT"
+
+          # Tiny Core's standard modules64 archive does not necessarily carry
+          # optional Ethernet drivers. If NE2000 support is absent, build the
+          # exact 5.4.3-tinycore64 8390/NE2K modules from Tiny Core's matching
+          # patched kernel source instead of silently producing a non-networking ISO.
+          if ! find "$MODULE_ROOT" -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) | grep -q .; then
+            echo "NE2000 modules are not in modules64.gz; building them from the matching Tiny Core kernel."
+            mkdir -p work/kernel
+            curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3-patched.txz https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/src/kernel/linux-5.4.3-patched.txz
+            curl -fL --retry 5 --retry-all-errors -o work/kernel/config-5.4.3-tinycore64 https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/src/kernel/config-5.4.3-tinycore64
+            tar -xf work/kernel/linux-5.4.3-patched.txz -C work/kernel
+            cp work/kernel/config-5.4.3-tinycore64 work/kernel/linux-5.4.3/.config
+            make -C work/kernel/linux-5.4.3 olddefconfig
+            make -C work/kernel/linux-5.4.3 -j2 M=drivers/net/ethernet/8390 modules
+            mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
+            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
+            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
+          fi
+
+          find "$MODULE_ROOT" -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) -print
+          test -n "$(find "$MODULE_ROOT" -type f -name '8390.ko*' -print -quit)"
+          test -n "$(find "$MODULE_ROOT" -type f -name 'ne2k-pci.ko*' -print -quit)"
 
           depmod -b work/root 5.4.3-tinycore64
-          test -s work/root/usr/local/lib/modules/5.4.3-tinycore64/modules.dep
+          test -s "$MODULE_ROOT/modules.dep"
 
           echo "=== embedded network files ==="
           ls -l work/root/bin/busybox work/root/sbin/udhcpc work/root/sbin/ifconfig work/root/sbin/route
-          find work/root/usr/local/lib/modules/5.4.3-tinycore64 -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) -print
+          find "$MODULE_ROOT" -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) -print
           echo "=== embedded network commands ==="
           sudo chroot work/root /bin/busybox --list | grep -E '^(udhcpc|ifconfig|route|modprobe)$' | sort
 
