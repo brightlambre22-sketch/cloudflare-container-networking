@@ -56,8 +56,17 @@ setTimeout(()=>copyStatus.textContent='',3000)
 document.getElementById('paste-terminal').onclick=pasteIntoVm;
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
 
+function getVmText(){
+try{
+if(window.emulator&&window.emulator.screen_adapter&&typeof window.emulator.screen_adapter.get_text==='function'){
+const t=window.emulator.screen_adapter.get_text();if(t)return t;
+}
+}catch(e){}
+const s=document.querySelector('#screen_container > div');
+return(s&&s.textContent)||''
+}
 function mirror(){
-const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent||'').trim();
+const t=getVmText().trim();
 if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
@@ -72,7 +81,7 @@ const diagnosticSections=[
 ['7. MYSTERIUM/CLOUDFLARE','clear; echo "===== SECTION 7: MYSTERIUM/CLOUDFLARE ====="; ps 2>&1 | grep -Ei "myst|cloudflare|supervisor|runner" | grep -v grep; echo "--- files ---"; ls -l /opt/mysterium /opt/cloudflare-node 2>&1; echo "--- /proc/net/dev ---"; cat /proc/net/dev 2>&1; echo "--- log tails ---"; tail -n 25 /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>&1; echo "__NETSEC7_DONE__"]
 ];
 
-function terminalText(){const s=document.querySelector('#screen_container > div');return(s&&s.textContent)||''}
+function terminalText(){return getVmText()}
 function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
 report('\n\n===== '+label+' =====\n');
@@ -118,7 +127,7 @@ const commands=[
 const markers=['__DHCP_DONE:','__TCE_LOAD_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
 const timeouts=[45000,120000,30000,360000,15000,10000,10000];
 let i=0;
-function terminal(){const s=document.querySelector('#screen_container > div');return(s&&s.textContent)||''}
+function terminal(){return getVmText()}
 function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
@@ -165,7 +174,7 @@ else if(typeof window.emulator.keyboard_send_keys==='function')window.emulator.k
 },1500);
 const started=Date.now();
 (function wait(){
-const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||'';
+const t=getVmText();
 if(/tc@box|tc@/.test(t)){startBootstrap();return}
 if(Date.now()-started>=120000){statusText('Tiny Core prompt not detected.');return}
 setTimeout(wait,500)
