@@ -1,47 +1,49 @@
 # Tiny Core Linux runner
 
-This directory is the non-Container runtime for the PoC.
+This directory contains the non-Container runtime for the PoC.
 
-Tiny Core is booted by the external Linux/VM runtime, while Cloudflare remains
-the control plane.
+## Canonical boot image
 
-## Base image
+The repository now uses:
 
-Use the official Tiny Core Linux 17.1 x86_64 release.
+`public/boot/cloudflare-tinycore-dhcp.iso`
 
-ISO:
-https://www.tinycorelinux.net/17.x/x86_64/release/CorePure64-17.1.iso
+This is the verified custom Tiny Core Pure64 image based on the repository's
+working Tiny Core 11.x base. The image has a boot-time DHCP hook so the first
+milestone is simply:
 
-Distribution files:
-https://www.tinycorelinux.net/17.x/x86_64/release/distribution_files/
+1. Boot Tiny Core.
+2. Bring up `eth0`.
+3. Obtain an IPv4 address through DHCP.
 
-The ISO is a boot asset, not part of the persistent-node source code. Do not
-commit the ISO to Git unless there is a specific reason to accept the large
-binary in repository history. For the browser/v86 PoC, place the working ISO
-under `public/boot/` when using repository-hosted assets. See `public/README.md`.
+The ISO is intentionally kept separate from the source scripts so it can be
+replaced by a later verified build without changing the runtime source.
 
 ## Persistence
 
-Tiny Core is normally a live system. The runner must boot with a persistent
-tce directory and persistent writable storage. Mysterium data must live on
-that persistent storage, not only in RAM.
+Tiny Core is normally a live system. The later persistent-node runner should
+boot with persistent writable storage. Mysterium data must live on that
+persistent storage, not only in RAM.
 
-On every boot the runner should:
+The intended lifecycle remains:
 
 1. Bring up networking.
-2. Restore the persistent tce directory.
+2. Restore persistent storage.
 3. Restore the Mysterium data directory.
-4. Configure the assigned 10.240.x.x addresses.
+4. Configure assigned node addresses.
 5. Start the Mysterium service.
 6. Start the Cloudflare runner/heartbeat.
 
-The browser is not part of the lifecycle.
+The browser is not part of that lifecycle.
 
 ## Mysterium
 
-Mysterium publishes an amd64 DEB and documents native Linux installation.
-Tiny Core is not one of the officially tested distributions, so this runner
-is a PoC and dependency compatibility must be verified on the target image.
+Mysterium integration remains a later stage. The current custom ISO does not
+claim to contain a Mysterium executable. Do not fabricate or silently assume
+`/opt/mysterium/myst` exists on the base image.
 
-Official installation reference:
-https://github.com/MysteriumNetwork/node
+## Important
+
+The DHCP-enabled ISO is the current known-good Tiny Core boot foundation.
+Older automated ISO-build/download workflows are intentionally removed so
+they cannot replace this verified image with an incompatible base.
