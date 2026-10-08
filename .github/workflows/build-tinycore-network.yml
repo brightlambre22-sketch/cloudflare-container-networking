@@ -37,8 +37,11 @@ jobs:
           set -euxo pipefail
           rm -rf work/root work/repacked verify
           mkdir -p work/root/usr/local/bin work/repacked/boot verify
-          gzip -dc work/pure/corepure64.gz | (cd work/root && cpio -idmu)
-          gzip -dc work/pure/modules64.gz | (cd work/root && cpio -idmu)
+          # The Tiny Core initrd contains many /dev device nodes. GitHub's
+          # unprivileged runner cannot create those nodes, so skip /dev during
+          # extraction; Tiny Core recreates/mounts its runtime device tree at boot.
+          gzip -dc work/pure/corepure64.gz | (cd work/root && cpio -idmu --exclude='dev/*')
+          gzip -dc work/pure/modules64.gz | (cd work/root && cpio -idmu --exclude='dev/*')
 
           # Tiny Core's base BusyBox supplies the DHCP and legacy network
           # commands. Make the expected paths explicit so boot does not depend
