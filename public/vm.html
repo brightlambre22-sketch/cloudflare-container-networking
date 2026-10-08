@@ -78,15 +78,21 @@ setTimeout(function(){
 const s=document.querySelector('#screen_container > div');report('----- screen snapshot -----\\n'+((s&&s.textContent)||'')+'\\n----- end snapshot -----\\n')
 },12000)
 }
-document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
-document.getElementById('run-fineproxy-test').onclick=function(){
-if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM not ready.');return}
+function runFineProxyAfterNetwork(){
 const cmd="wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/fineproxy-test.sh; rc=$?; echo FINEPROXY_SCRIPT_DOWNLOAD:$rc; if [ $rc -eq 0 ]; then sh /tmp/fineproxy-test.sh; fi";
-report('\n===== FINEPROXY MYSTERIUM TEST =====\\n');
+report('\\n===== FINEPROXY MYSTERIUM TEST =====\\n');
 window.emulator.keyboard_send_text(cmd+'\\n');
 statusText('FineProxy test running.');
 setTimeout(function(){const s=document.querySelector('#screen_container > div');const t=(s&&s.textContent)||'';report(t.slice(-30000));statusText('FineProxy test output captured.');},30000);
+}
+document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
+document.getElementById('run-fineproxy-test').onclick=function(){
+if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM not ready.');return}
+statusText('Running network test first; FineProxy will start automatically after it finishes.');
+runDiagnostic('NETWORK TEST BEFORE FINEPROXY');
+setTimeout(runFineProxyAfterNetwork,12500);
 };
+
 
 function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
