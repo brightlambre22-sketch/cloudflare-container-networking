@@ -84,16 +84,17 @@ jobs:
             # Kbuild file. Restore the Linux 5.4-era rule that maps NE2K_PCI
             # to both the PCI driver and the shared 8390 core.
             cat > work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile <<'EOF'
-            # SPDX-License-Identifier: GPL-2.0
-            #
-            # Makefile for the 8390 network device drivers.
-            #
-            obj-$(CONFIG_NE2K_PCI) += ne2k-pci.o 8390.o
-            EOF
+          # SPDX-License-Identifier: GPL-2.0
+          #
+          # Makefile for the 8390 network device drivers.
+          #
+          obj-$(CONFIG_NE2K_PCI) += ne2k-pci.o 8390.o
+          EOF
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.c
             make -C work/kernel/linux-5.4.3 olddefconfig
-            grep -q '^CONFIG_NE2K_PCI=m            make -C work/kernel/linux-5.4.3 -j2 M=drivers/net/ethernet/8390 modules
+            grep -q '^CONFIG_NE2K_PCI=m$' work/kernel/linux-5.4.3/.config
+            make -C work/kernel/linux-5.4.3 -j2 M=drivers/net/ethernet/8390 modules
             mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
             cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
             cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
