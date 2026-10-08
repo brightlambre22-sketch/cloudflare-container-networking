@@ -50,16 +50,16 @@ export default {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
       try {
-        const response = await fetch("https://api.ipify.org?format=json");
+        const response = await fetch("https://api4.ipify.org?format=json");
         if (!response.ok) {
-          return json({ error: "egress_ip_lookup_failed", upstream_status: response.status }, 502);
+          return json({ error: "egress_ipv4_lookup_failed", upstream_status: response.status }, 502);
         }
 
         const data = (await response.json()) as { ip?: string };
-        return json({ egress_ip: data.ip ?? null });
+        return json({ egress_ipv4: data.ip ?? null });
       } catch (error) {
         return json({
-          error: "egress_ip_lookup_failed",
+          error: "egress_ipv4_lookup_failed",
           detail: error instanceof Error ? error.message : String(error),
         }, 502);
       }
