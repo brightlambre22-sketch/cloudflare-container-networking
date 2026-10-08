@@ -24,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work/iso work/pure public/boot
-          curl -fL --retry 5 -o work/base.iso https://i.copy.sh/TinyCore-11.0.iso
+          curl -fL --retry 5 -o work/base.iso https://distro.ibiblio.org/tinycorelinux/11.x/x86/archive/11.0/TinyCore-11.0.iso
           curl -fL --retry 5 -o work/pure/vmlinuz64 https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/vmlinuz64
           curl -fL --retry 5 -o work/pure/corepure64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/corepure64.gz
           curl -fL --retry 5 -o work/pure/modules64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/modules64.gz
