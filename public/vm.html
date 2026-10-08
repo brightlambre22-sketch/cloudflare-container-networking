@@ -62,17 +62,47 @@ if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
 
-const diagnosticCommand='echo "===== NETWORK REPORT $(date) ====="; echo "--- id ---"; id; echo "--- interfaces ---"; ifconfig -a 2>&1; echo "--- ipv4 routes ---"; route -n 2>&1; echo "--- ipv6 routes ---"; route -A inet6 -n 2>&1; echo "--- kernel NIC ---"; dmesg | grep -Ei "eth|ne2k|ne2000|network|nic" 2>&1; echo "--- modules ---"; lsmod | grep -Ei "ne|8390|ether" 2>&1; echo "--- sockets ---"; netstat -lnptu 2>&1; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1; echo "--- hostname ---"; hostname 2>&1; echo "--- busybox network ---"; busybox | grep -E "ifconfig|route|udhcpc|ping|ping6|netstat" 2>&1; echo "--- addresses via /proc ---"; cat /proc/net/dev 2>&1; echo "===== END NETWORK REPORT ====="';
+const diagnosticSections=[
+['1. INTERFACES','clear; echo "===== SECTION 1: INTERFACES ====="; ifconfig -a 2>&1; echo "__NETSEC1_DONE__"'],
+['2. IPV4 ROUTING','clear; echo "===== SECTION 2: IPV4 ROUTING ====="; route -n 2>&1; echo "--- eth0 ---"; ifconfig eth0 2>&1; echo "__NETSEC2_DONE__"'],
+['3. IPV6','clear; echo "===== SECTION 3: IPV6 ====="; route -A inet6 -n 2>&1; echo "--- /proc/net/if_inet6 ---"; cat /proc/net/if_inet6 2>&1; echo "__NETSEC3_DONE__"'],
+['4. SOCKETS AND PROCESSES','clear; echo "===== SECTION 4: SOCKETS AND PROCESSES ====="; netstat -lnptu 2>&1; echo "--- myst/cloudflare ---"; ps 2>&1 | grep -Ei "myst|cloudflare|supervisor|runner" | grep -v grep; echo "__NETSEC4_DONE__"'],
+['5. DNS AND CONNECTIVITY','clear; echo "===== SECTION 5: DNS AND CONNECTIVITY ====="; cat /etc/resolv.conf 2>&1; echo "--- hostname ---"; hostname 2>&1; echo "--- ping relay ---"; timeout 12 ping -c 2 -W 3 relay.widgetry.org 2>&1; echo "__NETSEC5_DONE__"'],
+['6. KERNEL NIC','clear; echo "===== SECTION 6: KERNEL NIC ====="; dmesg | grep -Ei "eth|ne2k|ne2000|network|nic" 2>&1; echo "--- modules ---"; lsmod | grep -Ei "ne|8390|ether" 2>&1; echo "__NETSEC6_DONE__"'],
+['7. MYSTERIUM/CLOUDFLARE','clear; echo "===== SECTION 7: MYSTERIUM/CLOUDFLARE ====="; ps 2>&1 | grep -Ei "myst|cloudflare|supervisor|runner" | grep -v grep; echo "--- files ---"; ls -l /opt/mysterium /opt/cloudflare-node 2>&1; echo "--- /proc/net/dev ---"; cat /proc/net/dev 2>&1; echo "--- log tails ---"; tail -n 25 /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>&1; echo "__NETSEC7_DONE__"]
+];
 
+function terminalText(){const s=document.querySelector('#screen_container > div');return(s&&s.textContent)||''}
 function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
-report('\n\n===== '+label+' =====\n'+diagnosticCommand+'\n');
-window.emulator.keyboard_send_text(diagnosticCommand+'\n');
-setTimeout(function(){
-const s=document.querySelector('#screen_container > div');report('----- screen snapshot -----\n'+((s&&s.textContent)||'')+'\n----- end snapshot -----\n')
-},9000)
+report('\n\n===== '+label+' =====\n');
+let i=0;
+function next(){
+if(i>=diagnosticSections.length){
+report('===== END '+label+' =====\n');
+statusText(label+' complete; results saved locally.');
+return;
 }
-document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
+const section=diagnosticSections[i++],name=section[0],cmd=section[1],marker='__NETSEC'+i+'_DONE__';
+report('\n--- '+name+' COMMAND ---\n'+cmd+'\n');
+window.emulator.keyboard_send_text(cmd+'\n');
+const started=Date.now();
+(function wait(){
+const t=terminalText();
+if(t.indexOf(marker)>=0){
+report('--- '+name+' OUTPUT ---\n'+t+'\n--- END '+name+' ---\n');
+next();return;
+}
+if(Date.now()-started>=20000){
+report('*** TIMEOUT '+name+'; continuing ***\n');
+next();return;
+}
+setTimeout(wait,400);
+})()
+}
+next()
+}
+document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; collecting 7 short sections.')};
 
 function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
