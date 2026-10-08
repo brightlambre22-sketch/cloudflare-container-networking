@@ -163,8 +163,9 @@ cdrom:{url:'/boot/TinyCore-11.0.iso'},
 net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
 network_relay_url:'wss://relay.widgetry.org/',autostart:true
 });
-statusText('Linux VM starting; full bootstrap will run at Tiny Core prompt.');
+statusText('v86 started; waiting for Tiny Core...');
 let bootSent=false;
+setTimeout(function(){if(!bootstrapStarted){statusText('v86 boot wait active; bootstrap fallback will start shortly.')}},10000);
 setTimeout(function(){
 if(bootSent)return;bootSent=true;
 try{
@@ -177,9 +178,9 @@ let fallbackStarted=false;
 (function wait(){
 const t=getVmText();
 if(/tc@box|tc@/.test(t)){startBootstrap();return}
-if(!fallbackStarted && Date.now()-started>=30000){
+if(!fallbackStarted && Date.now()-started>=20000){
 fallbackStarted=true;
-report('\n*** Tiny Core prompt text was not readable by the browser; starting bootstrap fallback after 30s. ***\n');
+report('\n*** Tiny Core prompt text was not readable by the browser; starting bootstrap fallback after 20s. ***\n');
 startBootstrap();
 return;
 }
