@@ -46,6 +46,25 @@ export default {
       return json({ status: "ok", service: "cloudflare-container-networking" });
     }
 
+    if (url.pathname === "/debug/egress-ip") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+
+      try {
+        const response = await fetch("https://api.ipify.org?format=json");
+        if (!response.ok) {
+          return json({ error: "egress_ip_lookup_failed", upstream_status: response.status }, 502);
+        }
+
+        const data = (await response.json()) as { ip?: string };
+        return json({ egress_ip: data.ip ?? null });
+      } catch (error) {
+        return json({
+          error: "egress_ip_lookup_failed",
+          detail: error instanceof Error ? error.message : String(error),
+        }, 502);
+      }
+    }
+
     if (url.pathname === "/tunnel") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
