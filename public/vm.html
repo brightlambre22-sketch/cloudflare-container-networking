@@ -18,6 +18,7 @@
 <div id="status">Starting Linux VM...</div>
 <div id="toolbar">
   <button id="copy-errors" type="button">Copy terminal text</button>
+  <button id="paste-terminal" type="button">Paste into VM</button>
   <span id="copy-status"></span>
 </div>
 <pre id="myst-log">Waiting for Tiny Core...</pre>
@@ -45,6 +46,36 @@ window.onload=function(){
       area.remove();
       copyStatus.textContent='Copied.';
       setTimeout(function(){ copyStatus.textContent=''; },1500);
+    }
+  });
+
+  async function pasteIntoVm(){
+    try {
+      const text=await navigator.clipboard.readText();
+      if(!text) {
+        copyStatus.textContent='Clipboard is empty.';
+        setTimeout(function(){ copyStatus.textContent=''; },1500);
+        return;
+      }
+      if(!window.emulator || typeof window.emulator.keyboard_send_text!=='function') {
+        throw new Error('VM keyboard is not ready');
+      }
+      window.emulator.keyboard_send_text(text);
+      copyStatus.textContent='Pasted.';
+      setTimeout(function(){ copyStatus.textContent=''; },1500);
+    } catch(e) {
+      copyStatus.textContent='Paste blocked; use the button again and allow clipboard access.';
+      console.error(e);
+      setTimeout(function(){ copyStatus.textContent=''; },3000);
+    }
+  }
+
+  document.getElementById('paste-terminal').addEventListener('click',pasteIntoVm);
+
+  document.addEventListener('keydown',function(event){
+    if((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase()==='v') {
+      event.preventDefault();
+      pasteIntoVm();
     }
   });
   function mirrorTerminal(){
