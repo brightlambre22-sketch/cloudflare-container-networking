@@ -5,175 +5,142 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mysterium Browser VM</title>
 <style>
-  body { margin:0; background:#111; color:#ddd; font-family:monospace; }
-  #status { padding:8px; }
-  #toolbar { padding:8px; background:#181818; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  button { font:inherit; padding:6px 10px; cursor:pointer; }
-  #copy-status { color:#8f8; }
-  #myst-log { margin:0; padding:8px; height:220px; overflow:auto; white-space:pre-wrap; user-select:text; background:#000; color:#ddd; border-top:1px solid #333; }
-  #results { box-sizing:border-box; width:100%; min-height:260px; background:#000; color:#ddd; border:1px solid #444; padding:8px; font:14px monospace; resize:vertical; }
-  #screen_container { width:100%; min-height:480px; }
+body{margin:0;background:#111;color:#ddd;font-family:monospace}
+#status{padding:8px}
+#toolbar{padding:8px;background:#181818;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;padding:6px 10px;cursor:pointer}
+#copy-status{color:#8f8}
+#myst-log{margin:0;padding:8px;height:220px;overflow:auto;white-space:pre-wrap;user-select:text;background:#000;color:#ddd;border-top:1px solid #333}
+#results{box-sizing:border-box;width:100%;min-height:300px;background:#000;color:#ddd;border:1px solid #444;padding:8px;font:14px monospace;resize:vertical}
+#screen_container{width:100%;min-height:480px}
 </style>
 </head>
 <body>
 <div id="status">Starting Linux VM...</div>
 <div id="toolbar">
-  <button id="run-network-test" type="button">Run network test</button>
-  <button id="copy-results" type="button">Copy test results</button>
-  <button id="paste-terminal" type="button">Paste into VM</button>
-  <button id="clear-results" type="button">Clear results</button>
-  <span id="copy-status"></span>
+<button id="run-network-test" type="button">Run network test</button>
+<button id="copy-results" type="button">Copy test results</button>
+<button id="paste-terminal" type="button">Paste into VM</button>
+<button id="clear-results" type="button">Clear results</button>
+<span id="copy-status"></span>
 </div>
-<textarea id="results" spellcheck="false" placeholder="Network test results will appear here. You can select/copy the entire report, or paste it here in sections if it is too large."></textarea>
+<textarea id="results" spellcheck="false" placeholder="Full startup/network report. It is saved locally so you can copy it in sections."></textarea>
 <pre id="myst-log">Waiting for Tiny Core...</pre>
 <div id="screen_container"><div></div><canvas></canvas></div>
 <script src="/v86/libv86.js"></script>
 <script>
 window.onload=function(){
-  const status=document.getElementById('status');
-  const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840';
-  const apiUrl=window.location.origin;
-  const mystLog=document.getElementById('myst-log');
-  const results=document.getElementById('results');
-  const copyStatus=document.getElementById('copy-status');
-  let diagnosticRunning=false;
+const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('myst-log'),copyStatus=document.getElementById('copy-status');
+const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
+let reportTimer=null,bootstrapStarted=false;
 
-  function setStatus(t){ status.textContent=t; }
-  function appendResult(t){
-    results.value += t;
-    results.scrollTop=results.scrollHeight;
-    try { localStorage.setItem('mysterium-network-test-results',results.value); } catch(e){}
-  }
+function statusText(t){status.textContent=t}
+function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
+function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
+try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
 
-  try {
-    const saved=localStorage.getItem('mysterium-network-test-results');
-    if(saved) results.value=saved;
-  } catch(e){}
+document.getElementById('clear-results').onclick=function(){results.value='';save()};
+document.getElementById('copy-results').onclick=async function(){
+try{await navigator.clipboard.writeText(results.value)}catch(e){results.focus();results.select();document.execCommand('copy')}
+copyStatus.textContent='Results copied.';setTimeout(()=>copyStatus.textContent='',1800)
+};
+async function pasteIntoVm(){
+try{
+const text=await navigator.clipboard.readText();if(!text)throw new Error('empty');
+if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('VM not ready');
+window.emulator.keyboard_send_text(text);if(!/[\r\n]$/.test(text))window.emulator.keyboard_send_text('\n');
+copyStatus.textContent='Pasted and executed.'
+}catch(e){copyStatus.textContent='Paste blocked; use the button again.'}
+setTimeout(()=>copyStatus.textContent='',3000)
+}
+document.getElementById('paste-terminal').onclick=pasteIntoVm;
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
 
-  document.getElementById('clear-results').addEventListener('click',function(){
-    results.value='';
-    try { localStorage.removeItem('mysterium-network-test-results'); } catch(e){}
-  });
+function mirror(){
+const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent||'').trim();
+if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
+}
+setInterval(mirror,500);
 
-  document.getElementById('copy-results').addEventListener('click',async function(){
-    try {
-      await navigator.clipboard.writeText(results.value);
-      copyStatus.textContent='Results copied.';
-    } catch(e) {
-      results.focus(); results.select();
-      document.execCommand('copy');
-      copyStatus.textContent='Results copied.';
-    }
-    setTimeout(function(){copyStatus.textContent='';},1800);
-  });
+const diagnosticCommand='echo "===== NETWORK REPORT $(date) ====="; echo "--- id ---"; id; echo "--- interfaces ---"; ifconfig -a 2>&1; echo "--- ipv4 routes ---"; route -n 2>&1; echo "--- ipv6 routes ---"; route -A inet6 -n 2>&1; echo "--- kernel NIC ---"; dmesg | grep -Ei "eth|ne2k|ne2000|network|nic" 2>&1; echo "--- modules ---"; lsmod | grep -Ei "ne|8390|ether" 2>&1; echo "--- sockets ---"; netstat -lnptu 2>&1; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1; echo "--- hostname ---"; hostname 2>&1; echo "--- busybox network ---"; busybox | grep -E "ifconfig|route|udhcpc|ping|ping6|netstat" 2>&1; echo "--- addresses via /proc ---"; cat /proc/net/dev 2>&1; echo "===== END NETWORK REPORT ====="';
 
-  async function pasteIntoVm(){
-    try {
-      const text=await navigator.clipboard.readText();
-      if(!text){ copyStatus.textContent='Clipboard is empty.'; return; }
-      if(!window.emulator || typeof window.emulator.keyboard_send_text!=='function') throw new Error('VM keyboard is not ready');
-      window.emulator.keyboard_send_text(text);
-      if(!/[\r\n]$/.test(text)) window.emulator.keyboard_send_text('\n');
-      copyStatus.textContent='Pasted and executed.';
-    } catch(e) {
-      copyStatus.textContent='Paste blocked; use the button again and allow clipboard access.';
-    }
-    setTimeout(function(){copyStatus.textContent='';},3000);
-  }
-  document.getElementById('paste-terminal').addEventListener('click',pasteIntoVm);
-  document.addEventListener('keydown',function(event){
-    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='v'){
-      event.preventDefault(); pasteIntoVm();
-    }
-  });
+function runDiagnostic(label){
+if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
+report('\n\n===== '+label+' =====\n'+diagnosticCommand+'\n');
+window.emulator.keyboard_send_text(diagnosticCommand+'\n');
+setTimeout(function(){
+const s=document.querySelector('#screen_container > div');report('----- screen snapshot -----\n'+((s&&s.textContent)||'')+'\n----- end snapshot -----\n')
+},9000)
+}
+document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
 
-  function mirrorTerminal(){
-    const screen=document.querySelector('#screen_container > div');
-    const text=(screen&&screen.textContent||'').trim();
-    if(text){ mystLog.textContent=text; mystLog.scrollTop=mystLog.scrollHeight; }
-  }
+function startBootstrap(){
+if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
+const commands=[
+'sudo udhcpc -n -q -i eth0',
+'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
+'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/browser-bootstrap.sh; rc=$?; echo __BOOTSTRAP_DOWNLOAD_DONE:$rc',
+'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; echo __BOOTSTRAP_RUN_DONE:$rc; else echo __BOOTSTRAP_RUN_DONE:download_failed; fi',
+'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; else echo "__BOOTSTRAP_VERIFY_DONE:ok"; fi',
+'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; echo __SUPERVISOR_DONE',
+'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; echo __RUNNER_DONE'
+];
+const markers=[null,null,'__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
+const timeouts=[45000,120000,30000,360000,15000,10000,10000];
+let i=0;
+function terminal(){const s=document.querySelector('#screen_container > div');return(s&&s.textContent)||''}
+function next(){
+if(i>=commands.length){
+statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
+report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
+runDiagnostic('POST-BOOT NETWORK TEST');
+return;
+}
+const n=i++,cmd=commands[n],marker=markers[n];
+report('\n===== BOOTSTRAP STEP '+(n+1)+'/'+commands.length+' =====\n'+cmd+'\n');
+window.emulator.keyboard_send_text(cmd+'\n');
+if(marker){
+const started=Date.now();
+(function wait(){
+if(terminal().indexOf(marker)>=0){next();return}
+if(Date.now()-started>=timeouts[n]){
+report('*** TIMEOUT waiting for '+marker+'; continuing to next step ***\n');
+next();return
+}
+setTimeout(wait,500)
+})()
+}else setTimeout(next,timeouts[n])
+}
+next()
+}
 
-  // Safe, read-only diagnostics. No package installs, downloads, DHCP,
-  // interface changes, routing changes, or Mysterium startup.
-  const diagnosticCommand =
-    'echo "===== VM NETWORK TEST $(date) ====="; ' +
-    'echo "--- identity ---"; id; ' +
-    'echo "--- interfaces ---"; ifconfig -a 2>&1; ' +
-    'echo "--- routes ---"; route -n 2>&1; ' +
-    'echo "--- ipv6 routes ---"; route -A inet6 -n 2>&1; ' +
-    'echo "--- kernel NIC detection ---"; dmesg | grep -Ei "eth|ne2k|ne2000|network|nic" 2>&1; ' +
-    'echo "--- loaded NIC modules ---"; lsmod | grep -Ei "ne|8390|ether" 2>&1; ' +
-    'echo "--- sockets ---"; netstat -lnptu 2>&1; ' +
-    'echo "--- resolv.conf ---"; cat /etc/resolv.conf 2>&1; ' +
-    'echo "--- hostname ---"; hostname 2>&1; ' +
-    'echo "--- busybox network applets ---"; busybox | grep -E "^(.* )?(ifconfig|route|udhcpc|ping|ping6|netstat)( |$)" 2>&1; ' +
-    'echo "===== END VM NETWORK TEST ====="';
-
-  document.getElementById('run-network-test').addEventListener('click',function(){
-    if(diagnosticRunning) return;
-    if(!window.emulator || typeof window.emulator.keyboard_send_text!=='function'){
-      setStatus('VM keyboard is not ready yet.'); return;
-    }
-    diagnosticRunning=true;
-    setStatus('Running read-only network test...');
-    appendResult('\n\n' + diagnosticCommand + '\n\n');
-    window.emulator.keyboard_send_text(diagnosticCommand+'\n');
-    setTimeout(function(){
-      const screen=document.querySelector('#screen_container > div');
-      const text=(screen&&screen.textContent)||'';
-      appendResult('----- terminal snapshot -----\n'+text+'\n----- end snapshot -----\n');
-      diagnosticRunning=false;
-      setStatus('Network test finished. Copy the report from the box above.');
-    },8000);
-  });
-
-  setInterval(mirrorTerminal,500);
-
-  status.textContent='Loading v86...';
-  try {
-    window.emulator=new V86({
-      wasm_path:'/v86/v86.wasm',
-      memory_size:128*1024*1024,
-      vga_memory_size:8*1024*1024,
-      screen_container:document.getElementById('screen_container'),
-      bios:{url:'/bios/seabios.bin'},
-      vga_bios:{url:'/bios/vgabios.bin'},
-      cdrom:{url:'/boot/TinyCore-11.0.iso'},
-      net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
-      network_relay_url:'wss://relay.widgetry.org/',
-      autostart:true
-    });
-    setStatus('Linux VM starting. Automatic bootstrap is disabled; run the network test when the Tiny Core prompt appears.');
-
-    let commandLineModeStarted=false;
-    function sendCommandLineBoot(){
-      if(commandLineModeStarted) return;
-      commandLineModeStarted=true;
-      setTimeout(function(){
-        try {
-          if(window.emulator&&typeof window.emulator.keyboard_send_scancodes==='function')
-            window.emulator.keyboard_send_scancodes([0x50,0x50,0x1c]);
-          else if(window.emulator&&typeof window.emulator.keyboard_send_keys==='function')
-            window.emulator.keyboard_send_keys(['ARROWDOWN','ARROWDOWN','ENTER']);
-        } catch(e){}
-      },1500);
-    }
-    function tinyCorePromptVisible(){
-      const s=document.querySelector('#screen_container > div');
-      return /tc@box|tc@/.test((s&&s.textContent)||'');
-    }
-    function waitForPrompt(){
-      const started=Date.now();
-      function check(){
-        if(tinyCorePromptVisible()){ setStatus('Tiny Core ready. Run the read-only network test.'); return; }
-        if(Date.now()-started<120000) setTimeout(check,500);
-        else setStatus('Tiny Core prompt was not detected.');
-      }
-      check();
-    }
-    sendCommandLineBoot();
-    waitForPrompt();
-  } catch(e){ setStatus('VM ERROR: '+e.message); }
+statusText('Loading v86...');
+try{
+window.emulator=new V86({
+wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
+screen_container:document.getElementById('screen_container'),
+bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
+cdrom:{url:'/boot/TinyCore-11.0.iso'},
+net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
+network_relay_url:'wss://relay.widgetry.org/',autostart:true
+});
+statusText('Linux VM starting; full bootstrap will run at Tiny Core prompt.');
+let bootSent=false;
+setTimeout(function(){
+if(bootSent)return;bootSent=true;
+try{
+if(typeof window.emulator.keyboard_send_scancodes==='function')window.emulator.keyboard_send_scancodes([0x50,0x50,0x1c]);
+else if(typeof window.emulator.keyboard_send_keys==='function')window.emulator.keyboard_send_keys(['ARROWDOWN','ARROWDOWN','ENTER'])
+}catch(e){}
+},1500);
+const started=Date.now();
+(function wait(){
+const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||'';
+if(/tc@box|tc@/.test(t)){startBootstrap();return}
+if(Date.now()-started>=120000){statusText('Tiny Core prompt not detected.');return}
+setTimeout(wait,500)
+})()
+}catch(e){statusText('VM ERROR: '+e.message)}
 };
 </script>
 </body>
