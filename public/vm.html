@@ -129,7 +129,7 @@ const started=Date.now();
 statusText('Tiny Core is booting; no commands will be sent until the shell prompt is detected.');
 (function waitForBootComplete(){
 const s=document.querySelector('#screen_container > div'),t=(s&&s.textContent)||'';
-const promptReady=/(^|\n)tc@box:[^\n]*[$#]\s*$/.test(t.trim());
+const promptReady=/tc@box\s*[:][^\n]{0,80}[$#]/.test(t) || /tc@box/.test(t);
 if(promptReady){
 bootComplete=true;
 statusText('Tiny Core boot complete; shell prompt detected. Starting bootstrap.');
