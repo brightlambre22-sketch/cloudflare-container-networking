@@ -35,9 +35,14 @@ const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origi
 let reportTimer=null,bootstrapStarted=false;
 
 function statusText(t){status.textContent=t}
+const MAX_RESULTS_CHARS=120000;
 function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
-function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
-try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
+function report(t){
+results.value+=(results.value?'\n':'')+t;
+if(results.value.length>MAX_RESULTS_CHARS)results.value=results.value.slice(-MAX_RESULTS_CHARS);
+results.scrollTop=results.scrollHeight;save()
+}
+try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s.slice(-MAX_RESULTS_CHARS)}catch(e){}
 
 document.getElementById('clear-results').onclick=function(){results.value='';save()};
 document.getElementById('copy-results').onclick=async function(){
