@@ -91,7 +91,7 @@ await new Promise(r=>setTimeout(r,250));
 async function startBootstrap(){
 if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
 const commands=[
-'echo "--- NETWORK INIT ---"; /usr/local/bin/init-network.sh 2>&1; rc=$?; printf "__DHCP_READY_DONE:%s" "$rc"',
+'echo "--- NETWORK INIT ---"; MODPROBE=/sbin/modprobe; IFCONFIG=/sbin/ifconfig; UDHCPC=/sbin/udhcpc; ROUTE=/sbin/route; echo "===== Tiny Core network initialization ====="; echo "--- kernel ---"; uname -a; echo "--- interfaces before ---"; "$IFCONFIG" -a 2>&1 || true; echo "--- loading NE2000 modules ---"; [ -x "$MODPROBE" ] && "$MODPROBE" 8390 2>&1 || true; [ -x "$MODPROBE" ] && "$MODPROBE" ne2k-pci 2>&1 || true; sleep 1; eth=""; for n in 1 2 3 4 5 6 7 8 9 10; do eth=$("$IFCONFIG" -a 2>/dev/null | sed -n "s/^\(eth[0-9]\).*/\1/p" | head -1); [ -n "$eth" ] && break; sleep 1; done; if [ -z "$eth" ]; then echo "ERROR: no eth interface detected"; "$IFCONFIG" -a 2>&1 || true; printf "__DHCP_READY_DONE:10"; else echo "Detected interface: $eth"; "$IFCONFIG" "$eth" up 2>&1 || true; rc=1; for attempt in 1 2 3; do echo "--- DHCP attempt $attempt/3 ---"; "$UDHCPC" -n -q -i "$eth" 2>&1; rc=$?; [ "$rc" -eq 0 ] && break; sleep 1; done; echo "--- interfaces after DHCP ---"; "$IFCONFIG" -a 2>&1 || true; echo "--- routes ---"; "$ROUTE" -n 2>&1 || true; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1 || true; if [ "$rc" -eq 0 ] && "$ROUTE" -n 2>/dev/null | grep -q "0.0.0.0"; then printf "__DHCP_READY_DONE:0"; else printf "__DHCP_READY_DONE:%s" "$rc"; fi; fi',
 'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz; rc=$?; printf \"__PACKAGES_%s_DONE:%s\" READY \"$rc\"',
 'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/c052da1b750198d96a6b2149191e62c4848fc948/runner/tinycore/browser-bootstrap.sh; rc=$?; printf \"__BOOTSTRAP_DOWNLOAD_%s:%s\" DONE \"$rc\"',
 'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"__BOOTSTRAP_RUN_%s:%s\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
@@ -117,12 +117,13 @@ if(marker){
 const started=Date.now();
 (function wait(){
 if(terminal().indexOf(marker)>=0){
+report('----- bootstrap screen snapshot -----\n'+terminal()+'\n----- end bootstrap screen snapshot -----\n');
 if(marker==='__DHCP_READY_DONE:'&&!terminal().includes('__DHCP_READY_DONE:0')){report('*** DHCP completed with a non-zero status. NIC/relay diagnostics were captured; stopping before downloads. ***\n');statusText('DHCP failed; NIC/relay diagnostics captured.');return} if(marker==='__PACKAGES_READY_DONE:'&&!terminal().includes('__PACKAGES_READY_DONE:0')){report('*** Package installation failed; stopping startup. ***\n');statusText('Bootstrap stopped: package setup failed.');return}
 if(marker==='__BOOTSTRAP_VERIFY_DONE:'&&terminal().includes('__BOOTSTRAP_VERIFY_DONE:failed')){report('*** Required startup files are missing; runner launch aborted. ***\n');statusText('Bootstrap stopped: required files are missing.');return}
 next();return
 }
 if(Date.now()-started>=timeouts[n]){
-report('*** TIMEOUT waiting for '+marker+'; stopping startup sequence; no later commands were sent. ***\n');
+report('*** TIMEOUT waiting for '+marker+'; stopping startup sequence; no later commands were sent. ***\n----- timeout screen snapshot -----\n'+terminal()+'\n----- end timeout screen snapshot -----\n');
 statusText('Bootstrap stopped: timed out waiting for '+marker+'. No later commands were sent.');return
 }
 setTimeout(wait,500)
@@ -132,13 +133,14 @@ setTimeout(wait,500)
 next()
 }
 
+report('\n===== NEW VM RUN =====\n');
 statusText('Loading v86...');
 try{
 window.emulator=new V86({
 wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
 screen_container:document.getElementById('screen_container'),
 bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
-cdrom:{url:'/boot/TinyCore_Pure64-11.0.iso'},
+cdrom:{url:'/boot/TinyCore_Pure64-11.0-FineproxyUDP-experimental.iso'},
 net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
 network_relay_url:'wss://relay.widgetry.org/',autostart:true
 });
