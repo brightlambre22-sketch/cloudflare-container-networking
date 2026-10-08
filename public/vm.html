@@ -173,10 +173,17 @@ else if(typeof window.emulator.keyboard_send_keys==='function')window.emulator.k
 }catch(e){}
 },1500);
 const started=Date.now();
+let fallbackStarted=false;
 (function wait(){
 const t=getVmText();
 if(/tc@box|tc@/.test(t)){startBootstrap();return}
-if(Date.now()-started>=120000){statusText('Tiny Core prompt not detected.');return}
+if(!fallbackStarted && Date.now()-started>=30000){
+fallbackStarted=true;
+report('\n*** Tiny Core prompt text was not readable by the browser; starting bootstrap fallback after 30s. ***\n');
+startBootstrap();
+return;
+}
+if(Date.now()-started>=120000){statusText('Tiny Core prompt not detected; bootstrap fallback already attempted.');return}
 setTimeout(wait,500)
 })()
 }catch(e){statusText('VM ERROR: '+e.message)}
