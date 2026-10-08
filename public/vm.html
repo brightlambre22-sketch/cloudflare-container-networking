@@ -107,7 +107,7 @@ async function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
 report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
-const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/8091661336001148b67b9e9ce25586cfe60e0b83/runner/tinycore/network-test.sh; rc=$?; printf \"__NETWORK_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/network-test.sh; rc=$?; printf \"__NETWORK_TEST_%s:%s\" DONE \"$rc\"','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/33938110e07cddb1a3d0d1ca35132cebddd6c437/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_TEST_%s:%s\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); await sendVmCommand(pc+'\n'); const st=Date.now(); (function w(){const t=screenText(); if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+'; stopping post-boot tests. ***\n');statusText('Post-boot tests stopped: timed out waiting for '+pm+'.');return;} setTimeout(w,500)})()} runPost();
+const postCommands=['wget -q -O /tmp/network-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/8091661336001148b67b9e9ce25586cfe60e0b83/runner/tinycore/network-test.sh; rc=$?; printf \"__NETWORK_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/network-test.sh; rc=$?; printf \"__NETWORK_TEST_%s:%s\" DONE \"$rc\"','wget -q -O /tmp/fineproxy-test.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/33938110e07cddb1a3d0d1ca35132cebddd6c437/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_DOWNLOAD_%s:%s\" DONE \"$rc\"','sh /tmp/fineproxy-test.sh; rc=$?; printf \"__FINEPROXY_TEST_%s:%s\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; async function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); await sendVmCommand(pc+'\n'); const st=Date.now(); (function w(){const t=screenText(); if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+'; stopping post-boot tests. ***\n');statusText('Post-boot tests stopped: timed out waiting for '+pm+'.');return;} setTimeout(w,500)})()} runPost();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
@@ -138,7 +138,7 @@ window.emulator=new V86({
 wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
 screen_container:document.getElementById('screen_container'),
 bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
-cdrom:{url:'/boot/TinyCore-11.0.iso'},
+cdrom:{url:'/boot/TinyCore_Pure64-11.0.iso'},
 net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
 network_relay_url:'wss://relay.widgetry.org/',autostart:true
 });
