@@ -20,23 +20,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install image tools
         run: sudo apt-get update && sudo apt-get install -y xorriso squashfs-tools cpio kmod libarchive-tools
-      - name: Download official Tiny Core Pure64 11.0
+      - name: Download Tiny Core bootloader and official Pure64 11.0 files
         run: |
           set -euo pipefail
-          mkdir -p work public/boot
-          curl -fL --retry 5 -o work/CorePure64-11.0.iso http://tinycorelinux.net/11.x/x86_64/release/TinyCorePure64-11.0.iso
-          curl -fL --retry 5 -o work/CorePure64-11.0.iso.md5.txt http://tinycorelinux.net/11.x/x86_64/release/TinyCorePure64-11.0.iso.md5.txt || true
-          test "$(stat -c%s work/CorePure64-11.0.iso)" -gt 1000000
-          file work/CorePure64-11.0.iso
-      - name: Extract ISO
-        run: |
-          set -euo pipefail
-          mkdir -p work/iso
-          bsdtar -xf work/CorePure64-11.0.iso -C work/iso
-          test -s work/iso/boot/vmlinuz64
-          test -s work/iso/boot/corepure64.gz
-          cp work/iso/boot/vmlinuz64 work/vmlinuz64
-          cp work/iso/boot/corepure64.gz work/corepure64.gz
+          mkdir -p work/iso work/pure public/boot
+          curl -fL --retry 5 -o work/base.iso https://i.copy.sh/TinyCore-11.0.iso
+          curl -fL --retry 5 -o work/pure/vmlinuz64 https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/vmlinuz64
+          curl -fL --retry 5 -o work/pure/corepure64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/corepure64.gz
+          curl -fL --retry 5 -o work/pure/modules64.gz https://mirror.math.princeton.edu/pub/tinycorelinux/11.x/x86_64/archive/11.0/distribution_files/modules64.gz
+          test "$(stat -c%s work/base.iso)" -gt 1000000
+          test "$(stat -c%s work/pure/vmlinuz64)" -gt 1000000
+          test "$(stat -c%s work/pure/corepure64.gz)" -gt 1000000
+          test "$(stat -c%s work/pure/modules64.gz)" -gt 1000000
+          bsdtar -xf work/base.iso -C work/iso
+          test -s work/iso/boot/isolinux/isolinux.bin
+          cp work/pure/vmlinuz64 work/vmlinuz64
+          cp work/pure/corepure64.gz work/corepure64.gz
+          cp work/pure/modules64.gz work/modules64.gz
       - name: Fetch original Tiny Core kernel modules
         shell: bash
         run: |
