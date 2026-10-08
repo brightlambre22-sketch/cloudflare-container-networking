@@ -73,33 +73,30 @@ jobs:
             curl -fL --retry 5 --retry-all-errors -o work/kernel/config-5.4.3-tinycore64 https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/src/kernel/config-5.4.3-tinycore64
             tar -xf work/kernel/linux-5.4.3-patched.txz -C work/kernel
             cp work/kernel/config-5.4.3-tinycore64 work/kernel/linux-5.4.3/.config
-            # Tiny Core's patched source tree can omit the PCI NE2000 source even when
-            # its Kconfig entry is enabled. Restore the unchanged upstream 5.4.3 driver
-            # source before building so Kbuild has the source file it expects.
             if [ ! -f work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c ]; then
               curl -fL --retry 5 --retry-all-errors -o work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c https://raw.githubusercontent.com/torvalds/linux/v5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
             fi
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c
-            # The Tiny Core patched source archive is missing the 8390 directory
-            # Kbuild file. Restore the Linux 5.4-era rule that maps NE2K_PCI
-            # to both the PCI driver and the shared 8390 core.
-            # Kbuild's external-module path is unreliable with the historical
-            # hyphenated ne2k-pci.o target on this 5.4-era tree. Build that source
-            # under an underscore-safe target name, then install the module under
-            # the conventional ne2k-pci.ko filename used by modprobe.
+            # Build the PCI driver under an underscore-safe target name because this
+            # external-module Kbuild tree does not generate the historical hyphen target.
             cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k-pci.c work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k_pci.c
             cat > work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile <<'EOF'
           # SPDX-License-Identifier: GPL-2.0
           #
           # Makefile for the 8390 network device drivers.
           #
-          obj-m := ne2k_pci.o 8390.o
+          obj-m := ne2k_pci.o
+          obj-m += 8390.o
           EOF
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/Makefile
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.c
             test -s work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k_pci.c
             make -C work/kernel/linux-5.4.3 olddefconfig
-            grep -q '^CONFIG_NE2K_PCI=m
+            grep -q '^CONFIG_NE2K_PCI=m$' work/kernel/linux-5.4.3/.config
+            make -C work/kernel/linux-5.4.3 -j2 M="$PWD/work/kernel/linux-5.4.3/drivers/net/ethernet/8390" modules
+            mkdir -p "$MODULE_ROOT/kernel/drivers/net/ethernet/8390"
+            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/8390.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/"
+            cp work/kernel/linux-5.4.3/drivers/net/ethernet/8390/ne2k_pci.ko "$MODULE_ROOT/kernel/drivers/net/ethernet/8390/ne2k-pci.ko"
           fi
 
           find "$MODULE_ROOT" -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) -print
