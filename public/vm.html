@@ -59,73 +59,31 @@ window.onload=function(){
   function startBrowserBootstrap(){
     if (window.__browserBootstrapStarted) return;
     window.__browserBootstrapStarted=true;
-    status.textContent='Tiny Core ready; running startup steps...';
+    status.textContent='Tiny Core ready; running automated diagnostics...';
 
     const commands=[
-      'sudo udhcpc -n -q -i eth0',
-      'tce-load -wil openssl-1.1.1.tcz ca-certificates.tcz',
-      'wget -q -O /tmp/cloudflare-browser-bootstrap.sh https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/browser-bootstrap.sh; rc=$?; echo __BOOTSTRAP_DOWNLOAD_DONE:$rc',
-      'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; echo __BOOTSTRAP_RUN_DONE:$rc; else echo __BOOTSTRAP_RUN_DONE:download_failed; fi',
-      'if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; else echo "__BOOTSTRAP_VERIFY_DONE:ok"; fi',
-      'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; echo __SUPERVISOR_DONE',
-      'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; echo __RUNNER_DONE'
+      'echo "===== DIAGNOSTIC START ====="; date; uname -a; id',
+      'echo "===== NETWORK ====="; (ip addr || ifconfig) 2>&1; echo "--- ROUTE ---"; (ip route || route -n) 2>&1; echo "--- DNS ---"; cat /etc/resolv.conf 2>&1',
+      'echo "===== DHCP TEST ====="; sudo udhcpc -n -q -i eth0 2>&1; echo DHCP_RC:$?',
+      'echo "===== INTERNET TEST ====="; (wget -S -O /dev/null --timeout=10 https://example.com) 2>&1; echo INTERNET_RC:$?',
+      'echo "===== GITHUB BOOTSTRAP TEST ====="; url=https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/refs/heads/main/runner/tinycore/browser-bootstrap.sh; wget -S -O /tmp/debug-browser-bootstrap.sh "$url" 2>&1; rc=$?; echo DOWNLOAD_RC:$rc; if [ -f /tmp/debug-browser-bootstrap.sh ]; then wc -c /tmp/debug-browser-bootstrap.sh; sha256sum /tmp/debug-browser-bootstrap.sh; head -n 12 /tmp/debug-browser-bootstrap.sh; fi',
+      'echo "===== REPO VERSION ====="; wget -q -O - https://api.github.com/repos/brightlambre22-sketch/cloudflare-container-networking/commits/main 2>&1 | grep -E '"sha"|"message"' | head -n 4',
+      'echo "===== LOCAL FILES ====="; ls -la /opt/mysterium /opt/cloudflare-node /etc/cloudflare-node 2>&1; echo "--- PROCESS ---"; ps 2>&1 | grep -E "myst|cloudflare|supervisor" | grep -v grep || true',
+      'echo "===== LOGS ====="; for f in /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log /var/log/cloudflare-node-boot.log; do echo "--- $f ---"; tail -n 60 "$f" 2>&1 || true; done',
+      'echo "===== DIAGNOSTIC COMPLETE ====="; echo "Copy everything from DIAGNOSTIC START through DIAGNOSTIC COMPLETE."'
     ];
 
-    function terminalText(){
-      const screen=document.querySelector('#screen_container > div');
-      return ((screen && screen.textContent)||'');
-    }
-
-    function waitForMarker(marker, timeoutMs, callback){
-      const started=Date.now();
-      function check(){
-        if(terminalText().indexOf(marker)>=0){ callback(); return; }
-        if(Date.now()-started >= timeoutMs){
-          status.textContent='Timed out waiting for '+marker;
-          return;
-        }
-        setTimeout(check,500);
-      }
-      check();
-    }
-
-    const timeouts=[60000,120000,30000,360000,15000,10000,10000];
     let index=0;
     function sendNext(){
       if(index>=commands.length){
-        status.textContent='Startup complete; showing Mysterium logs.';
-        window.emulator.keyboard_send_text('clear\n');
-        setTimeout(function(){
-          window.emulator.keyboard_send_text('echo Mysterium live console\n');
-          setTimeout(function(){
-            window.emulator.keyboard_send_text('tail -F /var/log/mysterium-node.log /var/log/myst-supervisor-console.log /var/log/cloudflare-runner-console.log 2>/dev/null\n');
-          },1000);
-        },1000);
+        status.textContent='Diagnostics complete — copy the terminal output.';
         return;
       }
-
-      const step=index++;
-      const command=commands[step];
-      const marker=[
-        null,
-        null,
-        '__BOOTSTRAP_DOWNLOAD_DONE:',
-        '__BOOTSTRAP_RUN_DONE:',
-        '__BOOTSTRAP_VERIFY_DONE:',
-        '__SUPERVISOR_DONE',
-        '__RUNNER_DONE'
-      ][step];
-
-      status.textContent='Running startup step '+(step+1)+'/'+commands.length+'...';
-      window.emulator.keyboard_send_text(command+'\n');
-
-      if(marker){
-        waitForMarker(marker,timeouts[step],sendNext);
-      } else {
-        setTimeout(sendNext,timeouts[step]);
-      }
+      const command=commands[index++];
+      status.textContent='Running diagnostic '+index+'/'+commands.length+'...';
+      window.emulator.keyboard_send_text(command+'\\n');
+      setTimeout(sendNext,index===5?15000:2500);
     }
-
     sendNext();
   }
 
