@@ -24,8 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work public/boot
-          curl -fL --retry 5 -o work/CorePure64-11.0.iso https://i.copy.sh/CorePure64-11.0.iso
-          curl -fL --retry 5 -o work/CorePure64-11.0.iso.md5.txt https://i.copy.sh/CorePure64-11.0.iso.md5.txt || true
+          curl -fL --retry 5 -o work/CorePure64-11.0.iso https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/CorePure64-11.0.iso
+          curl -fL --retry 5 -o work/CorePure64-11.0.iso.md5.txt https://distro.ibiblio.org/tinycorelinux/11.x/x86_64/release/CorePure64-11.0.iso.md5.txt || true
           test "$(stat -c%s work/CorePure64-11.0.iso)" -gt 1000000
           file work/CorePure64-11.0.iso
       - name: Extract ISO
