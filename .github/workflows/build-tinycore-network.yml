@@ -108,16 +108,16 @@ jobs:
             '  APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap' \
             > work/repacked/boot/isolinux/isolinux.cfg
 
-          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/cloudflare-tinycore-dhcp.iso work/repacked
-          test $(stat -c%s public/boot/cloudflare-tinycore-dhcp.iso) -gt 1000000
-          sha256sum public/boot/cloudflare-tinycore-dhcp.iso > public/boot/cloudflare-tinycore-dhcp.iso.sha256
+          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
+          test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
+          sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
 
       - name: Commit generated image
         run: |
           set -euxo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/boot/cloudflare-tinycore-dhcp.iso public/boot/cloudflare-tinycore-dhcp.iso.sha256
+          git add public/boot/TinyCore_Pure64-11.0.iso public/boot/TinyCore_Pure64-11.0.iso.sha256
           git diff --cached --quiet && exit 0
           git commit -m "Build Tiny Core Pure64 network-enabled ISO"
           git push
