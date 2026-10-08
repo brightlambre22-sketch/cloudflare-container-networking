@@ -37,21 +37,13 @@ jobs:
           set -euxo pipefail
           rm -rf work/root work/repacked verify
           mkdir -p work/root/usr/local/bin work/repacked/boot verify
-          # The Tiny Core initrd contains many /dev device nodes. GitHub's
-          # unprivileged runner cannot create those nodes. GNU cpio has no
-          # --exclude option, so use libarchive's bsdtar extractor to omit
-          # /dev before extraction; Tiny Core recreates its runtime device tree at boot.
+
+          # Tiny Core initrd contains device nodes that the unprivileged runner cannot create.
           gzip -dc work/pure/corepure64.gz | (cd work/root && bsdtar -xpf - --exclude 'dev/*')
           gzip -dc work/pure/modules64.gz | (cd work/root && bsdtar -xpf - --exclude 'dev/*')
 
-          # Tiny Core's base BusyBox supplies the DHCP and legacy network
-          # commands. Make the expected paths explicit so boot does not depend
-          # on whichever BusyBox symlinks happened to be in the source image.
+          # Validate Tiny Core BusyBox from inside its own root so its ELF interpreter resolves.
           test -x work/root/bin/busybox
-          # BusyBox is a Tiny Core binary whose ELF interpreter lives inside
-          # the extracted root. Running it directly from the Ubuntu runner
-          # makes the runner look for that interpreter in the host filesystem.
-          # Execute it inside the extracted root instead.
           for applet in udhcpc ifconfig route; do
             sudo chroot work/root /bin/busybox --list | grep -Fx "$applet"
             mkdir -p work/root/sbin
@@ -67,9 +59,7 @@ jobs:
           install -m 0755 runner/tinycore/init-network.sh work/root/usr/local/bin/init-network.sh
           test -x work/root/usr/local/bin/init-network.sh
 
-          # The 11.0 modules archive must contain the PCI NE2000 driver and its
-          # 8390 dependency. Fail the build instead of producing an ISO that
-          # boots but cannot create eth0.
+          # Tiny Core 11.0 must contain the PCI NE2000 driver and its 8390 dependency.
           test -d work/root/usr/local/lib/modules/5.4.3-tinycore64
           find work/root/usr/local/lib/modules/5.4.3-tinycore64 -type f -name '8390.ko*' | grep -q .
           find work/root/usr/local/lib/modules/5.4.3-tinycore64 -type f -name 'ne2k-pci.ko*' | grep -q .
@@ -81,41 +71,7 @@ jobs:
           ls -l work/root/bin/busybox work/root/sbin/udhcpc work/root/sbin/ifconfig work/root/sbin/route
           find work/root/usr/local/lib/modules/5.4.3-tinycore64 -type f \( -name '8390.ko*' -o -name 'ne2k-pci.ko*' \) -print
           echo "=== embedded network commands ==="
-          sudo chroot work/root /bin/busybox --list | grep -E '^(udhcpc|ifconfig|route|modprobe)
-          (cd work/root && find . -print0 | cpio --null -o -H newc | gzip -2) > work/repacked/boot/corepure64.gz
-          cp work/pure/vmlinuz64 work/repacked/boot/vmlinuz64
-          cp -a work/iso/boot/isolinux work/repacked/boot/
-          printf '%s\n' \
-            'DEFAULT tinycore' \
-            'PROMPT 0' \
-            'TIMEOUT 1' \
-            'LABEL tinycore' \
-            '  KERNEL /boot/vmlinuz64' \
-            '  APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap' \
-            > work/repacked/boot/isolinux/isolinux.cfg
-          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
-          test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
-          sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
-
-          # Verify the rebuilt ISO contains the complete network payload.
-          bsdtar -xf public/boot/TinyCore_Pure64-11.0.iso -C verify
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx usr/local/bin/init-network.sh
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx bin/busybox
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/udhcpc
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/ifconfig
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/route
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -E 'usr/local/lib/modules/5.4.3-tinycore64/.*/(8390|ne2k-pci)\.ko' | head -1
-
-      - name: Commit generated image
-        run: |
-          set -euxo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/boot/TinyCore_Pure64-11.0.iso public/boot/TinyCore_Pure64-11.0.iso.sha256
-          git diff --cached --quiet && exit 0
-          git commit -m "Build Pure64 11.0 with network bootstrap"
-          git push
- | sort
+          sudo chroot work/root /bin/busybox --list | grep -E '^(udhcpc|ifconfig|route|modprobe)$' | sort
 
           (cd work/root && find . -print0 | cpio --null -o -H newc | gzip -2) > work/repacked/boot/corepure64.gz
           cp work/pure/vmlinuz64 work/repacked/boot/vmlinuz64
@@ -128,6 +84,7 @@ jobs:
             '  KERNEL /boot/vmlinuz64' \
             '  APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap' \
             > work/repacked/boot/isolinux/isolinux.cfg
+
           xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
           test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
           sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
@@ -139,77 +96,7 @@ jobs:
           gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/udhcpc
           gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/ifconfig
           gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/route
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -E 'usr/local/lib/modules/5.4.3-tinycore64/.*/(8390|ne2k-pci)\.ko' | head -1
-
-      - name: Commit generated image
-        run: |
-          set -euxo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/boot/TinyCore_Pure64-11.0.iso public/boot/TinyCore_Pure64-11.0.iso.sha256
-          git diff --cached --quiet && exit 0
-          git commit -m "Build Pure64 11.0 with network bootstrap"
-          git push
- | sort
-
-          (cd work/root && find . -print0 | cpio --null -o -H newc | gzip -2) > work/repacked/boot/corepure64.gz
-          cp work/pure/vmlinuz64 work/repacked/boot/vmlinuz64
-          cp -a work/iso/boot/isolinux work/repacked/boot/
-          printf '%s\n' \
-            'DEFAULT tinycore' \
-            'PROMPT 0' \
-            'TIMEOUT 1' \
-            'LABEL tinycore' \
-            '  KERNEL /boot/vmlinuz64' \
-            '  APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap' \
-            > work/repacked/boot/isolinux/isolinux.cfg
-          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
-          test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
-          sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
-
-          # Verify the rebuilt ISO contains the complete network payload.
-          bsdtar -xf public/boot/TinyCore_Pure64-11.0.iso -C verify
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx usr/local/bin/init-network.sh
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx bin/busybox
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/udhcpc
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/ifconfig
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/route
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -E 'usr/local/lib/modules/5.4.3-tinycore64/.*/(8390|ne2k-pci)\.ko' | head -1
-
-      - name: Commit generated image
-        run: |
-          set -euxo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/boot/TinyCore_Pure64-11.0.iso public/boot/TinyCore_Pure64-11.0.iso.sha256
-          git diff --cached --quiet && exit 0
-          git commit -m "Build Pure64 11.0 with network bootstrap"
-          git push
- | sort
-
-          (cd work/root && find . -print0 | cpio --null -o -H newc | gzip -2) > work/repacked/boot/corepure64.gz
-          cp work/pure/vmlinuz64 work/repacked/boot/vmlinuz64
-          cp -a work/iso/boot/isolinux work/repacked/boot/
-          printf '%s\n' \
-            'DEFAULT tinycore' \
-            'PROMPT 0' \
-            'TIMEOUT 1' \
-            'LABEL tinycore' \
-            '  KERNEL /boot/vmlinuz64' \
-            '  APPEND initrd=/boot/corepure64.gz waitusb=1 noswap nozswap' \
-            > work/repacked/boot/isolinux/isolinux.cfg
-          xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames -volid TINYCORE11NET -eltorito-boot boot/isolinux/isolinux.bin -boot-load-size 4 -eltorito-catalog boot/isolinux/boot.cat -boot-info-table -no-emul-boot -output public/boot/TinyCore_Pure64-11.0.iso work/repacked
-          test $(stat -c%s public/boot/TinyCore_Pure64-11.0.iso) -gt 1000000
-          sha256sum public/boot/TinyCore_Pure64-11.0.iso > public/boot/TinyCore_Pure64-11.0.iso.sha256
-
-          # Verify the rebuilt ISO contains the complete network payload.
-          bsdtar -xf public/boot/TinyCore_Pure64-11.0.iso -C verify
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx usr/local/bin/init-network.sh
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx bin/busybox
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/udhcpc
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/ifconfig
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -Fx sbin/route
-          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -E 'usr/local/lib/modules/5.4.3-tinycore64/.*/(8390|ne2k-pci)\.ko' | head -1
+          gzip -dc verify/boot/corepure64.gz | cpio -it 2>/dev/null | grep -E 'usr/local/lib/modules/5.4.3-tinycore64/.*/(8390|ne2k-pci)\\.ko' | head -1
 
       - name: Commit generated image
         run: |
