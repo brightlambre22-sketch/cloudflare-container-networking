@@ -100,7 +100,7 @@ const commands=[
 'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; printf \"__RUNNER_%s\" DONE'
 ];
 const markers=['__DHCP_READY_DONE:','__PACKAGES_READY_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
-const timeouts=[180000,300000,30000,360000,15000,10000,10000];
+const timeouts=[900000,900000,30000,900000,15000,10000,10000];
 let i=0;
 function terminal(){return screenText()}
 async function next(){
