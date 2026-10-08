@@ -133,7 +133,7 @@ setTimeout(wait,500)
 next()
 }
 
-report('\n===== NEW VM RUN =====\n');
+results.value='';save();report('\n===== NEW VM RUN =====\n');
 statusText('Loading v86...');
 try{
 window.emulator=new V86({
