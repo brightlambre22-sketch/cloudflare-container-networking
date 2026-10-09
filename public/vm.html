@@ -56,6 +56,11 @@ setTimeout(()=>copyStatus.textContent='',3000)
 document.getElementById('paste-terminal').onclick=pasteIntoVm;
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
 
+function shellPrompt(text){
+const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
+const match=normalized.match(/(?:^|\n)\s*(tc@box(?::[^\n]{0,80})?\s*[$#])\s*$/);
+return match?match[1].trim():'';
+}
 function screenText(){
 if(window.emulator&&window.emulator.screen_adapter&&typeof window.emulator.screen_adapter.get_text_screen==='function'){
 return window.emulator.screen_adapter.get_text_screen().join('\n');
