@@ -24,34 +24,36 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 });
 
 test("completion markers are emitted on their own lines", () => {
-  for (const marker of [
-    'printf "\\n__RESOURCE_PREFLIGHT_DONE\\n"',
-    'printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n"',
-    'printf "\\n__BOOTSTRAP_DOWNLOAD_%s:%s\\n"',
-    'printf \\"\\n__BOOTSTRAP_RUN_%s:%s\\n\\"',
-    'printf \\"\\n__SUPERVISOR_%s\\n\\"',
-    'printf \\"\\n__RUNNER_%s\\n\\"',
-    'printf \\"\\n__NETWORK_TEST_%s:%s\\n\\"',
-    'printf \\"\\n__FINEPROXY_TEST_%s:%s\\n\\"',
-  ]) {
-    assert.ok(html.includes(marker), "expected newline-delimited marker command: " + marker);
+  for (const marker of ["__RESOURCE_PREFLIGHT_DONE", "__TLS_DOWNLOAD_DONE:", "__OPENSSL_INSTALL_DONE:", "__CA_CERTIFICATES_INSTALL_DONE:", "__EGRESS_PREFLIGHT_%s:%s", "__BOOTSTRAP_DOWNLOAD_%s:%s", "__BOOTSTRAP_RUN_%s:%s", "__SUPERVISOR_%s", "__RUNNER_%s", "__NETWORK_TEST_%s:%s", "__FINEPROXY_TEST_%s:%s"]) {
+    assert.ok(html.includes(marker), "expected completion marker: " + marker);
   }
 });
 
-test("bootstrap does not gate startup on installing the OpenSSL extension", () => {
-  assert.ok(html.includes("OPENSSL_PACKAGE_INSTALL=SKIPPED"));
-  assert.ok(html.includes("__RESOURCE_PREFLIGHT_DONE"));
-  assert.ok(!html.includes("tce-load -wil openssl-1.1.1.tcz"));
-  assert.ok(!html.includes("__OPENSSL_DONE:"));
-});
-
-test("CA certificates are downloaded before HTTPS preflight and initialized afterward", () => {
+test("TLS installs run in the background and gate HTTPS on actual files", () => {
+  assert.ok(html.includes("tce-load -w openssl-1.1.1.tcz"));
   assert.ok(html.includes("tce-load -w ca-certificates.tcz"));
-  assert.ok(html.includes("tce-load -wil ca-certificates.tcz && sh /tmp/cloudflare-browser-bootstrap.sh"));
-  assert.ok(html.includes("__CA_CERTIFICATES_DOWNLOAD_%s:%s"));
-  assert.ok(!html.includes("__CA_CERTIFICATES_STARTED:"));
+  assert.ok(html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
+  assert.ok(html.includes("openssl version >/dev/null 2>&1"));
+  assert.ok(html.includes('kill -0 "$op" 2>/dev/null'));
+  assert.ok(html.includes('kill -0 "$cp" 2>/dev/null'));
+  assert.ok(html.includes("tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1 &"));
+  assert.ok(html.includes("/usr/local/etc/ssl/certs/ca-certificate"));
+  assert.ok(html.indexOf("tce-load -i openssl-1.1.1") < html.indexOf("tce-load -i ca-certificates"));
+  assert.ok(html.indexOf("tce-load -i ca-certificates") < html.indexOf("${apiUrl}/health"));
 });
 
+test("bootstrap waits for fresh markers and the shell prompt before sending the next command", () => {
+  assert.ok(html.includes("function markerCount(text,marker)"));
+  assert.ok(html.includes("markerCount(t,marker)>markerCountBefore"));
+  assert.ok(html.includes("shellPrompt(t.slice(markerAt+marker.length))"));
+  assert.ok(html.includes("markerCount(t,pm)>markerCountBefore"));
+  assert.ok(html.includes("shellPrompt(t.slice(markerAt+pm.length))"));
+});
+
+test("VM snapshot is saved after the post-boot test sequence", () => {
+  assert.ok(html.includes("const saved=await saveVmState(false)"));
+  assert.ok(html.includes("VM state saved locally."));
+});
 test("VM bootstrap downloads use same-origin public Worker assets, not private raw GitHub URLs", () => {
   assert.ok(html.includes("${apiUrl}/health"), "HTTPS preflight should test the deployed Worker health endpoint");
   for (const asset of ["browser-bootstrap.sh", "network-test.sh", "fineproxy-test.sh"]) {
