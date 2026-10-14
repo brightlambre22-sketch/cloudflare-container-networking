@@ -21,6 +21,7 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <button id="save-vm-state" type="button">Save VM state</button>
 <button id="clear-vm-state" type="button">Delete saved state</button>
 <button id="run-network-test" type="button">Run network test</button>
+<button id="run-bootstrap" type="button">Wake shell / run bootstrap</button>
 <button id="copy-results" type="button">Copy test results</button>
 <button id="paste-terminal" type="button">Paste into VM</button>
 <button id="clear-results" type="button">Clear results</button>
@@ -138,6 +139,23 @@ report('----- screen snapshot -----\n'+screenText()+'\n----- end snapshot -----\
 },9000)
 }
 document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
+document.getElementById('run-bootstrap').onclick=async function(){
+if(!window.emulator||!vmLoaded){statusText('VM is not ready yet. Wait for the VM engine to load.');report('\n*** MANUAL START: VM is not ready. ***\n');return}
+if(bootstrapStarted){statusText('Bootstrap has already started in this page session; check the report.');return}
+try{
+if(typeof window.emulator.keyboard_send_text!=='function')throw new Error('v86 keyboard_send_text API is unavailable');
+if(typeof window.emulator.keyboard_set_enabled==='function')window.emulator.keyboard_set_enabled(true);
+statusText('Sending explicit Enter and shell test command; waiting for a stable prompt.');
+report('\n===== MANUAL SHELL WAKE =====\nSending Enter, then echo __MANUAL_BOOTSTRAP_WAKE__.\n');
+await sendVmCommand('\n');
+await sendVmCommand('echo __MANUAL_BOOTSTRAP_WAKE__\n');
+report('Keyboard API accepted the shell wake sequence.\n');
+startBootMonitor();
+}catch(e){
+report('\n*** MANUAL SHELL WAKE FAILED: '+(e&&e.message?e.message:String(e))+' ***\n');
+statusText('Keyboard input failed: '+(e&&e.message?e.message:String(e)));
+}
+};
 
 async function sendVmCommand(cmd){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('v86 keyboard API unavailable');
