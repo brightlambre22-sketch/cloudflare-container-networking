@@ -249,8 +249,9 @@ stateText('Restored saved state from '+new Date(record.savedAt).toLocaleString()
 await window.emulator.run();
 }catch(e){
 restoredSnapshot=false;
-stateText('Saved state could not be restored; starting a clean VM.');
-report('\n*** RESTORE FAILED: '+(e&&e.message?e.message:String(e))+' ***\n');
+snapshotLoadFailed=true;
+stateText('Saved state could not be restored; starting a clean VM without overwriting the stored snapshot.');
+report('\n*** RESTORE FAILED: '+(e&&e.message?e.message:String(e))+'; server snapshot preserved. ***\n');
 await window.emulator.run();
 }
 }else{
