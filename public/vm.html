@@ -152,7 +152,7 @@ if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 function mirrorLoop(){mirror();requestAnimationFrame(mirrorLoop)}
 requestAnimationFrame(mirrorLoop);
 
-const diagnosticCommand=`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
+const diagnosticCommand=`wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
 let manualCommandRunning=false;
 function runDiagnostic(label){
@@ -212,7 +212,7 @@ const commands=[
 'echo "--- OpenSSL install ---"; tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1; install_rc=$?; if [ "$install_rc" -eq 0 ] && openssl version >/dev/null 2>&1; then rc=0; else rc=1; fi; echo OPENSSL_PATH=$(command -v openssl 2>/dev/null); echo OPENSSL_INSTALL_RC=$rc; printf "\n__OPENSSL_INSTALL_""DONE:%s\n" "$rc"',
 `echo "--- CA certificate install ---"; tce-load -i ca-certificates >/tmp/ca.log 2>&1; rc=$?; echo CA_INSTALL_RC=$rc; tail -n 5 /tmp/ca.log; CA_BUNDLE=$(find /usr/local/etc/ssl/certs /etc/ssl/certs -type f -name ca-certificates.crt 2>/dev/null | head -n 1); echo CA_BUNDLE_PATH=$CA_BUNDLE; [ "$rc" -eq 0 ] && [ -s "$CA_BUNDLE" ]; rc=$?; printf "\\n__CA_CERTIFICATES_INSTALL_DONE:%s\\n" "$rc"`,
 
-`echo "--- DNS / HTTPS PREFLIGHT ---"; echo "DNS_CONFIG:"; cat /etc/resolv.conf 2>&1; until wget -S -O /dev/null ${apiUrl}/health 2>&1; do echo HTTPS_PREFLIGHT_RETRYING; sleep 2; done; rc=0; echo INTERNET_HTTPS_OK; printf "\\n__EGRESS_PREFLIGHT_DONE:%s\\n" "$rc"`,
+`echo "--- DNS / HTTPS PREFLIGHT ---"; echo "DNS_CONFIG:"; cat /etc/resolv.conf 2>&1; tries=0; rc=1; while [ "$tries" -lt 6 ]; do if wget -T 10 -t 1 -S -O /dev/null ${apiUrl}/health 2>&1; then rc=0; break; fi; tries=$((tries+1)); echo HTTPS_PREFLIGHT_RETRYING=$tries; sleep 2; done; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo HTTPS_PREFLIGHT_FAILED; fi; printf "\\n__EGRESS_PREFLIGHT_DONE:%s\\n" "$rc"`,
 `wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; rc=$?; echo NETWORK_TEST_DOWNLOAD_RC=$rc; printf "\\n__NETWORK_DOWNLOAD_DONE:%s\\n" "$rc"`,
 'sh /tmp/network-test.sh; rc=$?; printf "\\n__NETWORK_TEST_DONE:%s\\n" "$rc"',
 `wget -T 15 -t 2 -q -O /tmp/fineproxy-test.sh ${apiUrl}/runner/tinycore/fineproxy-test.sh; rc=$?; echo FINEPROXY_TEST_DOWNLOAD_RC=$rc; printf "\\n__FINEPROXY_DOWNLOAD_DONE:%s\\n" "$rc"`,
