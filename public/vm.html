@@ -87,7 +87,7 @@ const response=await fetch(snapshotUrl(),{headers,cache:'no-store'});
 if(response.status===404){stateText('No server snapshot found; starting a clean VM.');return null}
 if(!response.ok)throw new Error('server returned HTTP '+response.status);
 const manifest=await response.json();
-if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912)throw new Error('snapshot manifest is invalid');
+if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912||manifest.chunks!==Math.ceil(manifest.byteLength/SNAPSHOT_CHUNK_BYTES))throw new Error('snapshot manifest is invalid');
 const state=new Uint8Array(manifest.byteLength);
 for(let base=0;base<manifest.chunks;base+=4){
 const batch=await Promise.all(Array.from({length:Math.min(4,manifest.chunks-base)},async(_,offset)=>{
@@ -96,7 +96,7 @@ const chunkResponse=await fetch(snapshotUrl()+'/chunks/'+manifest.generation+'/'
 if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status);
 return {part,bytes:await chunkResponse.arrayBuffer()};
 }));
-for(const item of batch)state.set(new Uint8Array(item.bytes),item.part*SNAPSHOT_CHUNK_BYTES);
+for(const item of batch){const expected=Math.min(SNAPSHOT_CHUNK_BYTES,manifest.byteLength-item.part*SNAPSHOT_CHUNK_BYTES);if(item.bytes.byteLength!==expected)throw new Error('snapshot part '+(item.part+1)+' has an invalid size');state.set(new Uint8Array(item.bytes),item.part*SNAPSHOT_CHUNK_BYTES)}
 stateText('Downloading saved VM snapshot '+Math.min(base+4,manifest.chunks)+' of '+manifest.chunks+'…');
 }
 if(state.byteLength!==manifest.byteLength)throw new Error('snapshot size did not match its manifest');
