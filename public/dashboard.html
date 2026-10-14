@@ -20,43 +20,22 @@ button.primary{background:#17634f;border-color:#27896f}button:hover,a.button:hov
 <header><div><div class="brand">VM Dashboard</div><div class="sub">Virtual machine dashboard</div></div><div class="controls"><span class="sub">Account session</span><button id="logout">Lock dashboard</button></div></header>
 <main>
 <section class="card">
-<div class="card-head"><div><h1>Tiny Core VM</h1><div class="sub">Browser-based instance · VM-001</div></div><div class="status" id="vm-status"><span class="dot"></span><span>Preparing console</span></div></div>
+<div class="card-head"><div><h1>Tiny Core VM</h1><div class="sub">Browser-based instance · VM-001</div></div><div class="status" id="vm-status"><span class="dot"></span><span>Loading console</span></div></div>
 <div class="card-head"><div class="controls">
-<button class="primary" id="launch-vm">Launch VM</button><button id="open-vm">Open VM in new tab</button><button data-action="start">Start / Resume</button><button data-action="stop">Stop / Pause</button><button data-action="reboot">Reboot</button>
+<button class="primary" data-action="start">Start / Resume</button><button data-action="stop">Stop / Pause</button><button data-action="reboot">Reboot</button>
 </div></div>
 <div class="details"><span>Runtime: v86 in this browser</span><span>Autonomous startup: enabled</span><span>Account isolation: not yet enabled</span></div>
-<div class="details notice">Launch VM reloads and focuses the embedded console. Open VM in new tab opens the VM page separately. Start / Resume, Stop / Pause, and Reboot control the embedded emulator once it has loaded.</div>
+<div class="details notice">These controls operate the browser emulator. Stop pauses execution; it does not shut down a separate server-hosted VPS. Existing VM toolbar buttons remain available in the console below.</div>
 </section>
-<section class="card" id="console-card"><div class="card-head"><h2>VM Console</h2><span class="sub" id="frame-status">Waiting for VM page</span></div><iframe id="vm-frame" title="Tiny Core VM console" src="/vm.html"></iframe></section>
+<section class="card"><div class="card-head"><h2>VM Console</h2><span class="sub">Existing VM page embedded below</span></div><iframe id="vm-frame" title="Tiny Core VM console" src="/vm.html"></iframe></section>
 </main>
 <script>
-const frame=document.getElementById('vm-frame'),status=document.getElementById('vm-status'),frameStatus=document.getElementById('frame-status');
-function setStatus(message){status.lastElementChild.textContent=message}
-function inspectFrame(){
-try{
-const path=frame.contentWindow.location.pathname;
-if(path==='/access.html'){frameStatus.textContent='Session expired — sign in again';setStatus('Authentication required');return}
-if(path==='/vm.html'){frameStatus.textContent='VM page loaded';setStatus('Console loaded');return}
-frameStatus.textContent='Unexpected page: '+path;setStatus('VM page was redirected');
-}catch(e){frameStatus.textContent='Could not inspect VM page';setStatus('Console load could not be verified')}
-}
-document.getElementById('launch-vm').addEventListener('click',()=>{
-setStatus('Loading VM console…');frameStatus.textContent='Reloading VM page';
-frame.src='/vm.html?launch='+Date.now();
-document.getElementById('console-card').scrollIntoView({behavior:'smooth',block:'start'});
-});
-document.getElementById('open-vm').addEventListener('click',()=>{
-const opened=window.open('/vm.html','_blank');
-if(opened){setStatus('VM opened in a new tab');}else{setStatus('New tab blocked; use Launch VM instead')}
-});
+const frame=document.getElementById('vm-frame'),status=document.getElementById('vm-status');
 document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>{
 const action=button.dataset.action;
-try{
-if(!frame.contentWindow||frame.contentWindow.location.pathname!=='/vm.html'){setStatus('VM page is not ready; click Launch VM first');return}
 frame.contentWindow.postMessage({type:'vm-control',action},window.location.origin);
-setStatus(action==='start'?'Resume requested':action==='stop'?'Pause requested':'Reboot requested');
-}catch(e){setStatus('Could not send VM control; click Launch VM first')}
+status.lastElementChild.textContent=action==='start'?'Resume requested':action==='stop'?'Pause requested':'Reboot requested';
 }));
-frame.addEventListener('load',inspectFrame);
+frame.addEventListener('load',()=>{status.lastElementChild.textContent='Console loaded';});
 document.getElementById('logout').addEventListener('click',async()=>{try{await fetch('/api/auth/logout',{method:'POST'});}finally{window.location.replace('/access.html');}});
 </script></body></html>
