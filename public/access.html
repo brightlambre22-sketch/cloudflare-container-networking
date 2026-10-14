@@ -2,35 +2,38 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin Login</title>
+<title>Sign in · VM Dashboard</title>
 <style>
 :root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--border:#28364c;--text:#e7edf7;--muted:#9aa9bf;--accent:#6ee7b7}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,sans-serif;padding:20px}
-main{width:min(420px,100%);padding:28px;background:var(--panel);border:1px solid var(--border);border-radius:16px}
+main{width:min(430px,100%);padding:28px;background:var(--panel);border:1px solid var(--border);border-radius:16px}
 h1{margin:0 0 8px;font-size:24px}.muted{color:var(--muted);line-height:1.5;font-size:14px}
-label{display:block;margin:24px 0 8px}input{width:100%;padding:12px;border:1px solid #40506a;border-radius:8px;background:#0b1020;color:var(--text);font:inherit}
-button{width:100%;margin-top:14px;padding:12px;border:1px solid #27896f;border-radius:8px;background:#17634f;color:white;font:inherit;cursor:pointer}
-#error{min-height:24px;margin-top:12px;color:#fca5a5;font-size:14px}
+label{display:block;margin:18px 0 8px}input{width:100%;padding:12px;border:1px solid #40506a;border-radius:8px;background:#0b1020;color:var(--text);font:inherit}
+button{width:100%;margin-top:16px;padding:12px;border:1px solid #27896f;border-radius:8px;background:#17634f;color:white;font:inherit;cursor:pointer}
+.switch{background:transparent;border-color:#40506a;color:var(--text);margin-top:10px}#error{min-height:24px;margin-top:12px;color:#fca5a5;font-size:14px}
 </style></head>
 <body><main>
-<h1>Admin Login</h1>
-<p class="muted">Enter the five-digit administrator code to access the VM dashboard.</p>
-<form id="login">
-<label for="key">Administrator code (5 digits)</label>
-<input id="key" name="key" type="password" inputmode="numeric" pattern="[0-9]{5}" minlength="5" maxlength="5" autocomplete="one-time-code" placeholder="•••••" required autofocus>
-<button type="submit">Unlock dashboard</button>
+<h1 id="heading">Sign in</h1>
+<p class="muted" id="intro">Sign in to open the protected VM dashboard.</p>
+<form id="auth-form">
+<label for="username">Username</label>
+<input id="username" name="username" type="text" minlength="3" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" autocomplete="username" required autofocus>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" minlength="12" maxlength="256" autocomplete="current-password" required>
+<button id="submit" type="submit">Sign in</button>
 <div id="error" role="status" aria-live="polite"></div>
 </form>
+<button class="switch" id="switch" type="button">Create an account</button>
+<p class="muted">Passwords must be at least 12 characters. Email verification will be added later.</p>
 </main>
 <script>
-const form=document.getElementById('login'),key=document.getElementById('key'),error=document.getElementById('error');
-form.addEventListener('submit',async event=>{
-event.preventDefault();error.textContent='';
-try{
-const response=await fetch('/api/dashboard-login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key.value})});
-const data=await response.json();
-if(!response.ok)throw new Error(data.error==='dashboard_auth_not_configured'?'Admin code is not configured correctly. Check cloudflare/src/dashboard-code.ts.':data.error==='invalid_access_key'?'That access key is not correct.':'Could not unlock dashboard.');
-window.location.replace(data.redirect||'/dashboard.html');
-}catch(e){error.textContent=e.message||'Could not connect. Please try again.'}
+const form=document.getElementById('auth-form'),username=document.getElementById('username'),password=document.getElementById('password'),error=document.getElementById('error');
+const heading=document.getElementById('heading'),intro=document.getElementById('intro'),submit=document.getElementById('submit'),switchButton=document.getElementById('switch');
+let mode='login';
+function render(){const registering=mode==='register';heading.textContent=registering?'Create account':'Sign in';intro.textContent=registering?'Create a username and password to access the VM dashboard.':'Sign in to open the protected VM dashboard.';submit.textContent=registering?'Create account':'Sign in';switchButton.textContent=registering?'Already have an account? Sign in':'Create an account';password.autocomplete=registering?'new-password':'current-password';error.textContent='';}
+switchButton.addEventListener('click',()=>{mode=mode==='login'?'register':'login';render();});
+form.addEventListener('submit',async event=>{event.preventDefault();error.textContent='';submit.disabled=true;
+try{const response=await fetch('/api/auth/'+mode,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});const data=await response.json();if(!response.ok)throw new Error(data.message||'Unable to sign in. Please try again.');window.location.replace(data.redirect||'/dashboard.html');}
+catch(e){error.textContent=e.message||'Request failed. Please try again.';}finally{submit.disabled=false;}
 });
 </script></body></html>
