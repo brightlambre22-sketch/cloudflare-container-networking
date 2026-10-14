@@ -20,9 +20,9 @@ chmod 755 "$DEST"
 # itself survives the successful save. Do not trigger a backup during install:
 # the boot hook performs it only after route and verified HTTPS checks pass.
 if [ ! -f /opt/.filetool.lst ]; then
-  printf '%s\\n' 'opt' > /opt/.filetool.lst
+  printf '%s\n' 'opt' > /opt/.filetool.lst
 elif ! grep -qx 'opt' /opt/.filetool.lst; then
-  printf '%s\\n' 'opt' >> /opt/.filetool.lst
+  printf '%s\n' 'opt' > /opt/.filetool.lst
 fi
 
 echo "Installed network-only final-boot gate at $DEST"
