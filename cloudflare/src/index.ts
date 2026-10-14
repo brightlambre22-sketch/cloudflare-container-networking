@@ -41,13 +41,7 @@ function constantTimeEqual(value: string, expected: string | undefined): boolean
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
-}
-
-function fromBase64Url(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(normalized + "=".repeat((4 - (normalized.length % 4)) % 4));
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 async function sessionSignature(expiry: string, secret: string): Promise<string> {
@@ -60,10 +54,10 @@ async function sessionSignature(expiry: string, secret: string): Promise<string>
 async function validDashboardSession(request: Request, secret: string | undefined): Promise<boolean> {
   if (!secret) return false;
   const cookieHeader = request.headers.get("cookie") ?? "";
-  const match = cookieHeader.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
+  const match = cookieHeader.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
   if (!match) return false;
   const parts = match[1].split(".");
-  if (parts.length !== 2 || !/^\\d{10,16}$/.test(parts[0])) return false;
+  if (parts.length !== 2 || !/^\d{10,16}$/.test(parts[0])) return false;
   if (Number(parts[0]) <= Math.floor(Date.now() / 1000)) return false;
   const expected = await sessionSignature(parts[0], secret);
   return constantTimeEqual(parts[1], expected);
