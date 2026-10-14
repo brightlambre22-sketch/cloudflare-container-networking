@@ -60,10 +60,8 @@ function shellPrompt(text){
 const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
 const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
 const promptPattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
-for(let i=lines.length-1;i>=Math.max(0,lines.length-6);i--){
-if(promptPattern.test(lines[i]))return lines[i];
-}
-return '';
+const lastLine=lines.length?lines[lines.length-1]:'';
+return promptPattern.test(lastLine)?lastLine:'';
 }
 function screenText(){
 if(window.emulator&&window.emulator.screen_adapter&&typeof window.emulator.screen_adapter.get_text_screen==='function'){
