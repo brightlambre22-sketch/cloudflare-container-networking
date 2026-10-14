@@ -7,6 +7,10 @@ workers_dev = true
 directory = "../public"
 binding = "ASSETS"
 
+[[r2_buckets]]
+binding = "VM_SNAPSHOTS"
+bucket_name = "cloudflare-container-vm-snapshots"
+
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
