@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mysterium VM Dashboard</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--border:#28364c;--text:#e7edf7;--muted:#9aa9bf;--accent:#6ee7b7}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;border-bottom:1px solid var(--border);background:#0e1525}
+.brand{font-size:18px;font-weight:700}.sub{color:var(--muted);font-size:13px;margin-top:4px}
+main{max-width:1400px;margin:auto;padding:24px;display:grid;gap:18px}.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:18px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+h1{font-size:22px;margin:0}h2{font-size:16px;margin:0}.status{display:inline-flex;align-items:center;gap:8px;color:var(--accent);font-size:13px}.dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.controls{display:flex;gap:8px;flex-wrap:wrap}button,a.button{border:1px solid #40506a;border-radius:8px;background:#1c2940;color:var(--text);padding:9px 14px;font:inherit;cursor:pointer;text-decoration:none}
+button.primary{background:#17634f;border-color:#27896f}button:hover,a.button:hover{filter:brightness(1.15)}
+.details{display:flex;gap:28px;flex-wrap:wrap;padding:16px 20px;color:var(--muted);font-size:13px}iframe{display:block;width:100%;height:min(78vh,900px);min-height:620px;border:0;background:#111}
+.notice{color:var(--muted);font-size:13px;line-height:1.5}@media(max-width:650px){main{padding:12px}header{padding:16px}iframe{min-height:520px}}
+</style></head>
+<body>
+<header><div><div class="brand">Mysterium Compute</div><div class="sub">Virtual machine dashboard</div></div><div class="sub">Account login planned for the next phase</div></header>
+<main>
+<section class="card">
+<div class="card-head"><div><h1>Tiny Core VM</h1><div class="sub">Browser-based instance · VM-001</div></div><div class="status" id="vm-status"><span class="dot"></span><span>Loading console</span></div></div>
+<div class="card-head"><div class="controls">
+<button class="primary" data-action="start">Start / Resume</button><button data-action="stop">Stop / Pause</button><button data-action="reboot">Reboot</button>
+<a class="button" href="/vm.html" target="_blank" rel="noopener">Open VM separately</a>
+</div></div>
+<div class="details"><span>Runtime: v86 in this browser</span><span>Autonomous startup: enabled</span><span>Account isolation: not yet enabled</span></div>
+<div class="details notice">These controls operate the browser emulator. Stop pauses execution; it does not shut down a separate server-hosted VPS. Existing VM toolbar buttons remain available in the console below.</div>
+</section>
+<section class="card"><div class="card-head"><h2>VM Console</h2><span class="sub">Existing VM page embedded below</span></div><iframe id="vm-frame" title="Tiny Core VM console" src="/vm.html"></iframe></section>
+</main>
+<script>
+const frame=document.getElementById('vm-frame'),status=document.getElementById('vm-status');
+document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>{
+const action=button.dataset.action;
+frame.contentWindow.postMessage({type:'vm-control',action},window.location.origin);
+status.lastElementChild.textContent=action==='start'?'Resume requested':action==='stop'?'Pause requested':'Reboot requested';
+}));
+frame.addEventListener('load',()=>{status.lastElementChild.textContent='Console loaded';});
+</script></body></html>
