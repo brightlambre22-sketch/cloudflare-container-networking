@@ -94,7 +94,7 @@ export default {
           typeof manifest.generation !== "string" ||
           !/^[a-z0-9-]{1,40}$/.test(manifest.generation) ||
           !Number.isInteger(manifest.chunks) || (manifest.chunks as number) < 1 || (manifest.chunks as number) > 128 ||
-          !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912
+          !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912 || manifest.chunks !== Math.ceil((manifest.byteLength as number) / 8388608)
         ) return json({ error: "invalid_manifest" }, 400);
         const generation = manifest.generation;
         const count = manifest.chunks as number;
