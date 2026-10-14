@@ -2,6 +2,7 @@ import { connect } from "cloudflare:sockets";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
+import { DASHBOARD_ACCESS_CODE } from "./dashboard-code";
 export { TunnelHub, NodeRegistry, NodeRuntime };
 
 export interface Env {
@@ -11,7 +12,6 @@ export interface Env {
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
-  DASHBOARD_ACCESS_KEY?: string;
 }
 
 function authorized(header: string | null, expected: string | undefined): boolean {
@@ -50,15 +50,14 @@ async function sessionSignature(expiry: string, secret: string): Promise<string>
   return base64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(expiry))));
 }
 
-async function validDashboardSession(request: Request, secret: string | undefined): Promise<boolean> {
-  if (!secret) return false;
+async function validDashboardSession(request: Request): Promise<boolean> {
   const cookieHeader = request.headers.get("cookie") ?? "";
   const match = cookieHeader.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
   if (!match) return false;
   const parts = match[1].split(".");
   if (parts.length !== 2 || !/^\d{10,16}$/.test(parts[0])) return false;
   if (Number(parts[0]) <= Math.floor(Date.now() / 1000)) return false;
-  const expected = await sessionSignature(parts[0], secret);
+  const expected = await sessionSignature(parts[0], DASHBOARD_ACCESS_CODE);
   return constantTimeEqual(parts[1], expected);
 }
 
@@ -85,7 +84,7 @@ export default {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ error: "origin_not_allowed" }, 403);
-      if (!env.DASHBOARD_ACCESS_KEY || !/^\d{5}$/.test(env.DASHBOARD_ACCESS_KEY)) {
+      if (!/^\d{5}$/.test(DASHBOARD_ACCESS_CODE)) {
         return json({ error: "dashboard_auth_not_configured" }, 503);
       }
       let submittedKey = "";
@@ -95,11 +94,11 @@ export default {
       } catch {
         return json({ error: "invalid_request" }, 400);
       }
-      if (!constantTimeEqual(submittedKey, env.DASHBOARD_ACCESS_KEY)) {
+      if (!constantTimeEqual(submittedKey, DASHBOARD_ACCESS_CODE)) {
         return json({ error: "invalid_access_key" }, 401);
       }
       const expiry = String(Math.floor(Date.now() / 1000) + SESSION_SECONDS);
-      const signature = await sessionSignature(expiry, env.DASHBOARD_ACCESS_KEY);
+      const signature = await sessionSignature(expiry, DASHBOARD_ACCESS_CODE);
       return new Response(JSON.stringify({ ok: true, redirect: "/dashboard.html" }), {
         status: 200,
         headers: {
@@ -310,7 +309,7 @@ export default {
     }
 
     if (url.pathname === "/") {
-      return Response.redirect(new URL("/dashboard.html", url), 302);
+      return Response.redirect(new URL("/access.html", url), 302);
     }
 
     const protectedAsset =
@@ -319,7 +318,7 @@ export default {
       url.pathname.startsWith("/v86/") ||
       url.pathname.startsWith("/boot/");
 
-    if (protectedAsset && !(await validDashboardSession(request, env.DASHBOARD_ACCESS_KEY))) {
+    if (protectedAsset && !(await validDashboardSession(request))) {
       if (url.pathname.endsWith(".html") || request.headers.get("accept")?.includes("text/html")) {
         return Response.redirect(new URL("/access.html", url), 302);
       }
