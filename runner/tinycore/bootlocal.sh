@@ -79,7 +79,7 @@ log "HTTPS/TLS check passed: $HTTPS_TEST_URL"
 # as persistent state.
 command -v filetool.sh >/dev/null 2>&1 || fail "filetool.sh not found; state was not saved"
 [ -r /opt/.backup_device ] || fail "/opt/.backup_device missing; backup target is unknown"
-BACKUP_DEVICE="$(tr -d '\\r\\n' </opt/.backup_device)"
+BACKUP_DEVICE="$(cat /opt/.backup_device)"
 [ -n "$BACKUP_DEVICE" ] || fail "backup target is empty; state was not saved"
 case "$BACKUP_DEVICE" in
   /tmp|/tmp/*|tmp|tmp/*|/dev/shm|/dev/shm/*)
