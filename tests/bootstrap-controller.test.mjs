@@ -7,7 +7,7 @@ const html = readFileSync(new URL("../public/vm.html", import.meta.url), "utf8")
 const bootstrap = readFileSync(new URL("../public/runner/tinycore/browser-bootstrap.sh", import.meta.url), "utf8");
 
 test("inline browser scripts parse", () => {
-  const scripts = [...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi)];
+  const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
   assert.ok(scripts.some((match) => match[1].trim()), "expected an inline script");
   for (const match of scripts) {
     const source = match[1].trim();
@@ -16,14 +16,15 @@ test("inline browser scripts parse", () => {
 });
 
 test("shell prompt detection tolerates blank rows but only accepts the current last line", () => {
-  const match = html.match(/function shellPrompt\\(text\\)\\s*\\{[\\s\\S]*?\\n\\}/);
+  const match = html.match(/function shellPrompt\(text\)\s*\{[\s\S]*?\n\}/);
   assert.ok(match, "shellPrompt function should exist");
   const shellPrompt = vm.runInNewContext("(" + match[0] + ")");
-  assert.equal(shellPrompt("boot output\\n tc@box:~$\\n\\n\\n"), "tc@box:~$");
-  assert.equal(shellPrompt("tc@box:~$\\ncommand still running\\n\\n"), "");
+  assert.equal(shellPrompt("boot output\n tc@box:~$\n\n\n"), "tc@box:~$");
+  assert.equal(shellPrompt("tc@box:~$\ncommand still running\n\n"), "");
 });
 
 test("startup completion markers match the sequential command controller", () => {
+  const normalized = html.replace(/"\s*"/g, "");
   for (const marker of [
     "DHCP_DONE",
     "__RESOURCE_PREFLIGHT_DONE",
@@ -36,8 +37,6 @@ test("startup completion markers match the sequential command controller", () =>
     "__FINEPROXY_DOWNLOAD_DONE:",
     "__FINEPROXY_TEST_DONE:"
   ]) {
-    // Some shell printf formats are split across adjacent quoted strings in HTML.
-    const normalized = html.replace(/"\\s*"/g, "");
     assert.ok(normalized.includes(marker), "expected startup marker: " + marker);
   }
 });
@@ -89,7 +88,7 @@ test("startup intentionally has no command or network timeouts", () => {
   assert.ok(!html.includes("setTimeout("), "startup must not use JavaScript timeouts");
   assert.ok(!html.includes("BOOT_TIMEOUT_MS"));
   assert.ok(!html.includes("wget -T "));
-  assert.ok(!/udhcpc[^\\n]*\\s-t\\s*[0-9]/.test(html), "DHCP should not have a retry-count timeout");
+  assert.ok(!/udhcpc[^\n]*\s-t\s*[0-9]/.test(html), "DHCP should not have a retry-count timeout");
   assert.ok(html.includes("until wget -S -O /dev/null ${apiUrl}/health"));
   assert.ok(html.includes("sleep 2"));
 });
