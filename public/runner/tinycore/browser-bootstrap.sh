@@ -80,7 +80,7 @@ fi
 fetch_verified() {
   name="$1"
   expected="$2"
-  tmp="/tmp/$name.$"
+  tmp="/tmp/${name}.${NODE_ID}.tmp"
   wget -q -O "$tmp" "$RAW_BASE/$name"
   actual="$(sha256_file "$tmp")"
   [ "$actual" = "$expected" ] || { echo "SHA-256 mismatch: $name" >&2; rm -f "$tmp"; exit 1; }
