@@ -18,11 +18,10 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <body>
 <section id="login-panel">
   <h2>Open your VM</h2>
-  <p>Regular users enter their username. Admin User A and B use the five-digit admin code and have separate snapshots.</p>
+  <p>Choose one of two regular-user accounts or the single admin account. Only the admin needs the five-digit code; each account has a separate server-side snapshot.</p>
   <form id="login-form">
     <label for="access-type">Access</label>
-    <select id="access-type"><option value="user">Regular user</option><option value="admin-user-a">Admin User A</option><option value="admin-user-b">Admin User B</option></select>
-    <input id="user-name" type="text" maxlength="59" autocomplete="username" placeholder="Username" required>
+    <select id="access-type"><option value="regular-user-a">Regular User A</option><option value="regular-user-b">Regular User B</option><option value="admin">Admin</option></select>
     <input id="admin-code" type="password" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="current-password" placeholder="5-digit admin code" hidden>
     <button id="open-vm" type="submit">Open VM</button><span id="login-message" role="status" aria-live="polite"></span>
   </form>
@@ -333,13 +332,22 @@ requestAnimationFrame(waitForBootComplete);
 };
 window.onload=function(){
 const panel=document.getElementById('login-panel'),form=document.getElementById('login-form'),access=document.getElementById('access-type');
-const username=document.getElementById('user-name'),code=document.getElementById('admin-code'),message=document.getElementById('login-message');
-function updateFields(){const admin=access.value!=='user';username.hidden=admin;username.required=!admin;code.hidden=!admin;code.required=admin}
+const code=document.getElementById('admin-code'),message=document.getElementById('login-message');
+function updateFields(){const admin=access.value==='admin';code.hidden=!admin;code.required=admin}
 access.addEventListener('change',updateFields);updateFields();
 form.addEventListener('submit',async function(event){
-event.preventDefault();message.textContent='';let identity;
-if(access.value==='user'){const name=username.value.trim();if(!/^[a-zA-Z0-9._-]{1,59}$/.test(name)){message.textContent='Use 1–59 letters, numbers, dots, underscores or hyphens.';return}identity='user-'+name.toLowerCase()}
-else{const adminCode=code.value.trim();if(!/^[0-9]{5}$/.test(adminCode)){message.textContent='Enter the five-digit admin code.';return}message.textContent='Checking admin code…';try{const response=await fetch('/api/admin/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:adminCode})});if(!response.ok)throw new Error('That admin code was not accepted.');window.snapshotAdminCode=adminCode;identity=access.value}catch(error){message.textContent=error.message||'Admin access check failed.';return}}
+event.preventDefault();message.textContent='';
+let identity=access.value;
+if(identity==='admin'){
+const adminCode=code.value.trim();
+if(!/^[0-9]{5}$/.test(adminCode)){message.textContent='Enter the five-digit admin code.';return}
+message.textContent='Checking admin code…';
+try{
+const response=await fetch('/api/admin/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:adminCode})});
+if(!response.ok)throw new Error('That admin code was not accepted.');
+window.snapshotAdminCode=adminCode;
+}catch(error){message.textContent=error.message||'Admin access check failed.';return}
+}
 window.snapshotIdentity=identity;document.body.classList.add('logged-in');panel.hidden=true;window.startVm();
 });
 };
