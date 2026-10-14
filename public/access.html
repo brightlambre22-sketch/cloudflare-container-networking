@@ -24,16 +24,18 @@ button{width:100%;margin-top:16px;padding:12px;border:1px solid #27896f;border-r
 <div id="error" role="status" aria-live="polite"></div>
 </form>
 <button class="switch" id="switch" type="button">Create an account</button>
+<button class="switch" id="admin-switch" type="button">Use administrator access key</button>
 <p class="muted">Passwords must be at least 12 characters. Email verification will be added later.</p>
 </main>
 <script>
 const form=document.getElementById('auth-form'),username=document.getElementById('username'),password=document.getElementById('password'),error=document.getElementById('error');
-const heading=document.getElementById('heading'),intro=document.getElementById('intro'),submit=document.getElementById('submit'),switchButton=document.getElementById('switch');
+const heading=document.getElementById('heading'),intro=document.getElementById('intro'),submit=document.getElementById('submit'),switchButton=document.getElementById('switch'),adminSwitch=document.getElementById('admin-switch'),usernameLabel=document.querySelector('label[for="username"]'),passwordLabel=document.querySelector('label[for="password"]');
 let mode='login';
-function render(){const registering=mode==='register';heading.textContent=registering?'Create account':'Sign in';intro.textContent=registering?'Create a username and password to access the VM dashboard.':'Sign in to open the protected VM dashboard.';submit.textContent=registering?'Create account':'Sign in';switchButton.textContent=registering?'Already have an account? Sign in':'Create an account';password.autocomplete=registering?'new-password':'current-password';error.textContent='';}
+function render(){const registering=mode==='register',admin=mode==='admin';heading.textContent=registering?'Create account':admin?'Administrator access':'Sign in';intro.textContent=registering?'Create a username and password to access the VM dashboard.':admin?'Enter the DASHBOARD_ACCESS_KEY configured in Cloudflare.':'Sign in to open the protected VM dashboard.';usernameLabel.hidden=admin;username.hidden=admin;passwordLabel.textContent=admin?'Administrator access key':'Password';password.autocomplete=registering?'new-password':admin?'off':'current-password';password.minLength=admin?1:12;submit.textContent=registering?'Create account':admin?'Unlock dashboard':'Sign in';switchButton.textContent=registering?'Already have an account? Sign in':'Create an account';adminSwitch.textContent=admin?'Back to username login':'Use administrator access key';error.textContent='';}
 switchButton.addEventListener('click',()=>{mode=mode==='login'?'register':'login';render();});
+adminSwitch.addEventListener('click',()=>{mode=mode==='admin'?'login':'admin';render();});
 form.addEventListener('submit',async event=>{event.preventDefault();error.textContent='';submit.disabled=true;
-try{const response=await fetch('/api/auth/'+mode,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});const data=await response.json();if(!response.ok)throw new Error(data.message||'Unable to sign in. Please try again.');window.location.replace(data.redirect||'/dashboard.html');}
+try{const endpoint=mode==='admin'?'/api/auth/admin-key':'/api/auth/'+mode;const payload=mode==='admin'?{key:password.value}:{username:username.value,password:password.value};const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data.message||'Unable to sign in. Please try again.');window.location.replace(data.redirect||'/dashboard.html');}
 catch(e){error.textContent=e.message||'Request failed. Please try again.';}finally{submit.disabled=false;}
 });
 </script></body></html>
