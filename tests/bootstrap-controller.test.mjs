@@ -24,11 +24,13 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 });
 
 test("VM uses a built ISO asset, a single supported relay configuration, and retries DHCP until a lease is valid", () => {
-  assert.ok(html.includes("cdrom:{url:'/boot/TinyCore_Pure64-11.0.iso'}"), "VM ISO path should match the main-branch build workflow");
+  assert.ok(html.includes("cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'}"), "VM should use the existing NIC-enabled experimental ISO");
   assert.ok(html.includes("net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'}"));
-  assert.ok(!html.includes("network_relay_url:"), "do not configure the deprecated relay option alongside net_device");
-  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v2'"), "network changes should invalidate stale saved NIC state");
-  assert.ok(html.includes("while :; do /sbin/udhcpc -f -n -q -i eth0;"), "DHCP should retry instead of abandoning the relay after three discovers");
+  assert.ok(html.includes("network_relay_url:'wss://relay.widgetry.org/'"), "retain relay fallback for this deployed v86 runtime");
+  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v3'"), "network changes should invalidate stale saved NIC state");
+  assert.ok(html.includes("while :; do /sbin/udhcpc -f -n -q -i \"$iface\";"), "DHCP should retry instead of abandoning the relay after three discovers");
+  assert.ok(html.includes("/sbin/modprobe ne2k-pci"), "try loading the NE2000 PCI driver when no interface is present");
+  assert.ok(html.includes("NIC_MISSING"), "report driver diagnostics instead of retrying DHCP forever without a NIC");
   assert.ok(html.includes("DHCP_RETRYING_NO_LEASE"));
   assert.ok(html.includes("echo DHCP_OK; break"));
 });
