@@ -45,6 +45,15 @@ else if(event.data.action==='reboot'){if(window.emulator&&typeof window.emulator
 });
 function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
 function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
+window.addEventListener('error',function(event){
+ const message='BROWSER ERROR: '+(event.message||'unknown error')+(event.filename?' ('+event.filename+':'+event.lineno+')':'');
+ statusText(message);report('\\n'+message+'\\n');
+});
+window.addEventListener('unhandledrejection',function(event){
+ const reason=event.reason&&event.reason.message?event.reason.message:String(event.reason||'unknown rejection');
+ const message='UNHANDLED PROMISE REJECTION: '+reason;
+ statusText(message);report('\\n'+message+'\\n');
+});
 try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
 
 document.getElementById('clear-results').onclick=function(){results.value='';save()};
@@ -160,7 +169,15 @@ cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'},
 net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
 network_relay_url:'wss://relay.widgetry.org/',autostart:true
 });
-statusText('Linux VM starting; full bootstrap will run at Tiny Core prompt.');
+if(window.emulator&&typeof window.emulator.add_listener==='function'){
+ window.emulator.add_listener('emulator-ready',function(){statusText('v86 initialized; waiting for Tiny Core shell prompt.');report('\\nV86 EVENT: emulator-ready\\n');});
+ window.emulator.add_listener('emulator-started',function(){report('\\nV86 EVENT: emulator-started\\n');});
+ window.emulator.add_listener('emulator-stopped',function(){report('\\nV86 EVENT: emulator-stopped\\n');});
+ window.emulator.add_listener('download-progress',function(event){
+  if(event&&typeof event.loaded==='number'&&typeof event.total==='number'&&event.total>0){statusText('Loading VM resources: '+Math.round(event.loaded/event.total*100)+'%');}
+ });
+}
+statusText('v86 object created; waiting for emulator initialization.');
 const started=Date.now();
 let promptCandidate='',promptCandidateSince=0;
 const BOOT_TIMEOUT_MS=15*60*1000,PROMPT_STABLE_MS=2000;
