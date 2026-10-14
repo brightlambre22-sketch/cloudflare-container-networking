@@ -23,6 +23,12 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
   assert.equal(shellPrompt("tc@box:~$\ncommand still running\n\n"), "");
 });
 
+test("startup prompt detection supports changed hostnames and explicitly wakes the shell before the first command", () => {
+  assert.ok(html.includes("[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+"), "prompt detection should not depend on one exact hostname");
+  assert.ok(html.includes("KEYBOARD INPUT WAKE"));
+  assert.ok(html.includes("await sendVmCommand('\\n')"));
+});
+
 test("startup completion markers match the sequential command controller", () => {
   const normalized = html.replace(/"\s*"/g, "");
   for (const marker of [
