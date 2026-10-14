@@ -25,7 +25,7 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 
 test("completion markers are emitted on their own lines", () => {
   for (const marker of [
-    'printf "\\n__OPENSSL_DONE:%s\\n"',
+    'printf "\\n__RESOURCE_PREFLIGHT_DONE\\n"',
     'printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n"',
     'printf "\\n__BOOTSTRAP_DOWNLOAD_%s:%s\\n"',
     'printf \\"\\n__BOOTSTRAP_RUN_%s:%s\\n\\"',
@@ -36,6 +36,13 @@ test("completion markers are emitted on their own lines", () => {
   ]) {
     assert.ok(html.includes(marker), "expected newline-delimited marker command: " + marker);
   }
+});
+
+test("bootstrap does not gate startup on installing the OpenSSL extension", () => {
+  assert.ok(html.includes("OPENSSL_PACKAGE_INSTALL=SKIPPED"));
+  assert.ok(html.includes("__RESOURCE_PREFLIGHT_DONE"));
+  assert.ok(!html.includes("tce-load -wil openssl-1.1.1.tcz"));
+  assert.ok(!html.includes("__OPENSSL_DONE:"));
 });
 
 test("CA certificates are downloaded before HTTPS preflight and initialized afterward", () => {
