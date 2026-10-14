@@ -76,17 +76,13 @@ async function initializeSnapshotIdentity(){
  snapshotReady=true;
  return snapshotGet();
 }
-function restoreEmulatorState(state){
- return new Promise((resolve,reject)=>{
-  try{window.emulator.restore_state(state,(error)=>error?reject(error):resolve());}
-  catch(error){reject(error);}
- });
+async function restoreEmulatorState(state){
+ await window.emulator.restore_state(state);
 }
-function exportEmulatorState(){
- return new Promise((resolve,reject)=>{
-  try{window.emulator.save_state((error,state)=>{if(error)reject(error);else if(state==null)reject(new Error('v86 returned an empty snapshot'));else resolve(state);});}
-  catch(error){reject(error);}
- });
+async function exportEmulatorState(){
+ const state=await window.emulator.save_state();
+ if(state==null)throw new Error('v86 returned an empty snapshot');
+ return state;
 }
 async function saveVmSnapshot(reason){
  if(!snapshotReady||snapshotSaveBusy||!window.emulator||typeof window.emulator.save_state!=='function')return;
