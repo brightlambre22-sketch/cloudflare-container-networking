@@ -1,145 +1,27 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mysterium Browser VM</title>
-<style>
-body{margin:0;background:#111;color:#ddd;font-family:monospace}
-#status{padding:8px}
-#toolbar{padding:8px;background:#181818;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-button{font:inherit;padding:6px 10px;cursor:pointer}
-#copy-status{color:#8f8}
-#myst-log{margin:0;padding:8px;height:220px;overflow:auto;white-space:pre-wrap;user-select:text;background:#000;color:#ddd;border-top:1px solid #333}
-#results{box-sizing:border-box;width:100%;min-height:300px;background:#000;color:#ddd;border:1px solid #444;padding:8px;font:14px monospace;resize:vertical}
-#screen_container{width:100%;min-height:480px}
-</style>
-</head>
-<body>
-<div id="status">Starting Linux VM...</div>
-<div id="toolbar">
-<button id="save-vm-state" type="button">Save VM state</button>
-<button id="clear-vm-state" type="button">Delete saved state</button>
-<button id="run-network-test" type="button">Run network test</button>
-<button id="run-bootstrap" type="button">Wake shell / run bootstrap</button>
-<button id="copy-results" type="button">Copy test results</button>
-<button id="paste-terminal" type="button">Paste into VM</button>
-<button id="clear-results" type="button">Clear results</button>
-<span id="copy-status"></span>
-<span id="state-status" aria-live="polite">Saved state: checkingâ¦</span>
-</div>
-<textarea id="results" spellcheck="false" placeholder="Full startup/network report. It is saved locally so you can copy it in sections."></textarea>
-<pre id="myst-log">Waiting for Tiny Core...</pre>
-<div id="screen_container"><div></div><canvas></canvas></div>
-<script src="/v86/libv86.js"></script>
-<script>
-window.onload=function(){
-const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('myst-log'),copyStatus=document.getElementById('copy-status'),stateStatus=document.getElementById('state-status');
-const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
-let reportTimer=null,bootstrapStarted=false,bootComplete=false;
-
-function statusText(t){status.textContent=t}
-const SNAPSHOT_DB='tinycore-v86-snapshots',SNAPSHOT_STORE='snapshots',SNAPSHOT_KEY='tinycore-main-v1';
-let snapshotDb=null,snapshotReady=false,snapshotBusy=false,vmLoaded=false,restoredSnapshot=false,autosaveTimer=null;
-function stateText(t){stateStatus.textContent=t}
-function openSnapshotDb(){
-return new Promise((resolve,reject)=>{
-const request=indexedDB.open(SNAPSHOT_DB,1);
-request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(SNAPSHOT_STORE))db.createObjectStore(SNAPSHOT_STORE)};
-request.onsuccess=()=>{snapshotDb=request.result;resolve(snapshotDb)};
-request.onerror=()=>reject(request.error||new Error('Could not open browser storage'));
-});
-}
-function snapshotTransaction(mode,action,value){
-return new Promise((resolve,reject)=>{
-const tx=snapshotDb.transaction(SNAPSHOT_STORE,mode),store=tx.objectStore(SNAPSHOT_STORE);
-let req;
-if(action==='get')req=store.get(SNAPSHOT_KEY);
-else if(action==='put')req=store.put(value,SNAPSHOT_KEY);
-else req=store.delete(SNAPSHOT_KEY);
-tx.oncomplete=()=>resolve(req?req.result:undefined);
-tx.onerror=()=>reject(tx.error||new Error('Browser storage operation failed'));
-tx.onabort=()=>reject(tx.error||new Error('Browser storage operation was aborted'));
-});
-}
-async function saveVmState(manual=true){
-if(snapshotBusy){if(manual)stateText('A save is already in progress.');return}
-if(!vmLoaded||!window.emulator||typeof window.emulator.save_state!=='function'){if(manual)stateText('VM is not ready to save yet.');return}
-snapshotBusy=true;
-if(manual)stateText('Saving VM memory and CPU stateâ¦');
-try{
-const state=await window.emulator.save_state();
-await snapshotTransaction('readwrite','put',{state,savedAt:Date.now(),version:1});
-stateText('Saved locally at '+new Date().toLocaleTimeString());
-}catch(e){
-stateText('Save failed: '+(e&&e.message?e.message:'browser storage unavailable'));
-report('\n*** VM STATE SAVE FAILED: '+(e&&e.message?e.message:String(e))+' ***\n');
-}finally{snapshotBusy=false}
-}
-async function loadVmState(){
-try{await openSnapshotDb();snapshotReady=true;const record=await snapshotTransaction('readonly','get');return record&&record.version===1?record:null}
-catch(e){snapshotReady=false;stateText('Saved state unavailable; browser storage may be blocked.');return null}
-}
-document.getElementById('save-vm-state').onclick=()=>saveVmState(true);
-document.getElementById('clear-vm-state').onclick=async()=>{
-if(!snapshotReady){stateText('Saved-state storage is not ready.');return}
-if(!confirm('Delete the saved VM state from this browser? This cannot be undone.'))return;
-try{await snapshotTransaction('readwrite','delete');stateText('Saved VM state deleted. The current VM keeps running.')}
-catch(e){stateText('Could not delete saved state.')}
-};
-function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
-function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
-try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
-
-document.getElementById('clear-results').onclick=function(){results.value='';save()};
-document.getElementById('copy-results').onclick=async function(){
-try{await navigator.clipboard.writeText(results.value)}catch(e){results.focus();results.select();document.execCommand('copy')}
-copyStatus.textContent='Results copied.';requestAnimationFrame(()=>copyStatus.textContent='',1800)
-};
-async function pasteIntoVm(){
-try{
-const text=await navigator.clipboard.readText();if(!text)throw new Error('empty');
-if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('VM not ready');
-window.emulator.keyboard_send_text(text);if(!/[\r\n]$/.test(text))window.emulator.keyboard_send_text('\n');
-copyStatus.textContent='Pasted and executed.'
-}catch(e){copyStatus.textContent='Paste blocked; use the button again.'}
-requestAnimationFrame(()=>copyStatus.textContent='',3000)
-}
-document.getElementById('paste-terminal').onclick=pasteIntoVm;
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
-
-function shellPrompt(text){
-const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
-const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
-const promptPattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
-const lastLine=lines.length?lines[lines.length-1]:'';
-return promptPattern.test(lastLine)?lastLine:'';
-}
-function screenText(){
-if(window.emulator&&window.emulator.screen_adapter&&typeof window.emulator.screen_adapter.get_text_screen==='function'){
-return window.emulator.screen_adapter.get_text_screen().join('\n');
-}
-const s=document.querySelector('#screen_container > div');
-return(s&&s.textContent)||'';
-}
-function mirror(){
-const t=screenText().trim();
-if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
-}
-function mirrorLoop(){mirror();requestAnimationFrame(mirrorLoop)}
-requestAnimationFrame(mirrorLoop);
-
-const diagnosticCommand=`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
-
+let manualCommandRunning=false;
 function runDiagnostic(label){
-if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
-report('\n\n===== '+label+' =====\n'+diagnosticCommand+'\n');
-window.emulator.keyboard_send_text(diagnosticCommand+'\n');
-requestAnimationFrame(function(){
-report('----- screen snapshot -----\n'+screenText()+'\n----- end snapshot -----\n')
-},9000)
+if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}
+if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM keyboard API unavailable.');return}
+manualCommandRunning=true;
+const marker='__MANUAL_DIAGNOSTIC_DONE__:',before=screenText().split(marker).length-1;
+const command=diagnosticCommand+'; rc=$?; printf "\\n__MANUAL_DIAGNOSTIC_DONE__:%s\\n" "$rc"';
+report('\n\n===== '+label+' =====\n'+command+'\n');
+(async()=>{
+try{
+await sendVmCommand(command+'\n');
+for(;;){
+const t=screenText(),at=t.lastIndexOf(marker);
+if(t.split(marker).length-1>before&&shellPrompt(t.slice(at+marker.length))){
+report('----- screen snapshot -----\n'+t+'\n----- end snapshot -----\n');
+break;
 }
-document.getElementById('run-network-test').onclick=function(){runDiagnostic('MANUAL NETWORK TEST');statusText('Network test requested; results are being captured.')};
+await new Promise(resolve=>requestAnimationFrame(resolve));
+}
+}catch(e){report('\n*** DIAGNOSTIC FAILED: '+e.message+' ***\n')}
+finally{manualCommandRunning=false}
+})();
+}
+document.getElementById('run-network-test').onclick=function(){if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}runDiagnostic('MANUAL NETWORK TEST');statusText('Network test running; waiting for the shell to finish.')};
 document.getElementById('run-bootstrap').onclick=async function(){
 if(!window.emulator||!vmLoaded){statusText('VM is not ready yet. Wait for the VM engine to load.');report('\n*** MANUAL START: VM is not ready. ***\n');return}
 if(bootstrapStarted){statusText('Bootstrap has already started in this page session; check the report.');return}
@@ -166,13 +48,13 @@ await window.emulator.keyboard_send_text(cmd,2);
 }
 
 async function startBootstrap(){
-if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running sequential network/TLS preflight. Mysterium is disabled.');
+if(bootstrapStarted)return;if(manualCommandRunning){requestAnimationFrame(startBootstrap);return}bootstrapStarted=true;statusText('Tiny Core ready; running sequential network/TLS preflight. Mysterium is disabled.');
 const commands=[
 `echo "--- NETWORK INIT ---"; id; sudo -n sh -c 'set +e; /sbin/ifconfig eth0 up; /sbin/udhcpc -f -n -q -i eth0; rc=$?; echo DHCP_RC=$rc; /sbin/ifconfig eth0; /sbin/route -n; if [ "$rc" -eq 0 ] && /sbin/ifconfig eth0 | grep -Eq "inet (addr:)?([0-9]{1,3}[.]){3}[0-9]{1,3}" && /sbin/route -n | grep -Eq "^0[.]0[.]0[.]0[[:space:]]+[1-9][0-9]*[.]"; then echo DHCP_OK; else echo DHCP_FAIL; fi'; echo DHCP_''DONE`,
 'echo "--- RESOURCE PREFLIGHT ---"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo "TLS prerequisite installation will run before HTTPS preflight."; printf "\n__RESOURCE_""PREFLIGHT_DONE\n"',
 'echo "--- TLS package downloads ---"; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; tce-load -w ca-certificates.tcz; ca_dl=$?; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl; printf "\n__TLS_DOWNLOAD_""DONE:%s:%s\n" "$openssl_dl" "$ca_dl"',
-'echo "--- OpenSSL install ---"; tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1; rc=$?; openssl version >/dev/null 2>&1; rc=$?; echo OPENSSL_PATH=$(command -v openssl 2>/dev/null); echo OPENSSL_INSTALL_RC=$rc; printf "\n__OPENSSL_INSTALL_""DONE:%s\n" "$rc"',
-"echo \"--- CA certificate install (foreground; wait for completion) ---\"; find /usr/local/etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl/certs -type f 2>/dev/null | sort > /tmp/ca-files-before.txt; tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1; ca_ir=$?; echo CA_INSTALL_RC=$ca_ir; tail -n 12 /tmp/ca-certificates-install.log; find /usr/local/etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl/certs -type f 2>/dev/null | sort > /tmp/ca-files-after.txt; echo \"--- Newly installed CA files ---\"; new_count=0; while IFS= read -r f; do if ! grep -F -x -q \"$f\" /tmp/ca-files-before.txt; then echo \"CA_INSTALLED_FILE=$f\"; new_count=$((new_count+1)); fi; done < /tmp/ca-files-after.txt; echo CA_INSTALLED_FILE_COUNT=$new_count; CA_BUNDLE=; for f in /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt /usr/local/share/ca-certificates/cacert.pem /etc/ssl/cert.pem; do if [ -s \"$f\" ]; then CA_BUNDLE=\"$f\"; break; fi; done; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/etc/ssl/certs ]; then set -- /usr/local/etc/ssl/certs/*.pem; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/share/ca-certificates/mozilla ]; then set -- /usr/local/share/ca-certificates/mozilla/*.crt; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/share/ca-certificates ]; then set -- /usr/local/share/ca-certificates/*.crt; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ \"$ca_ir\" -eq 0 ] && [ -s \"$CA_BUNDLE\" ]; then rc=0; else rc=1; fi; echo CA_BUNDLE_PATH=\\${CA_BUNDLE:-MISSING}; printf \"\\n__CA_CERTIFICATES_INSTALL_DONE:%s\\n\" \"$rc\""
+'echo "--- OpenSSL install ---"; tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1; install_rc=$?; if [ "$install_rc" -eq 0 ] && openssl version >/dev/null 2>&1; then rc=0; else rc=1; fi; echo OPENSSL_PATH=$(command -v openssl 2>/dev/null); echo OPENSSL_INSTALL_RC=$rc; printf "\n__OPENSSL_INSTALL_""DONE:%s\n" "$rc"',
+"echo \"--- CA certificate install (foreground; wait for completion) ---\"; find /usr/local/etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl/certs -type f 2>/dev/null | sort > /tmp/ca-files-before.txt; tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1; ca_ir=$?; echo CA_INSTALL_RC=$ca_ir; tail -n 12 /tmp/ca-certificates-install.log; find /usr/local/etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl/certs -type f 2>/dev/null | sort > /tmp/ca-files-after.txt; echo \"--- Newly installed CA files ---\"; new_count=0; while IFS= read -r f; do if ! grep -F -x -q \"$f\" /tmp/ca-files-before.txt; then echo \"CA_INSTALLED_FILE=$f\"; new_count=$((new_count+1)); fi; done < /tmp/ca-files-after.txt; echo CA_INSTALLED_FILE_COUNT=$new_count; CA_BUNDLE=; for f in /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt /usr/local/share/ca-certificates/cacert.pem /etc/ssl/cert.pem; do if [ -s \"$f\" ]; then CA_BUNDLE=\"$f\"; break; fi; done; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/etc/ssl/certs ]; then set -- /usr/local/etc/ssl/certs/*.pem; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/share/ca-certificates/mozilla ]; then set -- /usr/local/share/ca-certificates/mozilla/*.crt; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/share/ca-certificates ]; then set -- /usr/local/share/ca-certificates/*.crt; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ \"$ca_ir\" -eq 0 ] && [ -s \"$CA_BUNDLE\" ]; then rc=0; else rc=1; fi; echo CA_BUNDLE_PATH=$CA_BUNDLE; printf \"\\n__CA_CERTIFICATES_INSTALL_DONE:%s\\n\" \"$rc\""
 `echo "--- DNS / HTTPS PREFLIGHT ---"; echo "DNS_CONFIG:"; cat /etc/resolv.conf 2>&1; rc=1; attempt=1; while [ "$attempt" -le 3 ]; do echo "HTTPS_PREFLIGHT_ATTEMPT=$attempt"; wget -S -O /dev/null ${apiUrl}/health 2>&1; rc=$?; echo HTTPS_ATTEMPT_RC=$rc; if [ "$rc" -eq 0 ]; then break; fi; attempt=$((attempt+1)); sleep 2; done; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n" DONE "$rc"`,
 `wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; rc=$?; echo NETWORK_TEST_DOWNLOAD_RC=$rc; printf "\\n__NETWORK_DOWNLOAD_DONE:%s\\n" "$rc"`,
 'sh /tmp/network-test.sh; rc=$?; printf "\\n__NETWORK_TEST_DONE:%s\\n" "$rc"',
