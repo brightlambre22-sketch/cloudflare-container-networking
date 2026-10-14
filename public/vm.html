@@ -111,7 +111,7 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e
 function shellPrompt(text){
 const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
 const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
-const promptPattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
+const promptPattern=/^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+(?::[^\n]{0,100})?\s*[$#]\s*$/;
 const lastLine=lines.length?lines[lines.length-1]:'';
 return promptPattern.test(lastLine)?lastLine:'';
 }
@@ -210,6 +210,10 @@ statusText(saved?'Startup and network tests complete; VM state saved.':'Startup 
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
+if(n===0){
+report('\n===== KEYBOARD INPUT WAKE =====\nSending Enter to ensure the detected shell is accepting keyboard input.\n');
+await sendVmCommand('\n');
+}
 report('\n===== BOOTSTRAP STEP '+(n+1)+'/'+commands.length+' =====\n'+cmd+'\n');
 const markerCountBefore=marker?markerCount(terminal(),marker):0;
 await sendVmCommand(cmd+'\n');
@@ -271,7 +275,7 @@ const PROMPT_STABLE_MS=2000;
 function shellPrompt(text){
 const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
 const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
-const promptPattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
+const promptPattern=/^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+(?::[^\n]{0,100})?\s*[$#]\s*$/;
 for(let i=lines.length-1;i>=Math.max(0,lines.length-6);i--){
 if(promptPattern.test(lines[i]))return lines[i];
 }
