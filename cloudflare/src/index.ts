@@ -171,7 +171,7 @@ export default {
     if (url.pathname === "/api/auth/session") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       const cookie = request.headers.get("cookie") ?? "";
-      const match = cookie.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
+      const match = cookie.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
       if (!match) return json({ error: "dashboard_access_required" }, 401);
       const sessionResponse = await authStore(env, "/auth/session?token=" + encodeURIComponent(match[1]));
       if (!sessionResponse.ok) return json({ error: "dashboard_access_required" }, 401);
