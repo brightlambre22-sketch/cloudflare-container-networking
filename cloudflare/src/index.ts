@@ -168,6 +168,20 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/auth/session") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const cookie = request.headers.get("cookie") ?? "";
+      const match = cookie.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
+      if (!match) return json({ error: "dashboard_access_required" }, 401);
+      const sessionResponse = await authStore(env, "/auth/session?token=" + encodeURIComponent(match[1]));
+      if (!sessionResponse.ok) return json({ error: "dashboard_access_required" }, 401);
+      const session = await sessionResponse.json() as { username?: string; expiresAt?: number };
+      if (typeof session.username !== "string" || !/^[a-z0-9._-]{3,32}$/.test(session.username)) {
+        return json({ error: "invalid_session" }, 401);
+      }
+      return json({ username: session.username, expiresAt: session.expiresAt ?? null });
+    }
+
     if (url.pathname === "/api/auth/logout") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const cookie = request.headers.get("cookie") ?? "";
