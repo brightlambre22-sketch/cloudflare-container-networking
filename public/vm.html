@@ -94,7 +94,7 @@ try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.
 document.getElementById('clear-results').onclick=function(){results.value='';save()};
 document.getElementById('copy-results').onclick=async function(){
 try{await navigator.clipboard.writeText(results.value)}catch(e){results.focus();results.select();document.execCommand('copy')}
-copyStatus.textContent='Results copied.';setTimeout(()=>copyStatus.textContent='',1800)
+copyStatus.textContent='Results copied.';requestAnimationFrame(()=>copyStatus.textContent='',1800)
 };
 async function pasteIntoVm(){
 try{
@@ -103,7 +103,7 @@ if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')thro
 window.emulator.keyboard_send_text(text);if(!/[\r\n]$/.test(text))window.emulator.keyboard_send_text('\n');
 copyStatus.textContent='Pasted and executed.'
 }catch(e){copyStatus.textContent='Paste blocked; use the button again.'}
-setTimeout(()=>copyStatus.textContent='',3000)
+requestAnimationFrame(()=>copyStatus.textContent='',3000)
 }
 document.getElementById('paste-terminal').onclick=pasteIntoVm;
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
@@ -126,7 +126,8 @@ function mirror(){
 const t=screenText().trim();
 if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
-setInterval(mirror,500);
+function mirrorLoop(){mirror();requestAnimationFrame(mirrorLoop)}
+requestAnimationFrame(mirrorLoop);
 
 const diagnosticCommand=`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
@@ -134,7 +135,7 @@ function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
 report('\n\n===== '+label+' =====\n'+diagnosticCommand+'\n');
 window.emulator.keyboard_send_text(diagnosticCommand+'\n');
-setTimeout(function(){
+requestAnimationFrame(function(){
 report('----- screen snapshot -----\n'+screenText()+'\n----- end snapshot -----\n')
 },9000)
 }
@@ -161,25 +162,24 @@ async function sendVmCommand(cmd){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('v86 keyboard API unavailable');
 if(typeof window.emulator.keyboard_set_enabled==='function')window.emulator.keyboard_set_enabled(true);
 await window.emulator.keyboard_send_text(cmd,2);
-await new Promise(r=>setTimeout(r,250));
+await new Promise(r=>requestAnimationFrame(r,250));
 }
 
 async function startBootstrap(){
-if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running full Mysterium bootstrap.');
+if(bootstrapStarted)return;bootstrapStarted=true;statusText('Tiny Core ready; running sequential network/TLS preflight. Mysterium is disabled.');
 const commands=[
-`echo "--- NETWORK INIT ---"; id; sudo -n sh -c 'set +e; /sbin/ifconfig eth0 up; /sbin/udhcpc -f -n -q -t 5 -T 3 -i eth0; rc=$?; echo DHCP_RC=$rc; /sbin/ifconfig eth0; /sbin/route -n; if [ "$rc" -eq 0 ] && /sbin/ifconfig eth0 | grep -Eq "inet (addr:)?([0-9]{1,3}[.]){3}[0-9]{1,3}" && /sbin/route -n | grep -Eq "^0[.]0[.]0[.]0[[:space:]]+[1-9][0-9]*[.]"; then echo DHCP_OK; else echo DHCP_FAIL; fi'; echo DHCP_''DONE`,
+`echo "--- NETWORK INIT ---"; id; sudo -n sh -c 'set +e; /sbin/ifconfig eth0 up; /sbin/udhcpc -f -n -q -i eth0; rc=$?; echo DHCP_RC=$rc; /sbin/ifconfig eth0; /sbin/route -n; if [ "$rc" -eq 0 ] && /sbin/ifconfig eth0 | grep -Eq "inet (addr:)?([0-9]{1,3}[.]){3}[0-9]{1,3}" && /sbin/route -n | grep -Eq "^0[.]0[.]0[.]0[[:space:]]+[1-9][0-9]*[.]"; then echo DHCP_OK; else echo DHCP_FAIL; fi'; echo DHCP_''DONE`,
 'echo "--- RESOURCE PREFLIGHT ---"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo "TLS prerequisite installation will run before HTTPS preflight."; printf "\n__RESOURCE_""PREFLIGHT_DONE\n"',
 'echo "--- TLS package downloads ---"; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; tce-load -w ca-certificates.tcz; ca_dl=$?; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl; printf "\n__TLS_DOWNLOAD_""DONE:%s:%s\n" "$openssl_dl" "$ca_dl"',
 'echo "--- OpenSSL install ---"; tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 & op=$!; while ! openssl version >/dev/null 2>&1 && kill -0 "$op" 2>/dev/null; do sleep 1; done; openssl version >/dev/null 2>&1; rc=$?; echo OPENSSL_PATH=$(command -v openssl 2>/dev/null); echo OPENSSL_INSTALL_RC=$rc; printf "\n__OPENSSL_INSTALL_""DONE:%s\n" "$rc"',
 "echo \"--- CA certificate install (background; wait for completion) ---\"; find /usr/local/etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl/certs -type f 2>/dev/null | sort > /tmp/ca-files-before.txt; tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1 & cp=$!; while kill -0 \"$cp\" 2>/dev/null; do sleep 1; done; wait \"$cp\"; ca_ir=$?; echo CA_INSTALL_RC=$ca_ir; tail -n 12 /tmp/ca-certificates-install.log; find /usr/local/etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl/certs -type f 2>/dev/null | sort > /tmp/ca-files-after.txt; echo \"--- Newly installed CA files ---\"; new_count=0; while IFS= read -r f; do if ! grep -F -x -q \"$f\" /tmp/ca-files-before.txt; then echo \"CA_INSTALLED_FILE=$f\"; new_count=$((new_count+1)); fi; done < /tmp/ca-files-after.txt; echo CA_INSTALLED_FILE_COUNT=$new_count; CA_BUNDLE=; for f in /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt /usr/local/share/ca-certificates/cacert.pem /etc/ssl/cert.pem; do if [ -s \"$f\" ]; then CA_BUNDLE=\"$f\"; break; fi; done; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/etc/ssl/certs ]; then set -- /usr/local/etc/ssl/certs/*.pem; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/share/ca-certificates/mozilla ]; then set -- /usr/local/share/ca-certificates/mozilla/*.crt; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ -z \"$CA_BUNDLE\" ] && [ -d /usr/local/share/ca-certificates ]; then set -- /usr/local/share/ca-certificates/*.crt; if [ -f \"$1\" ]; then cat \"$@\" >/tmp/ca-certificates-bundle.pem 2>/dev/null && [ -s /tmp/ca-certificates-bundle.pem ] && CA_BUNDLE=/tmp/ca-certificates-bundle.pem; fi; fi; if [ \"$ca_ir\" -eq 0 ] && [ -s \"$CA_BUNDLE\" ]; then export SSL_CERT_FILE=\"$CA_BUNDLE\"; rc=0; else rc=1; fi; echo CA_BUNDLE_PATH=${CA_BUNDLE:-MISSING}; printf \"\\n__CA_CERTIFICATES_INSTALL_\"\"DONE:%s\\n\" \"$rc\""
-`echo "--- DNS / HTTPS PREFLIGHT ---"; echo "DNS_CONFIG:"; cat /etc/resolv.conf 2>&1; rc=1; attempt=1; while [ "$attempt" -le 3 ]; do echo "HTTPS_PREFLIGHT_ATTEMPT=$attempt"; wget -T 15 -S -O /dev/null ${apiUrl}/health 2>&1; rc=$?; echo HTTPS_ATTEMPT_RC=$rc; if [ "$rc" -eq 0 ]; then break; fi; attempt=$((attempt+1)); sleep 2; done; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n" DONE "$rc"`,
-`wget -q -O /tmp/cloudflare-browser-bootstrap.sh ${apiUrl}/runner/tinycore/browser-bootstrap.sh; rc=$?; printf "\n__BOOTSTRAP_DOWNLOAD_%s:%s\n" DONE "$rc"`,
-'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then tce-load -wil ca-certificates.tcz && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"\n__BOOTSTRAP_RUN_%s:%s\n\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
-'echo "--- CA CERTIFICATE INSTALL STATUS ---"; if [ -f /tmp/ca-certificates-install.rc ]; then echo CA_CERTIFICATES_RC=$(cat /tmp/ca-certificates-install.rc); tail -n 20 /tmp/ca-certificates-install.log; else echo CA_CERTIFICATES_STATUS=STILL_RUNNING; tail -n 20 /tmp/ca-certificates-install.log; fi; if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; printf "%s\n" failed > /tmp/bootstrap-step-5.done; printf "\n__BOOTSTRAP_VERIFY_%s:%s\n" DONE failed; else printf "%s\n" ok > /tmp/bootstrap-step-5.done; printf "\n__BOOTSTRAP_VERIFY_%s:%s\n" DONE ok; fi',
-'if [ -x /opt/cloudflare-node/myst-supervisor.sh ]; then nohup /opt/cloudflare-node/myst-supervisor.sh >/var/log/myst-supervisor-console.log 2>&1 & fi; printf \"\n__SUPERVISOR_%s\n\" DONE',
-'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; printf \"\n__RUNNER_%s\n\" DONE'
+`echo "--- DNS / HTTPS PREFLIGHT ---"; echo "DNS_CONFIG:"; cat /etc/resolv.conf 2>&1; rc=1; attempt=1; while [ "$attempt" -le 3 ]; do echo "HTTPS_PREFLIGHT_ATTEMPT=$attempt"; wget -S -O /dev/null ${apiUrl}/health 2>&1; rc=$?; echo HTTPS_ATTEMPT_RC=$rc; if [ "$rc" -eq 0 ]; then break; fi; attempt=$((attempt+1)); sleep 2; done; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n" DONE "$rc"`,
+\`wget -q -O /tmp/network-test.sh \${apiUrl}/runner/tinycore/network-test.sh; rc=$?; echo NETWORK_TEST_DOWNLOAD_RC=$rc; printf "\\n__NETWORK_DOWNLOAD_DONE:%s\\n" "$rc"\`,
+'sh /tmp/network-test.sh; rc=$?; printf "\\n__NETWORK_TEST_DONE:%s\\n" "$rc"',
+\`wget -q -O /tmp/fineproxy-test.sh \${apiUrl}/runner/tinycore/fineproxy-test.sh; rc=$?; echo FINEPROXY_TEST_DOWNLOAD_RC=$rc; printf "\\n__FINEPROXY_DOWNLOAD_DONE:%s\\n" "$rc"\`,
+'sh /tmp/fineproxy-test.sh; rc=$?; printf "\\n__FINEPROXY_TEST_DONE:%s\\n" "$rc'
 ];
-const markers=['DHCP_DONE','__RESOURCE_PREFLIGHT_DONE','__TLS_DOWNLOAD_DONE:','__OPENSSL_INSTALL_DONE:','__CA_CERTIFICATES_INSTALL_DONE:','__EGRESS_PREFLIGHT_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
+const markers=['DHCP_DONE','__RESOURCE_PREFLIGHT_DONE','__TLS_DOWNLOAD_DONE:','__OPENSSL_INSTALL_DONE:','__CA_CERTIFICATES_INSTALL_DONE:','__EGRESS_PREFLIGHT_DONE:','__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:'];
 // No per-step timeout; wait for completion markers.
 let i=0;
 function terminal(){return screenText()}
@@ -187,9 +187,11 @@ function markerCount(text,marker){return String(text||'').split(marker).length-1
 function markerResult(text,marker){const at=String(text||'').lastIndexOf(marker);return at<0?'':String(text).slice(at+marker.length).split(/\r?\n/,1)[0].trim()}
 async function next(){
 if(i>=commands.length){
-statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
-report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
-const postCommands=[`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; rc=$?; printf \"\n__NETWORK_DOWNLOAD_%s:%s\n\" DONE \"$rc\"`,'sh /tmp/network-test.sh; rc=$?; printf \"\n__NETWORK_TEST_%s:%s\n\" DONE \"$rc\"',`wget -q -O /tmp/fineproxy-test.sh ${apiUrl}/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"\n__FINEPROXY_DOWNLOAD_%s:%s\n\" DONE \"$rc\"`,'sh /tmp/fineproxy-test.sh; rc=$?; printf \"\n__FINEPROXY_TEST_%s:%s\n\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; async function runPost(){if(pi>=postCommands.length){statusText('Saving VM state after bootstrap tests…');while(snapshotBusy)await new Promise(r=>setTimeout(r,250));const saved=await saveVmState(false);statusText(saved?'Bootstrap and tests complete; VM state saved locally.':'Bootstrap finished, but VM state could not be saved; check the state status.');return;} const pc=postCommands[pi],pm=postMarkers[pi++],markerCountBefore=markerCount(screenText(),pm); report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); await sendVmCommand(pc+'\n'); (function w(){const t=screenText(); const markerAt=t.lastIndexOf(pm); if(markerCount(t,pm)>markerCountBefore&&shellPrompt(t.slice(markerAt+pm.length))){runPost();return;} setTimeout(w,500)})()} runPost();
+statusText('Startup preflight and network tests complete. Mysterium remains disabled.');
+report('\n===== STARTUP COMPLETE — MYSTERIUM DISABLED =====\n');
+while(snapshotBusy)await new Promise(r=>requestAnimationFrame(r));
+const saved=await saveVmState(false);
+statusText(saved?'Startup and network tests complete; VM state saved.':'Startup complete; VM state save did not complete. Check saved-state status.');
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
@@ -204,12 +206,11 @@ if(markerCount(t,marker)>markerCountBefore&&shellPrompt(t.slice(markerAt+marker.
 report('----- bootstrap screen snapshot -----\n'+terminal()+'\n----- end bootstrap screen snapshot -----\n');
 if(marker==='DHCP_DONE'&&!terminal().includes('DHCP_OK')){report('*** DHCP did not install a usable IPv4 address and default route. No guessed gateway will be added; stopping before package/bootstrap downloads. ***\\n');statusText('DHCP/default-route check failed; diagnostics captured.');return} if(marker==='__OPENSSL_INSTALL_DONE:'&&markerResult(t,marker)!=='0'){report('*** OpenSSL install did not produce a working binary; stopping before HTTPS. See /tmp/openssl-install.log. ***\\n');statusText('OpenSSL install failed; diagnostics captured.');return} if(marker==='__CA_CERTIFICATES_INSTALL_DONE:'&&markerResult(t,marker)!=='0'){report('*** CA certificate file is missing; stopping before HTTPS. See /tmp/ca-certificates-install.log. ***\\n');statusText('CA install failed; diagnostics captured.');return} if(marker==='__EGRESS_PREFLIGHT_DONE:'&&!terminal().includes('__EGRESS_PREFLIGHT_DONE:0')){report('*** HTTPS check against the deployed Worker failed after OpenSSL and CA certificates were installed and verified. Stopping before bootstrap download. ***\\n');statusText('Internet HTTPS check failed; diagnostics captured.');return}
 
-if(marker==='__BOOTSTRAP_VERIFY_DONE:'&&terminal().includes('__BOOTSTRAP_VERIFY_DONE:failed')){report('*** Required startup files are missing; runner launch aborted. ***\n');statusText('Bootstrap stopped: required files are missing.');return}
 next();return
 }
-setTimeout(wait,500)
+requestAnimationFrame(wait,500)
 })()
-}else setTimeout(next,250)
+}else requestAnimationFrame(next,250)
 }
 next()
 }
@@ -276,7 +277,7 @@ return;
 }
 }else{promptCandidate=prompt;promptCandidateSince=Date.now();}
 }else{promptCandidate='';promptCandidateSince=0;}
-setTimeout(waitForBootComplete,500);
+requestAnimationFrame(waitForBootComplete,500);
 })();
 }
 }catch(e){statusText('VM ERROR: '+e.message)}
