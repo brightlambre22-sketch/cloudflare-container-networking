@@ -39,11 +39,11 @@ test("completion markers are emitted on their own lines", () => {
   }
 });
 
-test("CA certificate initialization is backgrounded so a slow rehash cannot block bootstrap", () => {
-  assert.ok(html.includes("tce-load -wil ca-certificates.tcz > /tmp/ca-certificates-install.log 2>&1"));
-  assert.ok(html.includes("__CA_CERTIFICATES_STARTED:0"));
-  assert.ok(html.includes("CA_CERTIFICATES_STATUS=STILL_RUNNING"));
-  assert.ok(!html.includes("__PACKAGES_READY_DONE:"));
+test("CA certificates are downloaded before HTTPS preflight and initialized afterward", () => {
+  assert.ok(html.includes("tce-load -w ca-certificates.tcz"));
+  assert.ok(html.includes("tce-load -wil ca-certificates.tcz && sh /tmp/cloudflare-browser-bootstrap.sh"));
+  assert.ok(html.includes("__CA_CERTIFICATES_DOWNLOAD_%s:%s"));
+  assert.ok(!html.includes("__CA_CERTIFICATES_STARTED:"));
 });
 
 test("VM bootstrap downloads use same-origin public Worker assets, not private raw GitHub URLs", () => {
