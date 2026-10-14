@@ -12,7 +12,6 @@ export interface Env {
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
   DASHBOARD_ACCESS_KEY?: string;
-  DASHBOARD_SESSION_SECRET?: string;
 }
 
 function authorized(header: string | null, expected: string | undefined): boolean {
@@ -86,7 +85,7 @@ export default {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ error: "origin_not_allowed" }, 403);
-      if (!env.DASHBOARD_ACCESS_KEY || !env.DASHBOARD_SESSION_SECRET) {
+      if (!env.DASHBOARD_ACCESS_KEY || !/^\\d{5}$/.test(env.DASHBOARD_ACCESS_KEY)) {
         return json({ error: "dashboard_auth_not_configured" }, 503);
       }
       let submittedKey = "";
@@ -100,7 +99,7 @@ export default {
         return json({ error: "invalid_access_key" }, 401);
       }
       const expiry = String(Math.floor(Date.now() / 1000) + SESSION_SECONDS);
-      const signature = await sessionSignature(expiry, env.DASHBOARD_SESSION_SECRET);
+      const signature = await sessionSignature(expiry, env.DASHBOARD_ACCESS_KEY);
       return new Response(JSON.stringify({ ok: true, redirect: "/dashboard.html" }), {
         status: 200,
         headers: {
@@ -320,7 +319,7 @@ export default {
       url.pathname.startsWith("/v86/") ||
       url.pathname.startsWith("/boot/");
 
-    if (protectedAsset && !(await validDashboardSession(request, env.DASHBOARD_SESSION_SECRET))) {
+    if (protectedAsset && !(await validDashboardSession(request, env.DASHBOARD_ACCESS_KEY))) {
       if (url.pathname.endsWith(".html") || request.headers.get("accept")?.includes("text/html")) {
         return Response.redirect(new URL("/access.html", url), 302);
       }
