@@ -85,7 +85,7 @@ export default {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ error: "origin_not_allowed" }, 403);
-      if (!env.DASHBOARD_ACCESS_KEY || !/^\\d{5}$/.test(env.DASHBOARD_ACCESS_KEY)) {
+      if (!env.DASHBOARD_ACCESS_KEY || !/^\d{5}$/.test(env.DASHBOARD_ACCESS_KEY)) {
         return json({ error: "dashboard_auth_not_configured" }, 503);
       }
       let submittedKey = "";
