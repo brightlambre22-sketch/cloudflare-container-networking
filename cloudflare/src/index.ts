@@ -87,7 +87,7 @@ export default {
       }
       if (request.method === "PUT") {
         let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown };
-        try { manifest = (await request.json()) as typeof manifest; }
+        try { manifest = (await request.json()) as { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown }; }
         catch { return json({ error: "invalid_manifest" }, 400); }
         if (
           manifest.version !== 1 ||
