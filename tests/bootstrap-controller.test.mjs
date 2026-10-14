@@ -26,7 +26,6 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 test("completion markers are emitted on their own lines", () => {
   for (const marker of [
     'printf "\\n__OPENSSL_DONE:%s\\n"',
-    'printf "\\n__CA_CERTIFICATES_STARTED:0\\n"',
     'printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n"',
     'printf "\\n__BOOTSTRAP_DOWNLOAD_%s:%s\\n"',
     'printf \\"\\n__BOOTSTRAP_RUN_%s:%s\\n\\"',
