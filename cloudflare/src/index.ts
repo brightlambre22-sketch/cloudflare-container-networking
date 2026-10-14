@@ -53,33 +53,79 @@ export default {
       return json({ ok: true });
     }
 
+    const snapshotChunkMatch = url.pathname.match(/^\/api\/vm-snapshots\/([a-z0-9._-]{1,64})\/chunks\/([a-z0-9-]{1,40})\/([0-9]{1,3})$/i);
     const snapshotMatch = url.pathname.match(/^\/api\/vm-snapshots\/([a-z0-9._-]{1,64})$/i);
-    if (snapshotMatch) {
-      const identity = snapshotMatch[1].toLowerCase();
+    const snapshotIdentity = snapshotChunkMatch?.[1] ?? snapshotMatch?.[1];
+    if (snapshotIdentity) {
+      const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin-user-a" || identity === "admin-user-b";
       if (isAdmin && request.headers.get("x-admin-code") !== ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
-      if (!["GET", "PUT", "DELETE"].includes(request.method)) return json({ error: "method_not_allowed" }, 405);
-      const key = `vm-snapshots/${identity}.bin`;
+      if (snapshotChunkMatch) {
+        if (request.method !== "GET" && request.method !== "PUT") return json({ error: "method_not_allowed" }, 405);
+        const generation = snapshotChunkMatch[2];
+        const part = Number(snapshotChunkMatch[3]);
+        const key = `vm-snapshots/${identity}/${generation}/${part}.bin`;
+        if (request.method === "GET") {
+          const object = await env.VM_SNAPSHOTS.get(key);
+          if (!object) return json({ error: "snapshot_chunk_not_found" }, 404);
+          return new Response(object.body, { headers: { "content-type": "application/octet-stream", "cache-control": "no-store" } });
+        }
+        if (!request.body) return json({ error: "empty_snapshot_chunk" }, 400);
+        await env.VM_SNAPSHOTS.put(key, request.body, { httpMetadata: { contentType: "application/octet-stream" } });
+        return json({ ok: true });
+      }
+
+      if (request.method !== "GET" && request.method !== "PUT" && request.method !== "DELETE") return json({ error: "method_not_allowed" }, 405);
+      const prefix = `vm-snapshots/${identity}/`;
+      const manifestKey = prefix + "manifest.json";
       if (request.method === "GET") {
-        const object = await env.VM_SNAPSHOTS.get(key);
+        const object = await env.VM_SNAPSHOTS.get(manifestKey);
         if (!object) return json({ error: "snapshot_not_found" }, 404);
-        const headers = new Headers();
-        object.writeHttpMetadata(headers);
-        headers.set("content-type", "application/octet-stream");
-        headers.set("cache-control", "no-store");
+        const headers = new Headers({ "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
         headers.set("x-snapshot-saved-at", object.customMetadata?.savedAt ?? object.uploaded.toISOString());
         return new Response(object.body, { headers });
       }
       if (request.method === "PUT") {
-        if (!request.body) return json({ error: "empty_snapshot" }, 400);
+        let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown };
+        try { manifest = (await request.json()) as typeof manifest; }
+        catch { return json({ error: "invalid_manifest" }, 400); }
+        if (
+          manifest.version !== 1 ||
+          typeof manifest.generation !== "string" ||
+          !/^[a-z0-9-]{1,40}$/.test(manifest.generation) ||
+          !Number.isInteger(manifest.chunks) || (manifest.chunks as number) < 1 || (manifest.chunks as number) > 128 ||
+          !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912
+        ) return json({ error: "invalid_manifest" }, 400);
+        const generation = manifest.generation;
+        const count = manifest.chunks as number;
+        const present = await Promise.all(Array.from({ length: count }, (_, part) =>
+          env.VM_SNAPSHOTS.head(`${prefix}${generation}/${part}.bin`),
+        ));
+        if (present.some((part) => !part)) return json({ error: "snapshot_chunk_missing" }, 400);
         const savedAt = new Date().toISOString();
-        await env.VM_SNAPSHOTS.put(key, request.body, {
-          httpMetadata: { contentType: "application/octet-stream" },
+        await env.VM_SNAPSHOTS.put(manifestKey, JSON.stringify({
+          version: 1, generation, chunks: count, byteLength: manifest.byteLength, savedAt,
+        }), {
+          httpMetadata: { contentType: "application/json" },
           customMetadata: { savedAt },
         });
+        let cursor: string | undefined;
+        do {
+          const page = await env.VM_SNAPSHOTS.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+          const stale = page.objects
+            .filter((object) => object.key !== manifestKey && !object.key.startsWith(`${prefix}${generation}/`))
+            .map((object) => object.key);
+          if (stale.length) await env.VM_SNAPSHOTS.delete(stale);
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
         return json({ ok: true, savedAt });
       }
-      await env.VM_SNAPSHOTS.delete(key);
+      let cursor: string | undefined;
+      do {
+        const page = await env.VM_SNAPSHOTS.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+        if (page.objects.length) await env.VM_SNAPSHOTS.delete(page.objects.map((object) => object.key));
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
       return json({ ok: true });
     }
 
