@@ -1,3 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mysterium Browser VM</title>
+<style>
+body{margin:0;background:#111;color:#ddd;font-family:monospace}
+#status{padding:8px}
+#toolbar{padding:8px;background:#181818;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{font:inherit;padding:6px 10px;cursor:pointer}
+#copy-status{color:#8f8}
+#myst-log{margin:0;padding:8px;height:220px;overflow:auto;white-space:pre-wrap;user-select:text;background:#000;color:#ddd;border-top:1px solid #333}
+#results{box-sizing:border-box;width:100%;min-height:300px;background:#000;color:#ddd;border:1px solid #444;padding:8px;font:14px monospace;resize:vertical}
+#screen_container{width:100%;min-height:480px}
+</style>
+</head>
+<body>
+<div id="status">Starting Linux VM...</div>
+<div id="toolbar">
+<button id="save-vm-state" type="button">Save VM state</button>
+<button id="clear-vm-state" type="button">Delete saved state</button>
+<button id="run-network-test" type="button">Run network test</button>
+<button id="run-bootstrap" type="button">Wake shell / run bootstrap</button>
+<button id="copy-results" type="button">Copy test results</button>
+<button id="paste-terminal" type="button">Paste into VM</button>
+<button id="clear-results" type="button">Clear results</button>
+<span id="copy-status"></span>
+<span id="state-status" aria-live="polite">Saved state: checkingâ¦</span>
+</div>
+<textarea id="results" spellcheck="false" placeholder="Full startup/network report. It is saved locally so you can copy it in sections."></textarea>
+<pre id="myst-log">Waiting for Tiny Core...</pre>
+<div id="screen_container"><div></div><canvas></canvas></div>
+<script src="/v86/libv86.js"></script>
+<script>
+window.onload=function(){
+const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('myst-log'),copyStatus=document.getElementById('copy-status'),stateStatus=document.getElementById('state-status');
+const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
+let reportTimer=null,bootstrapStarted=false,bootComplete=false;
+
+function statusText(t){status.textContent=t}
+const SNAPSHOT_DB='tinycore-v86-snapshots',SNAPSHOT_STORE='snapshots',SNAPSHOT_KEY='tinycore-main-v1';
+let snapshotDb=null,snapshotReady=false,snapshotBusy=false,vmLoaded=false,restoredSnapshot=false,autosaveTimer=null;
+function stateText(t){stateStatus.textContent=t}
+function openSnapshotDb(){
+return new Promise((resolve,reject)=>{
+const request=indexedDB.open(SNAPSHOT_DB,1);
+request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(SNAPSHOT_STORE))db.createObjectStore(SNAPSHOT_STORE)};
+request.onsuccess=()=>{snapshotDb=request.result;resolve(snapshotDb)};
+request.onerror=()=>reject(request.error||new Error('Could not open browser storage'));
+});
+}
+function snapshotTransaction(mode,action,value){
+return new Promise((resolve,reject)=>{
+const tx=snapshotDb.transaction(SNAPSHOT_STORE,mode),store=tx.objectStore(SNAPSHOT_STORE);
+let req;
+if(action==='get')req=store.get(SNAPSHOT_KEY);
+else if(action==='put')req=store.put(value,SNAPSHOT_KEY);
+else req=store.delete(SNAPSHOT_KEY);
+tx.oncomplete=()=>resolve(req?req.result:undefined);
+tx.onerror=()=>reject(tx.error||new Error('Browser storage operation failed'));
+tx.onabort=()=>reject(tx.error||new Error('Browser storage operation was aborted'));
+});
+}
+async function saveVmState(manual=true){
+if(snapshotBusy){if(manual)stateText('A save is already in progress.');return}
+if(!vmLoaded||!window.emulator||typeof window.emulator.save_state!=='function'){if(manual)stateText('VM is not ready to save yet.');return}
+snapshotBusy=true;
+if(manual)stateText('Saving VM memory and CPU stateâ¦');
+try{
+const state=await window.emulator.save_state();
+await snapshotTransaction('readwrite','put',{state,savedAt:Date.now(),version:1});
+stateText('Saved locally at '+new Date().toLocaleTimeString());
+}catch(e){
+stateText('Save failed: '+(e&&e.message?e.message:'browser storage unavailable'));
+report('\n*** VM STATE SAVE FAILED: '+(e&&e.message?e.message:String(e))+' ***\n');
+}finally{snapshotBusy=false}
+}
+async function loadVmState(){
+try{await openSnapshotDb();snapshotReady=true;const record=await snapshotTransaction('readonly','get');return record&&record.version===1?record:null}
+catch(e){snapshotReady=false;stateText('Saved state unavailable; browser storage may be blocked.');return null}
+}
+document.getElementById('save-vm-state').onclick=()=>saveVmState(true);
+document.getElementById('clear-vm-state').onclick=async()=>{
+if(!snapshotReady){stateText('Saved-state storage is not ready.');return}
+if(!confirm('Delete the saved VM state from this browser? This cannot be undone.'))return;
+try{await snapshotTransaction('readwrite','delete');stateText('Saved VM state deleted. The current VM keeps running.')}
+catch(e){stateText('Could not delete saved state.')}
+};
+function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
+function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
+try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
+
+document.getElementById('clear-results').onclick=function(){results.value='';save()};
+document.getElementById('copy-results').onclick=async function(){
+try{await navigator.clipboard.writeText(results.value)}catch(e){results.focus();results.select();document.execCommand('copy')}
+copyStatus.textContent='Results copied.';requestAnimationFrame(()=>copyStatus.textContent='',1800)
+};
+async function pasteIntoVm(){
+try{
+const text=await navigator.clipboard.readText();if(!text)throw new Error('empty');
+if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('VM not ready');
+window.emulator.keyboard_send_text(text);if(!/[\r\n]$/.test(text))window.emulator.keyboard_send_text('\n');
+copyStatus.textContent='Pasted and executed.'
+}catch(e){copyStatus.textContent='Paste blocked; use the button again.'}
+requestAnimationFrame(()=>copyStatus.textContent='',3000)
+}
+document.getElementById('paste-terminal').onclick=pasteIntoVm;
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='v'){e.preventDefault();pasteIntoVm()}});
+
+function shellPrompt(text){
+const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
+const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
+const promptPattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
+const lastLine=lines.length?lines[lines.length-1]:'';
+return promptPattern.test(lastLine)?lastLine:'';
+}
+function screenText(){
+if(window.emulator&&window.emulator.screen_adapter&&typeof window.emulator.screen_adapter.get_text_screen==='function'){
+return window.emulator.screen_adapter.get_text_screen().join('\n');
+}
+const s=document.querySelector('#screen_container > div');
+return(s&&s.textContent)||'';
+}
+function mirror(){
+const t=screenText().trim();
+if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
+}
+function mirrorLoop(){mirror();requestAnimationFrame(mirrorLoop)}
+requestAnimationFrame(mirrorLoop);
+
+const diagnosticCommand=`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
+
 let manualCommandRunning=false;
 function runDiagnostic(label){
 if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}
