@@ -27,7 +27,7 @@ test("VM uses a built ISO asset, a single supported relay configuration, and ret
   assert.ok(html.includes("cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'}"), "VM should use the existing NIC-enabled experimental ISO");
   assert.ok(html.includes("net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'}"));
   assert.ok(html.includes("network_relay_url:'wss://relay.widgetry.org/'"), "retain relay fallback for this deployed v86 runtime");
-  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v4'"), "network changes should invalidate stale saved NIC and unfinished-shell state");
+  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v5'"), "network changes should invalidate stale saved NIC and unfinished-shell state");
   assert.ok(html.includes("while :; do /sbin/udhcpc -f -n -q -i \"$iface\";"), "DHCP should retry instead of abandoning the relay after three discovers");
   assert.ok(html.includes("/sbin/modprobe ne2k-pci"), "try loading the NE2000 PCI driver when no interface is present");
   assert.ok(html.includes("NIC_MISSING"), "report driver diagnostics instead of retrying DHCP forever without a NIC");
@@ -68,9 +68,11 @@ test("TLS installs run in the foreground before HTTPS and certificate checks", (
   assert.ok(html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1; install_rc=$?"));
   assert.ok(html.includes("openssl version >/dev/null 2>&1"));
   assert.ok(html.includes("tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1; ca_ir=$?"));
-  assert.ok(html.includes("CA_INSTALLED_FILE=$f"));
-  assert.ok(html.includes("CA_INSTALLED_FILE_COUNT=$new_count"));
-  assert.ok(html.includes("/usr/local/share/ca-certificates/mozilla/*.crt"));
+  assert.ok(html.includes("CA_BUNDLE_PATH=$CA_BUNDLE"));
+  assert.ok(html.includes("/tmp/ca-certificates-bundle.pem"));
+  const caCommand = html.match(/`echo "--- CA certificate install ---";([\s\S]*?)`,/);
+  assert.ok(caCommand, "CA install command should be present");
+  assert.ok(caCommand[0].length < 900, "CA install command must stay short enough to avoid terminal input truncation");
   assert.ok(html.includes("CA_INSTALL_RC=$ca_ir"));
   assert.ok(html.includes("CA_BUNDLE_PATH=$CA_BUNDLE"));
   assert.ok(!html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
