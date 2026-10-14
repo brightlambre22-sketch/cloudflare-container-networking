@@ -160,7 +160,7 @@ const commands=[
 'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; printf \"\n__RUNNER_%s\n\" DONE'
 ];
 const markers=['DHCP_DONE','__RESOURCE_PREFLIGHT_DONE','__CA_CERTIFICATES_DOWNLOAD_DONE:','__EGRESS_PREFLIGHT_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
-const timeouts=[30000,30000,30000,90000,30000,900000,15000,10000,10000];
+const timeouts=[120000,120000,120000,120000,120000,900000,120000,120000,120000];
 let i=0;
 function terminal(){return screenText()}
 async function next(){
