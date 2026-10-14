@@ -21,4 +21,4 @@ Print this page or keep it for the first snapshot test.
 - A and B snapshots remain separate: Pass / Fail
 - Save occurs only after startup finishes: Pass / Fail
 
-**Note:** Snapshot files live in Cloudflare R2, not browser storage. The R2 bucket named `cloudflare-container-vm-snapshots` must exist before deployment. Regular-user usernames are identifiers, not secure authentication; don't store private data under username-only accounts.
+**One-time setup before deployment:** Create the R2 bucket with `npx wrangler r2 bucket create cloudflare-container-vm-snapshots` (skip this if it already exists). Snapshot files live in Cloudflare R2, not browser storage. Regular-user usernames are identifiers, not secure authentication; don't store private data under username-only accounts.
