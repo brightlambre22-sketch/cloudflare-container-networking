@@ -17,7 +17,7 @@ button.primary{background:#17634f;border-color:#27896f}button:hover,a.button:hov
 .notice{color:var(--muted);font-size:13px;line-height:1.5}@media(max-width:650px){main{padding:12px}header{padding:16px}iframe{min-height:520px}}
 </style></head>
 <body>
-<header><div><div class="brand">VM Dashboard</div><div class="sub">Virtual machine dashboard</div></div><div class="controls"><span class="sub">Access-key session</span><button id="logout">Lock dashboard</button></div></header>
+<header><div><div class="brand">VM Dashboard</div><div class="sub">Virtual machine dashboard</div></div><div class="controls"><span class="sub">Account session</span><button id="logout">Lock dashboard</button></div></header>
 <main>
 <section class="card">
 <div class="card-head"><div><h1>Tiny Core VM</h1><div class="sub">Browser-based instance · VM-001</div></div><div class="status" id="vm-status"><span class="dot"></span><span>Loading console</span></div></div>
@@ -37,5 +37,5 @@ frame.contentWindow.postMessage({type:'vm-control',action},window.location.origi
 status.lastElementChild.textContent=action==='start'?'Resume requested':action==='stop'?'Pause requested':'Reboot requested';
 }));
 frame.addEventListener('load',()=>{status.lastElementChild.textContent='Console loaded';});
-document.getElementById('logout').addEventListener('click',async()=>{try{await fetch('/api/dashboard-logout',{method:'POST'});}finally{window.location.replace('/access.html');}});
+document.getElementById('logout').addEventListener('click',async()=>{try{await fetch('/api/auth/logout',{method:'POST'});}finally{window.location.replace('/access.html');}});
 </script></body></html>
