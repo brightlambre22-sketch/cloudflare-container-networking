@@ -11,6 +11,8 @@ export interface Env {
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
+  DASHBOARD_ACCESS_KEY?: string;
+  DASHBOARD_SESSION_SECRET?: string;
 }
 
 function authorized(header: string | null, expected: string | undefined): boolean {
@@ -22,6 +24,49 @@ function authorized(header: string | null, expected: string | undefined): boolea
     difference |= value.charCodeAt(i) ^ expected.charCodeAt(i);
   }
   return difference === 0;
+}
+
+
+const SESSION_COOKIE = "myst_dashboard_session";
+const SESSION_SECONDS = 12 * 60 * 60;
+const encoder = new TextEncoder();
+
+function constantTimeEqual(value: string, expected: string | undefined): boolean {
+  if (!expected || value.length !== expected.length) return false;
+  let difference = 0;
+  for (let i = 0; i < value.length; i += 1) difference |= value.charCodeAt(i) ^ expected.charCodeAt(i);
+  return difference === 0;
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+}
+
+function fromBase64Url(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(normalized + "=".repeat((4 - (normalized.length % 4)) % 4));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function sessionSignature(expiry: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  return base64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(expiry))));
+}
+
+async function validDashboardSession(request: Request, secret: string | undefined): Promise<boolean> {
+  if (!secret) return false;
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
+  if (!match) return false;
+  const parts = match[1].split(".");
+  if (parts.length !== 2 || !/^\\d{10,16}$/.test(parts[0])) return false;
+  if (Number(parts[0]) <= Math.floor(Date.now() / 1000)) return false;
+  const expected = await sessionSignature(parts[0], secret);
+  return constantTimeEqual(parts[1], expected);
 }
 
 function json(data: unknown, status = 200): Response {
@@ -41,6 +86,48 @@ function validNodeId(nodeId: string): boolean {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+
+    if (url.pathname === "/api/dashboard-login") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const origin = request.headers.get("origin");
+      if (origin && origin !== url.origin) return json({ error: "origin_not_allowed" }, 403);
+      if (!env.DASHBOARD_ACCESS_KEY || !env.DASHBOARD_SESSION_SECRET) {
+        return json({ error: "dashboard_auth_not_configured" }, 503);
+      }
+      let submittedKey = "";
+      try {
+        const body = (await request.json()) as { key?: unknown };
+        if (typeof body.key === "string") submittedKey = body.key;
+      } catch {
+        return json({ error: "invalid_request" }, 400);
+      }
+      if (!constantTimeEqual(submittedKey, env.DASHBOARD_ACCESS_KEY)) {
+        return json({ error: "invalid_access_key" }, 401);
+      }
+      const expiry = String(Math.floor(Date.now() / 1000) + SESSION_SECONDS);
+      const signature = await sessionSignature(expiry, env.DASHBOARD_SESSION_SECRET);
+      return new Response(JSON.stringify({ ok: true, redirect: "/dashboard.html" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          "set-cookie": `${SESSION_COOKIE}=${expiry}.${signature}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict`,
+        },
+      });
+    }
+
+    if (url.pathname === "/api/dashboard-logout") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+          "set-cookie": `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`,
+        },
+      });
+    }
 
     if (url.pathname === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
@@ -227,6 +314,23 @@ export default {
       }
 
       return json({ error: "method_not_allowed" }, 405);
+    }
+
+    if (url.pathname === "/") {
+      return Response.redirect(new URL("/dashboard.html", url), 302);
+    }
+
+    const protectedAsset =
+      url.pathname === "/dashboard.html" ||
+      url.pathname === "/vm.html" ||
+      url.pathname.startsWith("/v86/") ||
+      url.pathname.startsWith("/boot/");
+
+    if (protectedAsset && !(await validDashboardSession(request, env.DASHBOARD_SESSION_SECRET))) {
+      if (url.pathname.endsWith(".html") || request.headers.get("accept")?.includes("text/html")) {
+        return Response.redirect(new URL("/access.html", url), 302);
+      }
+      return json({ error: "dashboard_access_required" }, 401);
     }
 
     return env.ASSETS.fetch(request);
