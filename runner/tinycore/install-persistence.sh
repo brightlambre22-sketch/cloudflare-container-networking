@@ -22,7 +22,7 @@ chmod 755 "$DEST"
 if [ ! -f /opt/.filetool.lst ]; then
   printf '%s\n' 'opt' > /opt/.filetool.lst
 elif ! grep -qx 'opt' /opt/.filetool.lst; then
-  printf '%s\n' 'opt' > /opt/.filetool.lst
+  printf '%s\n' 'opt' >> /opt/.filetool.lst
 fi
 
 echo "Installed network-only final-boot gate at $DEST"
