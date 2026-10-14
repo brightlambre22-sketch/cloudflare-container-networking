@@ -29,8 +29,8 @@ sudo ./install-persistence.sh /tmp/cloudflare-node
 
 The installer places the hook at `/opt/bootlocal.sh`, the Tiny Core startup
 hook location used by `/opt/bootsync.sh`. Ensure `/opt` is included in
-`/opt/.filetool.lst`; the installer adds it if the file already exists and
-does not save state prematurely.
+`/opt/.filetool.lst`; the installer creates or updates that list and does not
+save state prematurely.
 
 On the next boot, inspect `/var/log/tinycore-final-boot.log` for the readiness
 checks and backup result. Tiny Core's `filetool.sh -b` saves only paths listed
