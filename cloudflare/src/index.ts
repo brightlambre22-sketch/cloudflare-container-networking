@@ -2,7 +2,6 @@ import { connect } from "cloudflare:sockets";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
-import { DASHBOARD_ACCESS_CODE } from "./dashboard-code";
 export { TunnelHub, NodeRegistry, NodeRuntime };
 
 export interface Env {
@@ -37,6 +36,12 @@ function constantTimeEqual(value: string, expected: string | undefined): boolean
   return difference === 0;
 }
 
+async function hashPassword(password: string, salt: Uint8Array): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 310000 }, key, 256);
+  return base64Url(new Uint8Array(bits));
+}
+
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -50,15 +55,17 @@ async function sessionSignature(expiry: string, secret: string): Promise<string>
   return base64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(expiry))));
 }
 
-async function validDashboardSession(request: Request): Promise<boolean> {
+async function authStore(env: Env, path: string, init?: RequestInit): Promise<Response> {
+  const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+  return registry.fetch(new Request("https://node-registry.internal" + path, init));
+}
+
+async function validDashboardSession(request: Request, env: Env): Promise<boolean> {
   const cookieHeader = request.headers.get("cookie") ?? "";
-  const match = cookieHeader.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
+  const match = cookieHeader.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
   if (!match) return false;
-  const parts = match[1].split(".");
-  if (parts.length !== 2 || !/^\d{10,16}$/.test(parts[0])) return false;
-  if (Number(parts[0]) <= Math.floor(Date.now() / 1000)) return false;
-  const expected = await sessionSignature(parts[0], DASHBOARD_ACCESS_CODE);
-  return constantTimeEqual(parts[1], expected);
+  const response = await authStore(env, "/auth/session?token=" + encodeURIComponent(match[1]));
+  return response.ok;
 }
 
 function json(data: unknown, status = 200): Response {
@@ -80,39 +87,75 @@ export default {
     const url = new URL(request.url);
 
 
-    if (url.pathname === "/api/dashboard-login") {
+    if (url.pathname === "/api/auth/register" || url.pathname === "/api/auth/login") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const origin = request.headers.get("origin");
       if (origin && origin !== url.origin) return json({ error: "origin_not_allowed" }, 403);
-      if (!/^\d{5}$/.test(DASHBOARD_ACCESS_CODE)) {
-        return json({ error: "dashboard_auth_not_configured" }, 503);
+      let body: { username?: unknown; password?: unknown } = {};
+      try { body = await request.json() as { username?: unknown; password?: unknown }; }
+      catch { return json({ error: "invalid_request" }, 400); }
+      const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
+        return json({ error: "invalid_username", message: "Use 3–32 letters, numbers, dots, underscores, or hyphens." }, 400);
       }
-      let submittedKey = "";
-      try {
-        const body = (await request.json()) as { key?: unknown };
-        if (typeof body.key === "string") submittedKey = body.key;
-      } catch {
-        return json({ error: "invalid_request" }, 400);
+      if (password.length < 12 || password.length > 256) {
+        return json({ error: "invalid_password", message: "Password must be at least 12 characters." }, 400);
       }
-      if (!constantTimeEqual(submittedKey, DASHBOARD_ACCESS_CODE)) {
-        return json({ error: "invalid_access_key" }, 401);
+
+      const accountResponse = await authStore(env, "/auth/account?username=" + encodeURIComponent(username));
+      if (url.pathname === "/api/auth/register") {
+        if (accountResponse.ok) return json({ error: "username_taken", message: "That username is already registered." }, 409);
+        const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+        const salt = base64Url(saltBytes);
+        const passwordHash = await hashPassword(password, saltBytes);
+        const created = await authStore(env, "/auth/register", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, salt, passwordHash }),
+        });
+        if (created.status === 409) return json({ error: "username_taken", message: "That username is already registered." }, 409);
+        if (!created.ok) return json({ error: "registration_failed" }, 500);
+      } else {
+        if (!accountResponse.ok) return json({ error: "invalid_credentials", message: "Username or password is incorrect." }, 401);
+        const account = await accountResponse.json() as { username: string; salt: string; passwordHash: string };
+        const saltBytes = Uint8Array.from(atob(account.salt.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((account.salt.length + 3) % 4)), c => c.charCodeAt(0));
+        const candidate = await hashPassword(password, saltBytes);
+        if (!constantTimeEqual(candidate, account.passwordHash)) {
+          return json({ error: "invalid_credentials", message: "Username or password is incorrect." }, 401);
+        }
       }
-      const expiry = String(Math.floor(Date.now() / 1000) + SESSION_SECONDS);
-      const signature = await sessionSignature(expiry, DASHBOARD_ACCESS_CODE);
+
+      const token = base64Url(crypto.getRandomValues(new Uint8Array(32)));
+      const expiresAt = Date.now() + SESSION_SECONDS * 1000;
+      const saved = await authStore(env, "/auth/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, username, expiresAt }),
+      });
+      if (!saved.ok) return json({ error: "session_creation_failed" }, 500);
       return new Response(JSON.stringify({ ok: true, redirect: "/dashboard.html" }), {
         status: 200,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "cache-control": "no-store",
-          "set-cookie": `${SESSION_COOKIE}=${expiry}.${signature}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict`,
+          "set-cookie": `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict`,
         },
       });
     }
 
-    if (url.pathname === "/api/dashboard-logout") {
+    if (url.pathname === "/api/auth/logout") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const cookie = request.headers.get("cookie") ?? "";
+      const match = cookie.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
+      if (match) {
+        await authStore(env, "/auth/logout", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: match[1] }),
+        });
+      }
       return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
         headers: {
           "content-type": "application/json; charset=utf-8",
           "cache-control": "no-store",
