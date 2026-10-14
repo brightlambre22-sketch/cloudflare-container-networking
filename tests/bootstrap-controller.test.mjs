@@ -26,8 +26,7 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 test("completion markers are emitted on their own lines", () => {
   for (const marker of [
     'printf "\\n__OPENSSL_DONE:%s\\n"',
-    'printf "\\n__CA_CERTIFICATES_STARTED:0\\n"',
-    'printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n"',
+    'printf "\\n__CA_CERTIFICATES_DOWNLOAD_%s:%s\\n"',
     'printf "\\n__BOOTSTRAP_DOWNLOAD_%s:%s\\n"',
     'printf \\"\\n__BOOTSTRAP_RUN_%s:%s\\n\\"',
     'printf \\"\\n__SUPERVISOR_%s\\n\\"',
@@ -47,7 +46,7 @@ test("CA certificates are downloaded before HTTPS preflight and initialized afte
 });
 
 test("VM bootstrap downloads use same-origin public Worker assets, not private raw GitHub URLs", () => {
-  assert.ok(html.includes("${apiUrl}/health"), "HTTPS preflight should test the deployed Worker health endpoint");
+  assert.ok(html.includes("${apiUrl}/runner/tinycore/browser-bootstrap.sh"), "bootstrap must be downloaded from the same-origin Worker assets");
   for (const asset of ["browser-bootstrap.sh", "network-test.sh", "fineproxy-test.sh"]) {
     assert.ok(html.includes("${apiUrl}/runner/tinycore/" + asset), "VM should download " + asset + " from Worker assets");
   }
