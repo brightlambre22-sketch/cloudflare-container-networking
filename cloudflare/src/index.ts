@@ -12,7 +12,6 @@ export interface Env {
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
   DASHBOARD_ACCESS_KEY?: string;
-  DASHBOARD_ACCESS_KEY?: string;
 }
 
 function authorized(header: string | null, expected: string | undefined): boolean {
@@ -172,21 +171,6 @@ export default {
       });
     }
 
-    if (url.pathname === "/api/auth/admin-key") {
-      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      const origin = request.headers.get("origin");
-      if (origin && origin !== url.origin) return json({ error: "origin_not_allowed" }, 403);
-      if (!env.DASHBOARD_ACCESS_KEY) return json({ error: "admin_key_not_configured", message: "Set the DASHBOARD_ACCESS_KEY Worker secret in Cloudflare." }, 503);
-      let body: { key?: unknown } = {};
-      try { body = await request.json() as { key?: unknown }; } catch { return json({ error: "invalid_request" }, 400); }
-      const key = typeof body.key === "string" ? body.key : "";
-      if (!constantTimeEqual(key, env.DASHBOARD_ACCESS_KEY)) return json({ error: "invalid_credentials", message: "The administrator access key is incorrect." }, 401);
-      const token = base64Url(crypto.getRandomValues(new Uint8Array(32)));
-      const expiresAt = Date.now() + SESSION_SECONDS * 1000;
-      const saved = await authStore(env, "/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, username: "admin", expiresAt }) });
-      if (!saved.ok) return json({ error: "session_creation_failed" }, 500);
-      return new Response(JSON.stringify({ ok: true, redirect: "/dashboard.html" }), { status: 200, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "set-cookie": `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Strict` } });
-    }
     if (url.pathname === "/api/auth/logout") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const cookie = request.headers.get("cookie") ?? "";
