@@ -23,6 +23,16 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
   assert.equal(shellPrompt("tc@box:~$\ncommand still running\n\n"), "");
 });
 
+test("VM uses a built ISO asset, a single supported relay configuration, and retries DHCP until a lease is valid", () => {
+  assert.ok(html.includes("cdrom:{url:'/boot/TinyCore_Pure64-11.0.iso'}"), "VM ISO path should match the main-branch build workflow");
+  assert.ok(html.includes("net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'}"));
+  assert.ok(!html.includes("network_relay_url:"), "do not configure the deprecated relay option alongside net_device");
+  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v2'"), "network changes should invalidate stale saved NIC state");
+  assert.ok(html.includes("while :; do /sbin/udhcpc -f -n -q -i eth0;"), "DHCP should retry instead of abandoning the relay after three discovers");
+  assert.ok(html.includes("DHCP_RETRYING_NO_LEASE"));
+  assert.ok(html.includes("echo DHCP_OK; break"));
+});
+
 test("startup prompt detection supports changed hostnames and explicitly wakes the shell before the first command", () => {
   assert.ok(html.includes("[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+"), "prompt detection should not depend on one exact hostname");
   assert.ok(html.includes("KEYBOARD INPUT WAKE"));
