@@ -62,7 +62,7 @@ async function authStore(env: Env, path: string, init?: RequestInit): Promise<Re
 
 async function validDashboardSession(request: Request, env: Env): Promise<boolean> {
   const cookieHeader = request.headers.get("cookie") ?? "";
-  const match = cookieHeader.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
+  const match = cookieHeader.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
   if (!match) return false;
   const response = await authStore(env, "/auth/session?token=" + encodeURIComponent(match[1]));
   return response.ok;
@@ -147,7 +147,7 @@ export default {
     if (url.pathname === "/api/auth/logout") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const cookie = request.headers.get("cookie") ?? "";
-      const match = cookie.match(/(?:^|;\\s*)myst_dashboard_session=([^;]+)/);
+      const match = cookie.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
       if (match) {
         await authStore(env, "/auth/logout", {
           method: "POST",
@@ -167,6 +167,11 @@ export default {
     if (url.pathname === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       return json({ status: "ok", service: "cloudflare-container-networking" });
+    }
+
+    if ((url.pathname.startsWith("/v1/") || url.pathname.startsWith("/debug/")) &&
+        !(await validDashboardSession(request, env))) {
+      return json({ error: "dashboard_access_required" }, 401);
     }
 
     if (url.pathname === "/debug/egress-ip") {
