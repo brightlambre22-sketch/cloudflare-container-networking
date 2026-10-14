@@ -36,12 +36,87 @@ const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origi
 let reportTimer=null,bootstrapStarted=false,bootComplete=false;
 
 function statusText(t){status.textContent=t}
+
+const SNAPSHOT_DB_NAME='mysterium-v86-snapshots-v1',SNAPSHOT_STORE='snapshots';
+let snapshotKey=null,snapshotDbPromise=null,snapshotSaveBusy=false,snapshotReady=false;
+function openSnapshotDb(){
+ if(snapshotDbPromise)return snapshotDbPromise;
+ snapshotDbPromise=new Promise((resolve,reject)=>{
+  const request=indexedDB.open(SNAPSHOT_DB_NAME,1);
+  request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(SNAPSHOT_STORE))db.createObjectStore(SNAPSHOT_STORE,{keyPath:'key'});};
+  request.onsuccess=()=>resolve(request.result);
+  request.onerror=()=>reject(request.error||new Error('Could not open snapshot storage'));
+ });
+ return snapshotDbPromise;
+}
+async function snapshotGet(){
+ const db=await openSnapshotDb();
+ return new Promise((resolve,reject)=>{
+  const request=db.transaction(SNAPSHOT_STORE,'readonly').objectStore(SNAPSHOT_STORE).get(snapshotKey);
+  request.onsuccess=()=>resolve(request.result||null);
+  request.onerror=()=>reject(request.error||new Error('Could not read saved VM state'));
+ });
+}
+async function snapshotPut(record){
+ const db=await openSnapshotDb();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction(SNAPSHOT_STORE,'readwrite');
+  tx.objectStore(SNAPSHOT_STORE).put(record);
+  tx.oncomplete=()=>resolve();
+  tx.onerror=()=>reject(tx.error||new Error('Could not save VM state'));
+  tx.onabort=()=>reject(tx.error||new Error('VM state save was aborted'));
+ });
+}
+async function initializeSnapshotIdentity(){
+ const response=await fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
+ if(!response.ok)throw new Error('Could not identify the signed-in account for VM persistence');
+ const session=await response.json();
+ if(!session||typeof session.username!=='string'||!/^[a-z0-9._-]{3,32}$/.test(session.username))throw new Error('Session did not return a valid account');
+ snapshotKey=session.username+':'+nodeId;
+ snapshotReady=true;
+ return snapshotGet();
+}
+function restoreEmulatorState(state){
+ return new Promise((resolve,reject)=>{
+  try{window.emulator.restore_state(state,(error)=>error?reject(error):resolve());}
+  catch(error){reject(error);}
+ });
+}
+function exportEmulatorState(){
+ return new Promise((resolve,reject)=>{
+  try{window.emulator.save_state((error,state)=>{if(error)reject(error);else if(state==null)reject(new Error('v86 returned an empty snapshot'));else resolve(state);});}
+  catch(error){reject(error);}
+ });
+}
+async function saveVmSnapshot(reason){
+ if(!snapshotReady||snapshotSaveBusy||!window.emulator||typeof window.emulator.save_state!=='function')return;
+ snapshotSaveBusy=true;
+ try{
+  const state=await exportEmulatorState();
+  await snapshotPut({key:snapshotKey,state,savedAt:Date.now(),version:1});
+  if(reason)report('\\nVM SNAPSHOT SAVED ('+reason+')\\n');
+ }catch(error){
+  report('\\nVM SNAPSHOT SAVE FAILED: '+(error&&error.message?error.message:String(error))+'\\n');
+ }finally{snapshotSaveBusy=false;}
+}
+async function clearVmSnapshot(){
+ if(!snapshotReady)return;
+ try{
+  const db=await openSnapshotDb();
+  await new Promise((resolve,reject)=>{
+   const tx=db.transaction(SNAPSHOT_STORE,'readwrite');
+   tx.objectStore(SNAPSHOT_STORE).delete(snapshotKey);
+   tx.oncomplete=resolve;
+   tx.onerror=()=>reject(tx.error||new Error('Could not clear saved VM state'));
+  });
+ }catch(error){report('\\nCould not clear VM snapshot: '+(error&&error.message?error.message:String(error))+'\\n');}
+}
 window.addEventListener('message',function(event){
 if(event.origin!==window.location.origin||!event.data||event.data.type!=='vm-control')return;
 try{
 if(event.data.action==='start'){if(window.emulator&&typeof window.emulator.run==='function'){window.emulator.run();statusText('VM resumed.');}}
-else if(event.data.action==='stop'){if(window.emulator&&typeof window.emulator.stop==='function'){window.emulator.stop();statusText('VM paused by dashboard.');}}
-else if(event.data.action==='reboot'){if(window.emulator&&typeof window.emulator.restart==='function'){window.emulator.restart();statusText('VM reboot requested.');}else{statusText('Reboot is not supported by this v86 build.');}}
+else if(event.data.action==='stop'){if(window.emulator&&typeof window.emulator.stop==='function'){window.emulator.stop();statusText('VM paused by dashboard.');saveVmSnapshot('dashboard pause');}}
+else if(event.data.action==='reboot'){if(window.emulator&&typeof window.emulator.restart==='function'){clearVmSnapshot();window.emulator.restart();statusText('VM reboot requested.');}else{statusText('Reboot is not supported by this v86 build.');}}
 }catch(error){statusText('VM control failed: '+error.message)}
 });
 function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
@@ -168,10 +243,31 @@ screen_container:document.getElementById('screen_container'),
 bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
 cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'},
 net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
-network_relay_url:'wss://relay.widgetry.org/',autostart:true
+network_relay_url:'wss://relay.widgetry.org/',autostart:false
 });
 if(window.emulator&&typeof window.emulator.add_listener==='function'){
- window.emulator.add_listener('emulator-ready',function(){statusText('v86 initialized; waiting for Tiny Core shell prompt.');report('\\nV86 EVENT: emulator-ready\\n');});
+ window.emulator.add_listener('emulator-ready',function(){
+  statusText('v86 initialized; checking for a saved VM snapshot.');
+  report('\\nV86 EVENT: emulator-ready\\n');
+  (async function(){
+   try{
+    const snapshot=await initializeSnapshotIdentity();
+    if(snapshot&&snapshot.version===1&&snapshot.state!=null){
+     try{
+      await restoreEmulatorState(snapshot.state);
+      report('\\nVM SNAPSHOT RESTORED from '+new Date(snapshot.savedAt||0).toISOString()+'\\n');
+      statusText('Saved VM state restored; resuming Tiny Core.');
+     }catch(error){
+      report('\\nSaved VM snapshot could not be restored; starting fresh: '+(error&&error.message?error.message:String(error))+'\\n');
+      await clearVmSnapshot();
+     }
+    }else report('\\nNo saved VM snapshot for this account; starting fresh.\\n');
+   }catch(error){
+    report('\\nVM snapshot persistence unavailable; starting fresh: '+(error&&error.message?error.message:String(error))+'\\n');
+   }
+   if(window.emulator&&typeof window.emulator.run==='function')window.emulator.run();
+  })();
+ });
  window.emulator.add_listener('emulator-started',function(){report('\\nV86 EVENT: emulator-started\\n');});
  window.emulator.add_listener('emulator-stopped',function(){report('\\nV86 EVENT: emulator-stopped\\n');});
  window.emulator.add_listener('download-progress',function(event){
@@ -191,6 +287,9 @@ if(promptPattern.test(lines[i]))return lines[i];
 }
 return '';
 }
+setInterval(function(){if(bootComplete)saveVmSnapshot('periodic checkpoint');},60000);
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden'&&bootComplete)saveVmSnapshot('page hidden');});
+window.addEventListener('pagehide',function(){if(bootComplete)saveVmSnapshot('page exit');});
 statusText('Tiny Core is booting; waiting for a stable shell prompt before sending commands.');
 (function waitForBootComplete(){
 const t=screenText();
@@ -199,6 +298,7 @@ if(prompt){
 if(prompt===promptCandidate){
 if(Date.now()-promptCandidateSince>=PROMPT_STABLE_MS){
 bootComplete=true;
+saveVmSnapshot('Tiny Core shell ready');
 statusText('Tiny Core shell prompt is stable; starting bootstrap.');
 startBootstrap();
 return;
