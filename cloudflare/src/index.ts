@@ -357,7 +357,16 @@ export default {
     }
 
     if (url.pathname === "/") {
-      return Response.redirect(new URL("/access.html", url), 302);
+      return Response.redirect(new URL((await validDashboardSession(request, env)) ? "/dashboard.html" : "/access.html", url), 302);
+    }
+
+    // The short /vm URL is a dashboard entry point, not a public VM bypass.
+    if (url.pathname === "/vm" || url.pathname === "/vm/") {
+      return Response.redirect(new URL((await validDashboardSession(request, env)) ? "/dashboard.html" : "/access.html", url), 302);
+    }
+
+    if (url.pathname === "/access.html" && await validDashboardSession(request, env)) {
+      return Response.redirect(new URL("/dashboard.html", url), 302);
     }
 
     const protectedAsset =
@@ -366,7 +375,7 @@ export default {
       url.pathname.startsWith("/v86/") ||
       url.pathname.startsWith("/boot/");
 
-    if (protectedAsset && !(await validDashboardSession(request))) {
+    if (protectedAsset && !(await validDashboardSession(request, env))) {
       if (url.pathname.endsWith(".html") || request.headers.get("accept")?.includes("text/html")) {
         return Response.redirect(new URL("/access.html", url), 302);
       }
