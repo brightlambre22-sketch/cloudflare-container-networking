@@ -26,7 +26,7 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 test("completion markers are emitted on their own lines", () => {
   for (const marker of [
     'printf "\\n__OPENSSL_DONE:%s\\n"',
-    'printf "\\n__PACKAGES_READY_DONE:%s\\n"',
+    'printf "\\n__CA_CERTIFICATES_STARTED:0:%s\\n"',
     'printf "\\n__EGRESS_PREFLIGHT_%s:%s\\n"',
     'printf "\\n__BOOTSTRAP_DOWNLOAD_%s:%s\\n"',
     'printf \\"\\n__BOOTSTRAP_RUN_%s:%s\\n\\"',
@@ -37,6 +37,13 @@ test("completion markers are emitted on their own lines", () => {
   ]) {
     assert.ok(html.includes(marker), "expected newline-delimited marker command: " + marker);
   }
+});
+
+test("CA certificate initialization is backgrounded so a slow rehash cannot block bootstrap", () => {
+  assert.ok(html.includes("tce-load -wil ca-certificates.tcz > /tmp/ca-certificates-install.log 2>&1"));
+  assert.ok(html.includes("__CA_CERTIFICATES_STARTED:0"));
+  assert.ok(html.includes("CA_CERTIFICATES_STATUS=STILL_RUNNING"));
+  assert.ok(!html.includes("__PACKAGES_READY_DONE:"));
 });
 
 test("VM bootstrap downloads use same-origin public Worker assets, not private raw GitHub URLs", () => {
