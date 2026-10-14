@@ -74,9 +74,19 @@ done
 
 log "HTTPS/TLS check passed: $HTTPS_TEST_URL"
 
-# Persist only after all readiness checks pass. Tiny Core reads the inclusion
-# list from /opt/.filetool.lst and writes its backup to the configured TCE area.
+# Persist only after all readiness checks pass and a backup target is configured.
+# Refuse an obviously volatile /tmp target so a RAM-only backup is not reported
+# as persistent state.
 command -v filetool.sh >/dev/null 2>&1 || fail "filetool.sh not found; state was not saved"
+[ -r /opt/.backup_device ] || fail "/opt/.backup_device missing; backup target is unknown"
+BACKUP_DEVICE="$(tr -d '\\r\\n' </opt/.backup_device)"
+[ -n "$BACKUP_DEVICE" ] || fail "backup target is empty; state was not saved"
+case "$BACKUP_DEVICE" in
+  /tmp|/tmp/*|tmp|tmp/*|/dev/shm|/dev/shm/*)
+    fail "backup target is volatile ($BACKUP_DEVICE); state was not saved"
+    ;;
+esac
+log "Configured Tiny Core backup target: $BACKUP_DEVICE"
 if filetool.sh -b >>"$LOG_FILE" 2>&1; then
   log "PASS: final boot checks passed and Tiny Core state backup completed"
 else
