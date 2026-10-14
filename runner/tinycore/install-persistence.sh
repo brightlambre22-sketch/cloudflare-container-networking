@@ -19,8 +19,10 @@ chmod 755 "$DEST"
 # Ensure /opt is included in Tiny Core's filetool backup list so this boot hook
 # itself survives the successful save. Do not trigger a backup during install:
 # the boot hook performs it only after route and verified HTTPS checks pass.
-if [ -f /opt/.filetool.lst ] && ! grep -qx 'opt' /opt/.filetool.lst; then
-  printf '%s\n' 'opt' >> /opt/.filetool.lst
+if [ ! -f /opt/.filetool.lst ]; then
+  printf '%s\\n' 'opt' > /opt/.filetool.lst
+elif ! grep -qx 'opt' /opt/.filetool.lst; then
+  printf '%s\\n' 'opt' >> /opt/.filetool.lst
 fi
 
 echo "Installed network-only final-boot gate at $DEST"
