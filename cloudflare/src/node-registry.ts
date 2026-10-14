@@ -24,6 +24,63 @@ export class NodeRegistry extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
+    // Authentication records are stored in this existing persistent Durable Object.
+    if (url.pathname === "/auth/account" && request.method === "GET") {
+      const username = (url.searchParams.get("username") ?? "").toLowerCase();
+      if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
+        return Response.json({ error: "invalid_username" }, { status: 400 });
+      }
+      const account = await this.ctx.storage.get<{ username: string; salt: string; passwordHash: string }>("auth:user:" + username);
+      return account ? Response.json(account) : Response.json({ error: "account_not_found" }, { status: 404 });
+    }
+
+    if (url.pathname === "/auth/register" && request.method === "POST") {
+      const body = await request.json().catch(() => ({})) as { username?: string; salt?: string; passwordHash?: string };
+      const username = typeof body.username === "string" ? body.username.toLowerCase() : "";
+      if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username) ||
+          typeof body.salt !== "string" || !/^[A-Za-z0-9_-]{20,64}$/.test(body.salt) ||
+          typeof body.passwordHash !== "string" || !/^[A-Za-z0-9_-]{40,64}$/.test(body.passwordHash)) {
+        return Response.json({ error: "invalid_registration" }, { status: 400 });
+      }
+      const key = "auth:user:" + username;
+      if (await this.ctx.storage.get(key)) return Response.json({ error: "username_taken" }, { status: 409 });
+      await this.ctx.storage.put(key, { username, salt: body.salt, passwordHash: body.passwordHash });
+      return Response.json({ ok: true, username }, { status: 201 });
+    }
+
+    if (url.pathname === "/auth/session" && request.method === "POST") {
+      const body = await request.json().catch(() => ({})) as { token?: string; username?: string; expiresAt?: number };
+      if (typeof body.token !== "string" || !/^[A-Za-z0-9_-]{40,64}$/.test(body.token) ||
+          typeof body.username !== "string" || typeof body.expiresAt !== "number" ||
+          !Number.isFinite(body.expiresAt) || body.expiresAt <= Date.now()) {
+        return Response.json({ error: "invalid_session" }, { status: 400 });
+      }
+      await this.ctx.storage.put("auth:session:" + body.token, {
+        username: body.username.toLowerCase(),
+        expiresAt: body.expiresAt,
+      });
+      return Response.json({ ok: true });
+    }
+
+    if (url.pathname === "/auth/session" && request.method === "GET") {
+      const token = url.searchParams.get("token") ?? "";
+      if (!/^[A-Za-z0-9_-]{40,64}$/.test(token)) return Response.json({ error: "invalid_session" }, { status: 401 });
+      const session = await this.ctx.storage.get<{ username: string; expiresAt: number }>("auth:session:" + token);
+      if (!session || session.expiresAt <= Date.now()) {
+        if (session) await this.ctx.storage.delete("auth:session:" + token);
+        return Response.json({ error: "invalid_session" }, { status: 401 });
+      }
+      return Response.json({ ok: true, username: session.username, expiresAt: session.expiresAt });
+    }
+
+    if (url.pathname === "/auth/logout" && request.method === "POST") {
+      const body = await request.json().catch(() => ({})) as { token?: string };
+      if (typeof body.token === "string" && /^[A-Za-z0-9_-]{40,64}$/.test(body.token)) {
+        await this.ctx.storage.delete("auth:session:" + body.token);
+      }
+      return Response.json({ ok: true });
+    }
+
     if (url.pathname === "/create" && request.method === "POST") {
       const body = await request.json().catch(() => ({})) as {
         node_id?: string;
