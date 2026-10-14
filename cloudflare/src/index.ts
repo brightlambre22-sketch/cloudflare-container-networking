@@ -1,4 +1,5 @@
 import { connect } from "cloudflare:sockets";
+import { ADMIN_ACCESS_CODE } from "./auth-codes";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
@@ -8,6 +9,7 @@ export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
+  VM_SNAPSHOTS: R2Bucket;
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
@@ -41,6 +43,45 @@ function validNodeId(nodeId: string): boolean {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/admin/access") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      let body: { code?: unknown };
+      try { body = (await request.json()) as { code?: unknown }; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      if (typeof body.code !== "string" || body.code !== ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
+      return json({ ok: true });
+    }
+
+    const snapshotMatch = url.pathname.match(/^\/api\/vm-snapshots\/([a-z0-9._-]{1,64})$/i);
+    if (snapshotMatch) {
+      const identity = snapshotMatch[1].toLowerCase();
+      const isAdmin = identity === "admin-user-a" || identity === "admin-user-b";
+      if (isAdmin && request.headers.get("x-admin-code") !== ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      if (!["GET", "PUT", "DELETE"].includes(request.method)) return json({ error: "method_not_allowed" }, 405);
+      const key = `vm-snapshots/${identity}.bin`;
+      if (request.method === "GET") {
+        const object = await env.VM_SNAPSHOTS.get(key);
+        if (!object) return json({ error: "snapshot_not_found" }, 404);
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set("content-type", "application/octet-stream");
+        headers.set("cache-control", "no-store");
+        headers.set("x-snapshot-saved-at", object.customMetadata?.savedAt ?? object.uploaded.toISOString());
+        return new Response(object.body, { headers });
+      }
+      if (request.method === "PUT") {
+        if (!request.body) return json({ error: "empty_snapshot" }, 400);
+        const savedAt = new Date().toISOString();
+        await env.VM_SNAPSHOTS.put(key, request.body, {
+          httpMetadata: { contentType: "application/octet-stream" },
+          customMetadata: { savedAt },
+        });
+        return json({ ok: true, savedAt });
+      }
+      await env.VM_SNAPSHOTS.delete(key);
+      return json({ ok: true });
+    }
 
     if (url.pathname === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
