@@ -55,12 +55,19 @@ async function authStore(env: Env, path: string, init?: RequestInit): Promise<Re
   return registry.fetch(new Request("https://node-registry.internal" + path, init));
 }
 
-async function validDashboardSession(request: Request, env: Env): Promise<boolean> {
+async function dashboardSession(request: Request, env: Env): Promise<{ username: string; expiresAt: number } | null> {
   const cookieHeader = request.headers.get("cookie") ?? "";
   const match = cookieHeader.match(/(?:^|;\s*)myst_dashboard_session=([^;]+)/);
-  if (!match) return false;
+  if (!match) return null;
   const response = await authStore(env, "/auth/session?token=" + encodeURIComponent(match[1]));
-  return response.ok;
+  if (!response.ok) return null;
+  const session = await response.json() as { username?: unknown; expiresAt?: unknown };
+  if (typeof session.username !== "string" || typeof session.expiresAt !== "number") return null;
+  return { username: session.username, expiresAt: session.expiresAt };
+}
+
+async function validDashboardSession(request: Request, env: Env): Promise<boolean> {
+  return (await dashboardSession(request, env)) !== null;
 }
 
 function json(data: unknown, status = 200): Response {
@@ -186,6 +193,13 @@ export default {
           "set-cookie": `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`,
         },
       });
+    }
+
+    if (url.pathname === "/api/auth/session") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const session = await dashboardSession(request, env);
+      if (!session) return json({ error: "dashboard_access_required" }, 401);
+      return json({ authenticated: true, username: session.username, expiresAt: session.expiresAt });
     }
 
     if (url.pathname === "/health") {
