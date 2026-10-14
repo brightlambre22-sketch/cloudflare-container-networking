@@ -31,3 +31,6 @@ storage = "sqlite"
 [exports.NodeRuntime]
 type = "durable-object"
 storage = "sqlite"
+
+[secrets]
+required = ["DASHBOARD_ACCESS_KEY"]
