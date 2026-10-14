@@ -29,15 +29,17 @@ test("completion markers are emitted on their own lines", () => {
   }
 });
 
-test("TLS installs run in the background and gate HTTPS on actual files", () => {
+test("TLS installs complete before checking certificate bundle paths", () => {
   assert.ok(html.includes("tce-load -w openssl-1.1.1.tcz"));
   assert.ok(html.includes("tce-load -w ca-certificates.tcz"));
   assert.ok(html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
   assert.ok(html.includes("openssl version >/dev/null 2>&1"));
   assert.ok(html.includes('kill -0 "$op" 2>/dev/null'));
-  assert.ok(html.includes('kill -0 "$cp" 2>/dev/null'));
-  assert.ok(html.includes("tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1 &"));
-  assert.ok(html.includes("/usr/local/etc/ssl/certs/ca-certificate"));
+  assert.ok(!html.includes('kill -0 "$cp" 2>/dev/null'));
+  assert.ok(html.includes("tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1; ca_ir=$?"));
+  assert.ok(html.includes("/usr/local/share/ca-certificates/mozilla/*.crt"));
+  assert.ok(html.includes("CA_INSTALL_RC=$ca_ir"));
+  assert.ok(html.includes("CA_BUNDLE_PATH=${CA_BUNDLE:-MISSING}"));
   assert.ok(html.indexOf("tce-load -i openssl-1.1.1") < html.indexOf("tce-load -i ca-certificates"));
   assert.ok(html.indexOf("tce-load -i ca-certificates") < html.indexOf("${apiUrl}/health"));
 });
