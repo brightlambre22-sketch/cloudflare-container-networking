@@ -29,12 +29,35 @@ case "$ARCH" in
     ;;
 esac
 
+# Fail early if required utilities are unavailable. Tiny Core commonly has
+# OpenSSL but may not include the standalone sha256sum utility.
+command -v wget >/dev/null 2>&1 || { echo "wget is required" >&2; exit 1; }
+command -v tar >/dev/null 2>&1 || { echo "tar is required" >&2; exit 1; }
+command -v awk >/dev/null 2>&1 || { echo "awk is required" >&2; exit 1; }
+command -v find >/dev/null 2>&1 || { echo "find is required" >&2; exit 1; }
+command -v head >/dev/null 2>&1 || { echo "head is required" >&2; exit 1; }
+command -v cp >/dev/null 2>&1 || { echo "cp is required" >&2; exit 1; }
+command -v chmod >/dev/null 2>&1 || { echo "chmod is required" >&2; exit 1; }
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v openssl >/dev/null 2>&1; then
+  echo "A SHA-256 utility is required (sha256sum or openssl)" >&2
+  exit 1
+fi
+
+sha256_file() {
+  file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    openssl dgst -sha256 "$file" | awk '{print $NF}'
+  fi
+}
+
 # The runner scripts expect a real Mysterium executable. Download the pinned
 # official Linux amd64 release and verify its SHA-256 before installing it.
 if [ ! -x /opt/mysterium/myst ]; then
   echo "Downloading Mysterium $MYST_VERSION..."
   wget -q -O /tmp/myst_linux_amd64.tar.gz "$MYST_URL"
-  actual="$(sha256sum /tmp/myst_linux_amd64.tar.gz | awk '{print $1}')"
+  actual="$(sha256_file /tmp/myst_linux_amd64.tar.gz)"
   [ "$actual" = "$MYST_SHA256" ] || {
     echo "SHA-256 mismatch: Mysterium $MYST_VERSION" >&2
     rm -f /tmp/myst_linux_amd64.tar.gz
@@ -46,6 +69,7 @@ if [ ! -x /opt/mysterium/myst ]; then
   found="$(find /tmp/myst-extract -type f -name myst | head -n 1)"
   [ -n "$found" ] || {
     echo "Mysterium archive did not contain a myst executable" >&2
+    rm -f /tmp/myst-extract /tmp/myst_linux_amd64.tar.gz
     exit 1
   }
   cp "$found" /opt/mysterium/myst
@@ -53,16 +77,12 @@ if [ ! -x /opt/mysterium/myst ]; then
   rm -rf /tmp/myst-extract /tmp/myst_linux_amd64.tar.gz
 fi
 
-
-command -v wget >/dev/null 2>&1 || { echo "wget is required" >&2; exit 1; }
-command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit 1; }
-
 fetch_verified() {
   name="$1"
   expected="$2"
-  tmp="/tmp/$name.$$"
+  tmp="/tmp/${name}.${NODE_ID}.tmp"
   wget -q -O "$tmp" "$RAW_BASE/$name"
-  actual="$(sha256sum "$tmp" | awk '{print $1}')"
+  actual="$(sha256_file "$tmp")"
   [ "$actual" = "$expected" ] || { echo "SHA-256 mismatch: $name" >&2; rm -f "$tmp"; exit 1; }
   mv "$tmp" "$ROOT/$name"
   chmod +x "$ROOT/$name"
