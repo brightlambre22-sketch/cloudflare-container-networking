@@ -36,6 +36,26 @@ const action=button.dataset.action;
 frame.contentWindow.postMessage({type:'vm-control',action},window.location.origin);
 status.lastElementChild.textContent=action==='start'?'Resume requested':action==='stop'?'Pause requested':'Reboot requested';
 }));
-frame.addEventListener('load',()=>{status.lastElementChild.textContent='Console loaded';});
-document.getElementById('logout').addEventListener('click',async()=>{try{await fetch('/api/auth/logout',{method:'POST'});}finally{window.location.replace('/access.html');}});
+window.addEventListener('message',event=>{
+if(event.origin!==window.location.origin||event.source!==frame.contentWindow||!event.data)return;
+if(event.data.type==='vm-status'&&typeof event.data.text==='string')status.lastElementChild.textContent=event.data.text;
+});
+frame.addEventListener('load',()=>{if(status.lastElementChild.textContent==='Loading console')status.lastElementChild.textContent='Console page loaded; starting VM…';});
+document.getElementById('logout').addEventListener('click',async event=>{
+const button=event.currentTarget;button.disabled=true;
+const requestId='save-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+try{
+await new Promise(resolve=>{
+let settled=false;
+const finish=()=>{if(settled)return;settled=true;clearTimeout(timer);window.removeEventListener('message',onMessage);resolve();};
+const onMessage=message=>{if(message.origin===window.location.origin&&message.source===frame.contentWindow&&message.data&&message.data.type==='vm-save-state-result'&&message.data.requestId===requestId)finish();};
+const timer=setTimeout(finish,30000);
+window.addEventListener('message',onMessage);
+if(!frame.contentWindow){finish();return;}
+frame.contentWindow.postMessage({type:'vm-save-state',requestId},window.location.origin);
+});
+}finally{
+try{await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'});}finally{window.location.replace('/access.html');}
+}
+});
 </script></body></html>
