@@ -35,8 +35,11 @@ test("TLS installs complete before checking certificate bundle paths", () => {
   assert.ok(html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
   assert.ok(html.includes("openssl version >/dev/null 2>&1"));
   assert.ok(html.includes('kill -0 "$op" 2>/dev/null'));
-  assert.ok(!html.includes('kill -0 "$cp" 2>/dev/null'));
-  assert.ok(html.includes("tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1; ca_ir=$?"));
+  assert.ok(html.includes('while kill -0 "$cp" 2>/dev/null; do sleep 1; done; wait "$cp"; ca_ir=$?'));
+  assert.ok(html.includes("tce-load -i ca-certificates >/tmp/ca-certificates-install.log 2>&1 & cp=$!"));
+  assert.ok(html.includes('while kill -0 "$cp" 2>/dev/null; do sleep 1; done; wait "$cp"; ca_ir=$?'));
+  assert.ok(html.includes("CA_INSTALLED_FILE=$f"));
+  assert.ok(html.includes("CA_INSTALLED_FILE_COUNT=$new_count"));
   assert.ok(html.includes("/usr/local/share/ca-certificates/mozilla/*.crt"));
   assert.ok(html.includes("CA_INSTALL_RC=$ca_ir"));
   assert.ok(html.includes("CA_BUNDLE_PATH=${CA_BUNDLE:-MISSING}"));
