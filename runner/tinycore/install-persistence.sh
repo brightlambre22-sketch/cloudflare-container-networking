@@ -1,24 +1,30 @@
 #!/bin/sh
 set -eu
 
-# Run once inside the Tiny Core guest after copying this runner directory.
-# It creates the persistent layout and installs the boot hook.
+# Install the network-only final-boot gate as Tiny Core's /opt/bootlocal.sh.
+# Usage: sudo ./install-persistence.sh [runner-source-directory]
 SRC="${1:-/tmp/cloudflare-node}"
-DEST="/opt/cloudflare-node"
-ENV_SRC="${2:-$SRC/node.env}"
+BOOT_SRC="$SRC/bootlocal.sh"
+DEST="/opt/bootlocal.sh"
 
-[ -d "$SRC" ] || { echo "Runner source not found: $SRC" >&2; exit 1; }
-[ -f "$ENV_SRC" ] || { echo "node.env not found: $ENV_SRC" >&2; exit 1; }
+[ -f "$BOOT_SRC" ] || {
+  echo "bootlocal.sh not found in source directory: $SRC" >&2
+  exit 1
+}
+[ -d /opt ] || { echo "/opt is unavailable" >&2; exit 1; }
 
-mkdir -p "$DEST" /etc/cloudflare-node /var/lib/mysterium-node /var/log /var/run
-cp "$SRC/configure-node-ips.sh" "$DEST/"
-cp "$SRC/myst-supervisor.sh" "$DEST/"
-cp "$SRC/cloudflare-runner.sh" "$DEST/"
-cp "$SRC/bootlocal.sh" /usr/local/etc/init.d/bootlocal.sh
-cp "$ENV_SRC" /etc/cloudflare-node/node.env
+cp "$BOOT_SRC" "$DEST"
+chmod 755 "$DEST"
 
-chmod +x "$DEST/"*.sh /usr/local/etc/init.d/bootlocal.sh
-chmod 600 /etc/cloudflare-node/node.env
+# Ensure /opt is included in Tiny Core's filetool backup list so this boot hook
+# itself survives the successful save. Do not trigger a backup during install:
+# the boot hook performs it only after route and verified HTTPS checks pass.
+if [ ! -f /opt/.filetool.lst ]; then
+  printf '%s\n' 'opt' > /opt/.filetool.lst
+elif ! grep -qx 'opt' /opt/.filetool.lst; then
+  printf '%s\n' 'opt' >> /opt/.filetool.lst
+fi
 
-echo "Persistent runner installed."
-echo "Back up Tiny Core persistence now with: sudo filetool.sh -b"
+echo "Installed network-only final-boot gate at $DEST"
+echo "On the next boot it will wait for a default route, verify HTTPS/TLS,"
+echo "and run filetool.sh -b only if those checks pass."
