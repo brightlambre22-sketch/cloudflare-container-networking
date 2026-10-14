@@ -52,21 +52,56 @@ let reportTimer=null,bootstrapStarted=false,bootComplete=false;
 function statusText(t){status.textContent=t}
 let snapshotBusy=false,snapshotLoadFailed=false,vmLoaded=false,restoredSnapshot=false,autosaveTimer=null;
 function stateText(t){stateStatus.textContent=t}
+const SNAPSHOT_CHUNK_BYTES=8*1024*1024;
 function snapshotUrl(){if(!window.snapshotIdentity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(window.snapshotIdentity)}
-function snapshotHeaders(){const headers={'content-type':'application/octet-stream'};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;return headers}
+function snapshotHeaders(contentType='application/octet-stream'){const headers={'content-type':contentType};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;return headers}
 async function saveVmState(manual=true){
 if(!bootComplete){if(manual)stateText('Startup must finish before saving a snapshot.');return false}
 if(snapshotLoadFailed){stateText('Snapshot load failed; refusing to overwrite server state. Reload and retry.');return false}
 if(snapshotBusy){if(manual)stateText('A save is already in progress.');return false}
 if(!vmLoaded||!window.emulator||typeof window.emulator.save_state!=='function'){if(manual)stateText('VM is not ready to save yet.');return false}
-snapshotBusy=true;stateText('Saving VM snapshot to server…');
-try{const state=await window.emulator.save_state();const response=await fetch(snapshotUrl(),{method:'PUT',headers:snapshotHeaders(),body:state});if(!response.ok)throw new Error('server returned HTTP '+response.status);const result=await response.json();stateText('Server snapshot saved at '+new Date(result.savedAt||Date.now()).toLocaleTimeString());return true}
-catch(e){stateText('Snapshot save failed: '+(e&&e.message?e.message:'server storage unavailable'));report('\\n*** VM SNAPSHOT SAVE FAILED: '+(e&&e.message?e.message:String(e))+' ***\\n');return false}
+snapshotBusy=true;stateText('Creating VM snapshot…');
+try{
+const state=await window.emulator.save_state();
+const generation=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+const chunks=Math.ceil(state.byteLength/SNAPSHOT_CHUNK_BYTES);
+for(let part=0;part<chunks;part++){
+const chunk=state.slice(part*SNAPSHOT_CHUNK_BYTES,Math.min((part+1)*SNAPSHOT_CHUNK_BYTES,state.byteLength));
+stateText('Uploading snapshot part '+(part+1)+' of '+chunks+'…');
+const response=await fetch(snapshotUrl()+'/chunks/'+generation+'/'+part,{method:'PUT',headers:snapshotHeaders(),body:chunk});
+if(!response.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+response.status);
+}
+const savedAt=new Date().toISOString();
+const response=await fetch(snapshotUrl(),{method:'PUT',headers:snapshotHeaders('application/json'),body:JSON.stringify({version:1,generation,chunks,byteLength:state.byteLength,savedAt})});
+if(!response.ok)throw new Error('snapshot manifest failed with HTTP '+response.status);
+const result=await response.json();
+stateText('Server snapshot saved at '+new Date(result.savedAt||savedAt).toLocaleTimeString());
+return true;
+}catch(e){stateText('Snapshot save failed: '+(e&&e.message?e.message:'server storage unavailable'));report('\\n*** VM SNAPSHOT SAVE FAILED: '+(e&&e.message?e.message:String(e))+' ***\\n');return false}
 finally{snapshotBusy=false}
 }
 async function loadVmState(){
-try{const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;const response=await fetch(snapshotUrl(),{headers,cache:'no-store'});if(response.status===404){stateText('No server snapshot found; starting a clean VM.');return null}if(!response.ok)throw new Error('server returned HTTP '+response.status);const state=await response.arrayBuffer();return {state,savedAt:Date.parse(response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1}}
-catch(e){snapshotLoadFailed=true;stateText('Server snapshot unavailable; starting a clean VM.');report('\\n*** SNAPSHOT LOAD NOTE: '+(e&&e.message?e.message:String(e))+'; autosave paused to protect any existing snapshot. ***\\n');return null}
+try{
+const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;
+const response=await fetch(snapshotUrl(),{headers,cache:'no-store'});
+if(response.status===404){stateText('No server snapshot found; starting a clean VM.');return null}
+if(!response.ok)throw new Error('server returned HTTP '+response.status);
+const manifest=await response.json();
+if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912)throw new Error('snapshot manifest is invalid');
+const state=new Uint8Array(manifest.byteLength);
+for(let base=0;base<manifest.chunks;base+=4){
+const batch=await Promise.all(Array.from({length:Math.min(4,manifest.chunks-base)},async(_,offset)=>{
+const part=base+offset;
+const chunkResponse=await fetch(snapshotUrl()+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
+if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status);
+return {part,bytes:await chunkResponse.arrayBuffer()};
+}));
+for(const item of batch)state.set(new Uint8Array(item.bytes),item.part*SNAPSHOT_CHUNK_BYTES);
+stateText('Downloading saved VM snapshot '+Math.min(base+4,manifest.chunks)+' of '+manifest.chunks+'…');
+}
+if(state.byteLength!==manifest.byteLength)throw new Error('snapshot size did not match its manifest');
+return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1};
+}catch(e){snapshotLoadFailed=true;stateText('Server snapshot unavailable; starting a clean VM.');report('\\n*** SNAPSHOT LOAD NOTE: '+(e&&e.message?e.message:String(e))+'; autosave paused to protect any existing snapshot. ***\\n');return null}
 }
 document.getElementById('save-vm-state').onclick=()=>saveVmState(true);
 document.getElementById('clear-vm-state').onclick=async()=>{
