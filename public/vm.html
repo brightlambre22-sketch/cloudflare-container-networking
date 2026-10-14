@@ -127,7 +127,7 @@ if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
 
-const diagnosticCommand=`wget -T 20 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
+const diagnosticCommand=`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
 function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
@@ -152,7 +152,7 @@ const commands=[
 `echo "--- NETWORK INIT ---"; id; sudo -n sh -c 'set +e; /sbin/ifconfig eth0 up; /sbin/udhcpc -f -n -q -t 5 -T 3 -i eth0; rc=$?; echo DHCP_RC=$rc; /sbin/ifconfig eth0; /sbin/route -n; if [ "$rc" -eq 0 ] && /sbin/ifconfig eth0 | grep -Eq "inet (addr:)?([0-9]{1,3}[.]){3}[0-9]{1,3}" && /sbin/route -n | grep -Eq "^0[.]0[.]0[.]0[[:space:]]+[1-9][0-9]*[.]"; then echo DHCP_OK; else echo DHCP_FAIL; fi'; echo DHCP_DONE`,
 'echo "--- RESOURCE PREFLIGHT ---"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo "OPENSSL_PACKAGE_INSTALL=SKIPPED; HTTPS is checked directly in the next steps."; printf "\n__RESOURCE_PREFLIGHT_DONE\n"',
 'tce-load -w ca-certificates.tcz; rc=$?; echo CA_CERTIFICATES_DOWNLOAD_RC=$rc; printf "\\n__CA_CERTIFICATES_DOWNLOAD_%s:%s\\n" DONE "$rc"',
-`rc=1; attempt=1; while [ "$attempt" -le 5 ]; do echo "HTTPS_PREFLIGHT_ATTEMPT=$attempt"; if wget -T 12 -q -O /dev/null ${apiUrl}/health; then rc=0; break; else rc=$?; fi; attempt=$((attempt+1)); sleep 2; done; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\n__EGRESS_PREFLIGHT_%s:%s\n" DONE "$rc"`,
+`rc=1; attempt=1; while [ "$attempt" -le 5 ]; do echo "HTTPS_PREFLIGHT_ATTEMPT=$attempt"; if wget -q -O /dev/null ${apiUrl}/health; then rc=0; break; else rc=$?; fi; attempt=$((attempt+1)); sleep 2; done; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\n__EGRESS_PREFLIGHT_%s:%s\n" DONE "$rc"`,
 `wget -q -O /tmp/cloudflare-browser-bootstrap.sh ${apiUrl}/runner/tinycore/browser-bootstrap.sh; rc=$?; printf "\n__BOOTSTRAP_DOWNLOAD_%s:%s\n" DONE "$rc"`,
 'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then tce-load -wil ca-certificates.tcz && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"\n__BOOTSTRAP_RUN_%s:%s\n\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
 'echo "--- CA CERTIFICATE INSTALL STATUS ---"; if [ -f /tmp/ca-certificates-install.rc ]; then echo CA_CERTIFICATES_RC=$(cat /tmp/ca-certificates-install.rc); tail -n 20 /tmp/ca-certificates-install.log; else echo CA_CERTIFICATES_STATUS=STILL_RUNNING; tail -n 20 /tmp/ca-certificates-install.log; fi; if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; printf "%s\n" failed > /tmp/bootstrap-step-5.done; printf "\n__BOOTSTRAP_VERIFY_%s:%s\n" DONE failed; else printf "%s\n" ok > /tmp/bootstrap-step-5.done; printf "\n__BOOTSTRAP_VERIFY_%s:%s\n" DONE ok; fi',
@@ -160,14 +160,14 @@ const commands=[
 'if [ -x /opt/cloudflare-node/cloudflare-runner.sh ]; then nohup /opt/cloudflare-node/cloudflare-runner.sh >/var/log/cloudflare-runner-console.log 2>&1 & fi; printf \"\n__RUNNER_%s\n\" DONE'
 ];
 const markers=['DHCP_DONE','__RESOURCE_PREFLIGHT_DONE','__CA_CERTIFICATES_DOWNLOAD_DONE:','__EGRESS_PREFLIGHT_DONE:','__BOOTSTRAP_DOWNLOAD_DONE:','__BOOTSTRAP_RUN_DONE:','__BOOTSTRAP_VERIFY_DONE:','__SUPERVISOR_DONE','__RUNNER_DONE'];
-const timeouts=[120000,120000,120000,120000,120000,900000,120000,120000,120000];
+// No per-step timeout; wait for completion markers.
 let i=0;
 function terminal(){return screenText()}
 async function next(){
 if(i>=commands.length){
 statusText('Bootstrap finished; collecting network report. Mysterium processes remain running.');
 report('\n===== FULL BOOTSTRAP COMPLETE =====\n');
-const postCommands=[`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; rc=$?; printf \"\n__NETWORK_DOWNLOAD_%s:%s\n\" DONE \"$rc\"`,'sh /tmp/network-test.sh; rc=$?; printf \"\n__NETWORK_TEST_%s:%s\n\" DONE \"$rc\"',`wget -q -O /tmp/fineproxy-test.sh ${apiUrl}/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"\n__FINEPROXY_DOWNLOAD_%s:%s\n\" DONE \"$rc\"`,'sh /tmp/fineproxy-test.sh; rc=$?; printf \"\n__FINEPROXY_TEST_%s:%s\n\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; async function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); await sendVmCommand(pc+'\n'); const st=Date.now(); (function w(){const t=screenText(); if(t.indexOf(pm)>=0){runPost();return;} if(Date.now()-st>180000){report('*** TIMEOUT waiting for '+pm+'; stopping post-boot tests. ***\n');statusText('Post-boot tests stopped: timed out waiting for '+pm+'.');return;} setTimeout(w,500)})()} runPost();
+const postCommands=[`wget -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; rc=$?; printf \"\n__NETWORK_DOWNLOAD_%s:%s\n\" DONE \"$rc\"`,'sh /tmp/network-test.sh; rc=$?; printf \"\n__NETWORK_TEST_%s:%s\n\" DONE \"$rc\"',`wget -q -O /tmp/fineproxy-test.sh ${apiUrl}/runner/tinycore/fineproxy-test.sh; rc=$?; printf \"\n__FINEPROXY_DOWNLOAD_%s:%s\n\" DONE \"$rc\"`,'sh /tmp/fineproxy-test.sh; rc=$?; printf \"\n__FINEPROXY_TEST_%s:%s\n\" DONE \"$rc\"']; const postMarkers=['__NETWORK_DOWNLOAD_DONE:','__NETWORK_TEST_DONE:','__FINEPROXY_DOWNLOAD_DONE:','__FINEPROXY_TEST_DONE:']; let pi=0; async function runPost(){if(pi>=postCommands.length){statusText('Mysterium bootstrap and FineProxy test complete.');return;} const pc=postCommands[pi],pm=postMarkers[pi++]; report('\n===== POST-BOOT '+pi+'/4 =====\n'+pc+'\n'); await sendVmCommand(pc+'\n'); (function w(){const t=screenText(); if(t.indexOf(pm)>=0){runPost();return;} setTimeout(w,500)})()} runPost();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
@@ -183,13 +183,9 @@ if(marker==='DHCP_DONE'&&!terminal().includes('DHCP_OK')){report('*** DHCP did n
 if(marker==='__BOOTSTRAP_VERIFY_DONE:'&&terminal().includes('__BOOTSTRAP_VERIFY_DONE:failed')){report('*** Required startup files are missing; runner launch aborted. ***\n');statusText('Bootstrap stopped: required files are missing.');return}
 next();return
 }
-if(Date.now()-started>=timeouts[n]){
-report('*** TIMEOUT waiting for '+marker+'; stopping startup sequence; no later commands were sent. ***\n----- timeout screen snapshot -----\n'+terminal()+'\n----- end timeout screen snapshot -----\n');
-statusText('Bootstrap stopped: timed out waiting for '+marker+'. No later commands were sent.');return
-}
 setTimeout(wait,500)
 })()
-}else setTimeout(next,timeouts[n])
+}else setTimeout(next,250)
 }
 next()
 }
@@ -231,9 +227,8 @@ if(!restoredSnapshot)startBootMonitor();
 else statusText('Saved VM resumed. Network services may need reconnecting.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 });
-const started=Date.now();
 let promptCandidate='',promptCandidateSince=0;
-const BOOT_TIMEOUT_MS=15*60*1000,PROMPT_STABLE_MS=2000;
+const PROMPT_STABLE_MS=2000;
 function shellPrompt(text){
 const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
 const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
@@ -257,11 +252,6 @@ return;
 }
 }else{promptCandidate=prompt;promptCandidateSince=Date.now();}
 }else{promptCandidate='';promptCandidateSince=0;}
-if(Date.now()-started>=BOOT_TIMEOUT_MS){
-statusText('Tiny Core did not reach a stable shell prompt within 15 minutes. No commands were sent.');
-report('*** BOOT TIMEOUT: no stable Tiny Core shell prompt detected; no commands were sent. ***\n');
-return;
-}
 setTimeout(waitForBootComplete,500);
 })();
 }
