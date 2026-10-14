@@ -27,12 +27,15 @@ test("VM uses a built ISO asset, a single supported relay configuration, and ret
   assert.ok(html.includes("cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'}"), "VM should use the existing NIC-enabled experimental ISO");
   assert.ok(html.includes("net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'}"));
   assert.ok(html.includes("network_relay_url:'wss://relay.widgetry.org/'"), "retain relay fallback for this deployed v86 runtime");
-  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v3'"), "network changes should invalidate stale saved NIC state");
+  assert.ok(html.includes("SNAPSHOT_KEY='tinycore-main-v4'"), "network changes should invalidate stale saved NIC and unfinished-shell state");
   assert.ok(html.includes("while :; do /sbin/udhcpc -f -n -q -i \"$iface\";"), "DHCP should retry instead of abandoning the relay after three discovers");
   assert.ok(html.includes("/sbin/modprobe ne2k-pci"), "try loading the NE2000 PCI driver when no interface is present");
   assert.ok(html.includes("NIC_MISSING"), "report driver diagnostics instead of retrying DHCP forever without a NIC");
   assert.ok(html.includes("DHCP_RETRYING_NO_LEASE"));
-  assert.ok(html.includes("echo DHCP_OK; break"));
+  assert.ok(html.includes("echo DHCP_OK"), "successful DHCP path should emit its completion marker");
+  const firstCommand = html.match(/const commands=\[\s*`([\s\S]*?)`,/);
+  assert.ok(firstCommand, "first startup command should be present");
+  assert.ok(firstCommand[1].length < 900, "network init command must stay short enough to avoid terminal input truncation");
 });
 
 test("startup prompt detection supports changed hostnames and explicitly wakes the shell before the first command", () => {
