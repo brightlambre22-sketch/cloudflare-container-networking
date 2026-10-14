@@ -76,7 +76,7 @@ if(t){mystLog.textContent=t;mystLog.scrollTop=mystLog.scrollHeight}
 }
 setInterval(mirror,500);
 
-const diagnosticCommand='sh /tmp/network-test.sh';
+const diagnosticCommand=`wget -T 20 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
 function runDiagnostic(label){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')return;
@@ -101,7 +101,7 @@ const commands=[
 `echo "--- NETWORK INIT ---"; id; sudo -n sh -c 'set +e; /sbin/ifconfig eth0 up; /sbin/udhcpc -f -n -q -t 5 -T 3 -i eth0; rc=$?; echo DHCP_RC=$rc; /sbin/ifconfig eth0; /sbin/route -n; if [ "$rc" -eq 0 ] && /sbin/ifconfig eth0 | grep -Eq "inet (addr:)?([0-9]{1,3}[.]){3}[0-9]{1,3}" && /sbin/route -n | grep -Eq "^0[.]0[.]0[.]0[[:space:]]+[1-9][0-9]*[.]"; then echo DHCP_OK; else echo DHCP_FAIL; fi'; echo DHCP_DONE`,
 'echo "--- RESOURCE PREFLIGHT ---"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo "--- OPENSSL PACKAGE ---"; tce-load -wil openssl-1.1.1.tcz; rc=$?; echo OPENSSL_RC=$rc; printf "\n__OPENSSL_DONE:%s\n" "$rc"',
 'tce-load -w ca-certificates.tcz; rc=$?; echo CA_CERTIFICATES_DOWNLOAD_RC=$rc; printf "\\n__CA_CERTIFICATES_DOWNLOAD_%s:%s\\n" DONE "$rc"',
-`wget -T 12 -q -O /dev/null ${apiUrl}/health; rc=$?; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\n__EGRESS_PREFLIGHT_%s:%s\n" DONE "$rc"`,
+`rc=1; attempt=1; while [ "$attempt" -le 5 ]; do echo "HTTPS_PREFLIGHT_ATTEMPT=$attempt"; if wget -T 12 -q -O /dev/null ${apiUrl}/health; then rc=0; break; else rc=$?; fi; attempt=$((attempt+1)); sleep 2; done; echo INTERNET_HTTPS_RC=$rc; if [ "$rc" -eq 0 ]; then echo INTERNET_HTTPS_OK; else echo INTERNET_HTTPS_FAIL; fi; printf "\n__EGRESS_PREFLIGHT_%s:%s\n" DONE "$rc"`,
 `wget -q -O /tmp/cloudflare-browser-bootstrap.sh ${apiUrl}/runner/tinycore/browser-bootstrap.sh; rc=$?; printf "\n__BOOTSTRAP_DOWNLOAD_%s:%s\n" DONE "$rc"`,
 'if [ -f /tmp/cloudflare-browser-bootstrap.sh ]; then tce-load -wil ca-certificates.tcz && sh /tmp/cloudflare-browser-bootstrap.sh '+apiUrl+' '+nodeId+'; rc=$?; printf \"\n__BOOTSTRAP_RUN_%s:%s\n\" DONE \"$rc\"; else printf "__BOOTSTRAP_RUN_%s:%s" DONE download_failed; fi',
 'echo "--- CA CERTIFICATE INSTALL STATUS ---"; if [ -f /tmp/ca-certificates-install.rc ]; then echo CA_CERTIFICATES_RC=$(cat /tmp/ca-certificates-install.rc); tail -n 20 /tmp/ca-certificates-install.log; else echo CA_CERTIFICATES_STATUS=STILL_RUNNING; tail -n 20 /tmp/ca-certificates-install.log; fi; if [ ! -x /opt/cloudflare-node/myst-supervisor.sh ] || [ ! -x /opt/cloudflare-node/cloudflare-runner.sh ] || [ ! -x /opt/mysterium/myst ]; then echo "BOOTSTRAP FAILED: required files are missing"; ls -l /opt/cloudflare-node /opt/mysterium 2>/dev/null || true; printf "%s\n" failed > /tmp/bootstrap-step-5.done; printf "\n__BOOTSTRAP_VERIFY_%s:%s\n" DONE failed; else printf "%s\n" ok > /tmp/bootstrap-step-5.done; printf "\n__BOOTSTRAP_VERIFY_%s:%s\n" DONE ok; fi',
