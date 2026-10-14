@@ -30,22 +30,96 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <div id="screen_container"><div></div><canvas></canvas></div>
 <script src="/v86/libv86.js"></script>
 <script>
-window.onload=function(){
+window.onload=async function(){
 const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('vm-log'),copyStatus=document.getElementById('copy-status');
 const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
-let reportTimer=null,bootstrapStarted=false,bootComplete=false;
+let reportTimer=null,bootstrapStarted=false,bootComplete=false,bootstrapFinished=false,vmStateKey='',snapshotWrite=null,snapshotSaveFailureReported=false;
 
-function statusText(t){status.textContent=t}
+function statusText(t){status.textContent=t;if(window.parent!==window)window.parent.postMessage({type:'vm-status',text:t},window.location.origin)}
 window.addEventListener('message',function(event){
-if(event.origin!==window.location.origin||!event.data||event.data.type!=='vm-control')return;
+if(event.origin!==window.location.origin||event.source!==window.parent||!event.data)return;
+if(event.data.type==='vm-save-state'){
+const requestId=event.data.requestId;
+saveVmState().then(saved=>window.parent.postMessage({type:'vm-save-state-result',requestId,saved},window.location.origin));
+return;
+}
+if(event.data.type!=='vm-control')return;
 try{
 if(event.data.action==='start'){if(window.emulator&&typeof window.emulator.run==='function'){window.emulator.run();statusText('VM resumed.');}}
-else if(event.data.action==='stop'){if(window.emulator&&typeof window.emulator.stop==='function'){window.emulator.stop();statusText('VM paused by dashboard.');}}
-else if(event.data.action==='reboot'){if(window.emulator&&typeof window.emulator.restart==='function'){window.emulator.restart();statusText('VM reboot requested.');}else{statusText('Reboot is not supported by this v86 build.');}}
+else if(event.data.action==='stop'){if(window.emulator&&typeof window.emulator.stop==='function'){window.emulator.stop();statusText('VM paused by dashboard.');saveVmState();}}
+else if(event.data.action==='reboot'){if(window.emulator&&typeof window.emulator.restart==='function'){bootstrapStarted=false;bootComplete=false;bootstrapFinished=false;window.emulator.restart();statusText('VM reboot requested.');setTimeout(watchForBoot,1000);}else{statusText('Reboot is not supported by this v86 build.');}}
 }catch(error){statusText('VM control failed: '+error.message)}
 });
 function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
 function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
+function openVmStateDb(){
+return new Promise((resolve,reject)=>{
+if(!window.indexedDB){reject(new Error('IndexedDB is unavailable'));return;}
+const request=window.indexedDB.open('myst-v86-state',1);
+request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains('snapshots'))db.createObjectStore('snapshots');};
+request.onsuccess=()=>resolve(request.result);
+request.onerror=()=>reject(request.error||new Error('Could not open VM state storage'));
+request.onblocked=()=>reject(new Error('VM state storage is blocked by another tab'));
+});
+}
+async function readVmState(key){
+const db=await openVmStateDb();
+return new Promise((resolve,reject)=>{
+const tx=db.transaction('snapshots','readonly');let value=null;
+const request=tx.objectStore('snapshots').get(key);
+request.onsuccess=()=>{value=request.result||null;};
+request.onerror=()=>{db.close();reject(request.error||new Error('Could not read VM state'));};
+tx.oncomplete=()=>{db.close();resolve(value);};
+tx.onerror=()=>{db.close();reject(tx.error||new Error('Could not read VM state'));};
+tx.onabort=()=>{db.close();reject(tx.error||new Error('VM state read was aborted'));};
+});
+}
+async function writeVmState(key,value){
+const db=await openVmStateDb();
+return new Promise((resolve,reject)=>{
+const tx=db.transaction('snapshots','readwrite');
+tx.objectStore('snapshots').put(value,key);
+tx.oncomplete=()=>{db.close();resolve();};
+tx.onerror=()=>{db.close();reject(tx.error||new Error('Could not write VM state'));};
+tx.onabort=()=>{db.close();reject(tx.error||new Error('VM state write was aborted'));};
+});
+}
+async function deleteVmState(key){
+if(!key)return;
+const db=await openVmStateDb();
+return new Promise((resolve,reject)=>{
+const tx=db.transaction('snapshots','readwrite');tx.objectStore('snapshots').delete(key);
+tx.oncomplete=()=>{db.close();resolve();};
+tx.onerror=()=>{db.close();reject(tx.error||new Error('Could not delete VM state'));};
+tx.onabort=()=>{db.close();reject(tx.error||new Error('VM state delete was aborted'));};
+});
+}
+function normalizeStateBuffer(state){
+if(state instanceof ArrayBuffer)return state;
+if(ArrayBuffer.isView(state))return state.buffer.slice(state.byteOffset,state.byteOffset+state.byteLength);
+return null;
+}
+function isV86State(state){
+const buffer=normalizeStateBuffer(state);if(!buffer||buffer.byteLength<16)return false;
+try{const view=new DataView(buffer);return view.getInt32(0,true)===-2039052682&&view.getInt32(4,true)===6&&view.getInt32(8,true)===buffer.byteLength;}catch(e){return false;}
+}
+function saveVmState(){
+if(!vmStateKey||!bootstrapFinished||!window.emulator||typeof window.emulator.save_state!=='function')return Promise.resolve(false);
+if(snapshotWrite)return snapshotWrite;
+snapshotWrite=(async()=>{
+const state=normalizeStateBuffer(await window.emulator.save_state());
+if(!isV86State(state))throw new Error('v86 returned an invalid snapshot');
+await writeVmState(vmStateKey,{formatVersion:1,updatedAt:Date.now(),state});
+snapshotSaveFailureReported=false;copyStatus.textContent='VM state saved locally for this account.';return true;
+})().catch(error=>{
+copyStatus.textContent='VM state could not be saved in this browser.';
+if(!snapshotSaveFailureReported){const reason=error&&error.message?error.message:String(error);report('\nVM STATE SAVE FAILED: '+reason+'\n');snapshotSaveFailureReported=true;}
+return false;
+}).finally(()=>{snapshotWrite=null;});
+return snapshotWrite;
+}
+setInterval(()=>{if(bootstrapFinished)saveVmState();},60000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&bootstrapFinished)saveVmState();});
 window.addEventListener('error',function(event){
  const message='BROWSER ERROR: '+(event.message||'unknown error')+(event.filename?' ('+event.filename+':'+event.lineno+')':'');
  statusText(message);report('\\n'+message+'\\n');
@@ -131,8 +205,10 @@ let i=0;
 function terminal(){return screenText()}
 async function next(){
 if(i>=commands.length){
+bootstrapFinished=true;
 statusText('Bootstrap finished. Background services remain running.');
 report('\\n===== FULL BOOTSTRAP COMPLETE =====\\n');
+saveVmState();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
@@ -159,8 +235,53 @@ setTimeout(wait,500)
 next()
 }
 
+function watchForBoot(){
+statusText('Tiny Core is booting; waiting for a stable shell prompt before sending commands.');
+const started=Date.now(),BOOT_TIMEOUT_MS=15*60*1000,PROMPT_STABLE_MS=2000;
+let promptCandidate='',promptCandidateSince=0;
+function detectPrompt(text){
+const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
+const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
+const pattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
+for(let i=lines.length-1;i>=Math.max(0,lines.length-6);i--){if(pattern.test(lines[i]))return lines[i];}
+return '';
+}
+function poll(){
+const prompt=detectPrompt(screenText());
+if(prompt){
+if(prompt===promptCandidate){
+if(Date.now()-promptCandidateSince>=PROMPT_STABLE_MS){bootComplete=true;statusText('Tiny Core shell prompt is stable; starting bootstrap.');startBootstrap();return;}
+}else{promptCandidate=prompt;promptCandidateSince=Date.now();}
+}else{promptCandidate='';promptCandidateSince=0;}
+if(Date.now()-started>=BOOT_TIMEOUT_MS){statusText('Tiny Core did not reach a stable shell prompt within 15 minutes. No commands were sent.');report('*** BOOT TIMEOUT: no stable Tiny Core shell prompt detected; no commands were sent. ***\n');return;}
+setTimeout(poll,500);
+}
+poll();
+}
+
 results.value='';save();report('\n===== NEW VM RUN =====\n');
 statusText('Loading v86...');
+let initialVmState=null,sessionUsername='';
+try{
+const sessionResponse=await fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'});
+if(!sessionResponse.ok)throw new Error('Signed-in session could not be verified ('+sessionResponse.status+').');
+const session=await sessionResponse.json();
+if(typeof session.username!=='string'||!session.username)throw new Error('Signed-in session has no account identity.');
+sessionUsername=session.username.toLowerCase();
+vmStateKey='myst-v86-state-v1:'+nodeId+':'+sessionUsername;
+const saved=await readVmState(vmStateKey);
+if(saved&&saved.formatVersion===1&&isV86State(saved.state)){
+initialVmState=normalizeStateBuffer(saved.state);
+report('\nA saved VM state was found for this signed-in account. Restoring it...\n');
+}else if(saved){
+await deleteVmState(vmStateKey);
+report('\nThe saved VM state was not supported; starting a fresh VM.\n');
+}
+}catch(error){
+vmStateKey='';
+const reason=error&&error.message?error.message:String(error);
+report('\nVM state lookup unavailable; starting a fresh VM: '+reason+'\n');
+}
 try{
 window.emulator=new V86({
 wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
@@ -168,51 +289,43 @@ screen_container:document.getElementById('screen_container'),
 bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
 cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'},
 net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
-network_relay_url:'wss://relay.widgetry.org/',autostart:true
+network_relay_url:'wss://relay.widgetry.org/',autostart:false
 });
 if(window.emulator&&typeof window.emulator.add_listener==='function'){
- window.emulator.add_listener('emulator-ready',function(){statusText('v86 initialized; waiting for Tiny Core shell prompt.');report('\\nV86 EVENT: emulator-ready\\n');});
- window.emulator.add_listener('emulator-started',function(){report('\\nV86 EVENT: emulator-started\\n');});
- window.emulator.add_listener('emulator-stopped',function(){report('\\nV86 EVENT: emulator-stopped\\n');});
+ window.emulator.add_listener('emulator-ready',function(){statusText('v86 initialized; waiting for Tiny Core shell prompt.');report('\nV86 EVENT: emulator-ready\n');});
+ window.emulator.add_listener('emulator-started',function(){report('\nV86 EVENT: emulator-started\n');});
+ window.emulator.add_listener('emulator-stopped',function(){report('\nV86 EVENT: emulator-stopped\n');});
  window.emulator.add_listener('download-progress',function(event){
   if(event&&typeof event.loaded==='number'&&typeof event.total==='number'&&event.total>0){statusText('Loading VM resources: '+Math.round(event.loaded/event.total*100)+'%');}
  });
+ let loadHandled=false;
+ window.emulator.add_listener('emulator-loaded',function(){
+  if(loadHandled)return;loadHandled=true;
+  (async function(){
+   if(initialVmState){
+    try{
+     await window.emulator.restore_state(initialVmState);
+     bootstrapStarted=true;bootComplete=true;bootstrapFinished=true;
+     report('\nSaved VM state restored for '+sessionUsername+'.\n');
+     window.emulator.run();statusText('Saved VM state restored; VM running.');
+     return;
+    }catch(error){
+     const reason=error&&error.message?error.message:String(error);
+     report('\nVM STATE RESTORE FAILED: '+reason+'\nStarting a fresh VM instead.\n');
+     await deleteVmState(vmStateKey).catch(()=>{});
+     bootstrapStarted=false;bootComplete=false;bootstrapFinished=false;
+     if(typeof window.emulator.restart==='function')window.emulator.restart();
+    }
+   }
+   window.emulator.run();watchForBoot();
+  })().catch(error=>{statusText('VM ERROR: '+(error&&error.message?error.message:String(error)));});
+ });
 }
 statusText('v86 object created; waiting for emulator initialization.');
-const started=Date.now();
-let promptCandidate='',promptCandidateSince=0;
-const BOOT_TIMEOUT_MS=15*60*1000,PROMPT_STABLE_MS=2000;
-function shellPrompt(text){
-const normalized=String(text||'').replace(/\r/g,'').replace(/\u00a0/g,' ');
-const lines=normalized.split('\n').map(line=>line.trim()).filter(Boolean);
-const promptPattern=/^tc@box(?::[^\n]{0,80})?\s*[$#]\s*$/;
-for(let i=lines.length-1;i>=Math.max(0,lines.length-6);i--){
-if(promptPattern.test(lines[i]))return lines[i];
+}catch(error){
+statusText('VM ERROR: '+(error&&error.message?error.message:String(error)));
+report('\nVM INITIALIZATION FAILED: '+(error&&error.message?error.message:String(error))+'\n');
 }
-return '';
-}
-statusText('Tiny Core is booting; waiting for a stable shell prompt before sending commands.');
-(function waitForBootComplete(){
-const t=screenText();
-const prompt=shellPrompt(t);
-if(prompt){
-if(prompt===promptCandidate){
-if(Date.now()-promptCandidateSince>=PROMPT_STABLE_MS){
-bootComplete=true;
-statusText('Tiny Core shell prompt is stable; starting bootstrap.');
-startBootstrap();
-return;
-}
-}else{promptCandidate=prompt;promptCandidateSince=Date.now();}
-}else{promptCandidate='';promptCandidateSince=0;}
-if(Date.now()-started>=BOOT_TIMEOUT_MS){
-statusText('Tiny Core did not reach a stable shell prompt within 15 minutes. No commands were sent.');
-report('*** BOOT TIMEOUT: no stable Tiny Core shell prompt detected; no commands were sent. ***\n');
-return;
-}
-setTimeout(waitForBootComplete,500);
-})()
-}catch(e){statusText('VM ERROR: '+e.message)}
 };
 </script>
 </body>
