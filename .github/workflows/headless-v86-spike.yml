@@ -1,6 +1,7 @@
 name: Worker headless v86 spike
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
