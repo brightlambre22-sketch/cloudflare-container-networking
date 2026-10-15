@@ -1,7 +1,7 @@
 import V86 from "../dist/headless-v86-bundle.js";
 import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-wasm";
 
-const BOOT_TIMEOUT_MS = 60000;
+const BOOT_TIMEOUT_MS = 300000;
 
 export default {
   async fetch(request: Request, env: { ASSETS: Fetcher }) {
