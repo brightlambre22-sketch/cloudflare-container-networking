@@ -148,8 +148,11 @@ export async function loadWorkerV86File(
 
   if (range) {
     const contentRange = response.headers.get("content-range") ?? "";
-    const expectedContentRange = `bytes ${range.start}-${range.start + range.length - 1}/`;
-    if (!contentRange.startsWith(expectedContentRange)) {
+    const rangeEnd = range.start + range.length - 1;
+    const match = /^bytes (\\d+)-(\\d+)\\/(\\d+|\\*)$/.exec(contentRange);
+    const totalSize = match && match[3] !== "*" ? Number(match[3]) : null;
+    if (!match || Number(match[1]) !== range.start || Number(match[2]) !== rangeEnd ||
+        (totalSize !== null && (!Number.isSafeInteger(totalSize) || rangeEnd >= totalSize))) {
       await response.body?.cancel();
       throw new Error("v86_asset_content_range_invalid");
     }
