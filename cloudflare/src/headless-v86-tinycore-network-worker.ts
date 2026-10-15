@@ -42,10 +42,12 @@ export default {
     }
     (globalThis as unknown as { XMLHttpRequest: typeof AssetXMLHttpRequest }).XMLHttpRequest = AssetXMLHttpRequest;
 
+    // Match the relay already used by the real browser VM in public/vm.html.
+    // Keep this in fetch() scope because the DHCP stages and response also use it.
+    // Allow CI to override it, but do not silently boot an unconnected NE2000 device.
+    const relayUrl = env.NETWORK_RELAY_URL || "wss://relay.widgetry.org/";
+
     try {
-      // Match the relay already used by the real browser VM in public/vm.html.
-      // Allow CI to override it, but do not silently boot an unconnected NE2000 device.
-      const relayUrl = env.NETWORK_RELAY_URL || "wss://relay.widgetry.org/";
       const netDevice: { type: "ne2k"; relay_url?: string } = { type: "ne2k", relay_url: relayUrl };
       emulator = new V86({
         wasm_fn: createCompiledV86WasmFn(),
