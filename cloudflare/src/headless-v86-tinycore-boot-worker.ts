@@ -1,7 +1,7 @@
 import V86 from "../dist/headless-v86-bundle.js";
 import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-wasm";
 
-const BOOT_TIMEOUT_MS = 20000;
+const BOOT_TIMEOUT_MS = 60000;
 
 export default {
   async fetch(request: Request, env: { ASSETS: Fetcher }) {
@@ -55,7 +55,7 @@ export default {
     try {
       emulator = new V86({
         wasm_fn: createCompiledV86WasmFn(),
-        memory_size: 64 * 1024 * 1024,
+        memory_size: 128 * 1024 * 1024,
         vga_memory_size: 1024 * 1024,
         bios: { url: new URL("/bios/seabios.bin", base).toString() },
         vga_bios: { url: new URL("/bios/vgabios.bin", base).toString() },
