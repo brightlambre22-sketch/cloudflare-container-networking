@@ -18,7 +18,7 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <body>
 <section id="login-panel">
   <h2>Open your VM</h2>
-  <p>Testing accounts: usera / test123 and userb / test123. You can create another regular account below. Admin access still uses the five-digit admin code.</p>
+  <p>Regular accounts are stored server-side and each account gets its own persistent VM snapshot. Passwords are never stored in browser localStorage. Admin access still uses the five-digit admin code.</p>
   <form id="login-form">
     <label for="access-type">Account</label>
     <select id="access-type"><option value="regular">Regular user</option><option value="admin">Admin</option></select>
@@ -55,7 +55,8 @@ let snapshotBusy=false,snapshotLoadFailed=false,vmLoaded=false,restoredSnapshot=
 function stateText(t){stateStatus.textContent=t}
 const SNAPSHOT_CHUNK_BYTES=8*1024*1024;
 function snapshotUrl(){if(!window.snapshotIdentity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(window.snapshotIdentity)}
-function snapshotHeaders(contentType='application/octet-stream'){const headers={'content-type':contentType};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;return headers}
+function snapshotUrlFor(identity){if(!identity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(identity)}
+function snapshotHeaders(contentType='application/octet-stream'){const headers={'content-type':contentType};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;if(window.snapshotAuthToken)headers.authorization='Bearer '+window.snapshotAuthToken;return headers}
 async function saveVmState(manual=true){
 if(!bootComplete){if(manual)stateText('Startup must finish before saving a snapshot.');return false}
 if(snapshotLoadFailed){stateText('Snapshot load failed; refusing to overwrite server state. Reload and retry.');return false}
@@ -83,37 +84,45 @@ finally{snapshotBusy=false}
 }
 async function loadVmState(){
 try{
-const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;
-const response=await fetch(snapshotUrl(),{headers,cache:'no-store'});
-if(response.status===404){stateText('No server snapshot found; starting a clean VM.');return null}
-if(!response.ok)throw new Error('server returned HTTP '+response.status);
+const requestedIdentity=window.snapshotIdentity;
+const candidates=requestedIdentity==='user-usera'?['user-usera','regular-user-a']:requestedIdentity==='user-userb'?['user-userb','regular-user-b']:[requestedIdentity];
+const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;if(window.snapshotAuthToken)headers.authorization='Bearer '+window.snapshotAuthToken;
+for(const identity of candidates){
+const response=await fetch(snapshotUrlFor(identity),{headers,cache:'no-store'});
+if(response.status===404){if(identity.startsWith('acct-'))throw new Error('No saved VM snapshot exists for this account; refusing to boot a fresh VM over missing user data.');continue;}
+if(!response.ok)throw new Error('server returned HTTP '+response.status+' for snapshot identity '+identity);
 const manifest=await response.json();
 if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912||manifest.chunks!==Math.ceil(manifest.byteLength/SNAPSHOT_CHUNK_BYTES))throw new Error('snapshot manifest is invalid');
 const state=new Uint8Array(manifest.byteLength);
 for(let base=0;base<manifest.chunks;base+=4){
 const batch=await Promise.all(Array.from({length:Math.min(4,manifest.chunks-base)},async(_,offset)=>{
 const part=base+offset;
-const chunkResponse=await fetch(snapshotUrl()+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
-if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status);
+const chunkResponse=await fetch(snapshotUrlFor(identity)+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
+if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status+' for identity '+identity);
 return {part,bytes:await chunkResponse.arrayBuffer()};
 }));
 for(const item of batch){const expected=Math.min(SNAPSHOT_CHUNK_BYTES,manifest.byteLength-item.part*SNAPSHOT_CHUNK_BYTES);if(item.bytes.byteLength!==expected)throw new Error('snapshot part '+(item.part+1)+' has an invalid size');state.set(new Uint8Array(item.bytes),item.part*SNAPSHOT_CHUNK_BYTES)}
 stateText('Downloading saved VM snapshot '+Math.min(base+4,manifest.chunks)+' of '+manifest.chunks+'…');
 }
 if(state.byteLength!==manifest.byteLength)throw new Error('snapshot size did not match its manifest');
-return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1};
+window.snapshotIdentity=identity;
+return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1,bootstrapRequired:manifest.bootstrapRequired===true};
+}
+stateText('No server snapshot found; starting a clean VM.');
+return null;
 }catch(e){snapshotLoadFailed=true;stateText('Server snapshot unavailable; starting a clean VM.');report('\\n*** SNAPSHOT LOAD NOTE: '+(e&&e.message?e.message:String(e))+'; autosave paused to protect any existing snapshot. ***\\n');return null}
 }
 document.getElementById('save-vm-state').onclick=()=>saveVmState(true);
 document.getElementById('clear-vm-state').onclick=async()=>{
 if(!bootComplete){stateText('Startup must finish before changing the saved snapshot.');return}
 if(!confirm('Delete this account’s saved VM snapshot from the server? This cannot be undone.'))return;
-try{const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;const response=await fetch(snapshotUrl(),{method:'DELETE',headers});if(!response.ok)throw new Error('server returned HTTP '+response.status);stateText('Server snapshot deleted. The current VM keeps running.')}
+try{const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;if(window.snapshotAuthToken)headers.authorization='Bearer '+window.snapshotAuthToken;const response=await fetch(snapshotUrl(),{method:'DELETE',headers});if(!response.ok)throw new Error('server returned HTTP '+response.status);stateText('Server snapshot deleted. The current VM keeps running.')}
 catch(e){stateText('Could not delete snapshot: '+(e&&e.message?e.message:String(e)))}
 };
-function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
+function reportStorageKey(){return 'mysterium-network-test-results:'+(window.snapshotIdentity||'admin')}
+function save(){try{localStorage.setItem(reportStorageKey(),results.value)}catch(e){}}
 function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
-try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
+try{const s=localStorage.getItem(reportStorageKey());if(s)results.value=s}catch(e){}
 
 document.getElementById('clear-results').onclick=function(){results.value='';save()};
 document.getElementById('copy-results').onclick=async function(){
@@ -156,7 +165,7 @@ requestAnimationFrame(mirrorLoop);
 const diagnosticCommand=`wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
 let manualCommandRunning=false;
-function runDiagnostic(label){
+function runDiagnostic(label,saveAfter=false){
 if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM keyboard API unavailable.');return}
 manualCommandRunning=true;
@@ -175,7 +184,7 @@ break;
 await new Promise(resolve=>requestAnimationFrame(resolve));
 }
 }catch(e){report('\n*** DIAGNOSTIC FAILED: '+e.message+' ***\n')}
-finally{manualCommandRunning=false}
+finally{manualCommandRunning=false;if(saveAfter&&bootComplete){const saved=await saveVmState(false);statusText(saved?'Automatic network test complete; saved VM state updated.':'Automatic network test complete; state save failed. Check saved-state status.')}}
 })();
 }
 document.getElementById('run-network-test').onclick=function(){if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}runDiagnostic('MANUAL NETWORK TEST');statusText('Network test running; waiting for the shell to finish.')};
@@ -339,6 +348,11 @@ window.emulator.add_listener('emulator-loaded',async function(){
 if(vmLoaded)return;
 vmLoaded=true;
 const record=await loadVmState();
+if(snapshotLoadFailed&&window.snapshotIdentity&&window.snapshotIdentity.startsWith('acct-')){
+statusText('Account snapshot could not be restored; VM startup stopped to protect user data.');
+stateText('Restore failed; no fresh bootstrap started.');
+return;
+}
 if(record&&record.state){
 try{
 stateText('Restoring saved VM stateâ¦');
@@ -351,6 +365,10 @@ restoredSnapshot=false;
 snapshotLoadFailed=true;
 stateText('Saved state could not be restored; starting a clean VM without overwriting the stored snapshot.');
 report('\n*** RESTORE FAILED: '+(e&&e.message?e.message:String(e))+'; server snapshot preserved. ***\n');
+if(window.snapshotIdentity&&window.snapshotIdentity.startsWith('acct-')){
+statusText('Account snapshot restore failed; stopped without starting a fresh VM.');
+return;
+}
 await window.emulator.run();
 }
 }else{
@@ -358,10 +376,17 @@ stateText('No saved VM state found; starting a clean VM.');
 await window.emulator.run();
 }
 if(restoredSnapshot){
+if(record&&record.bootstrapRequired){
+statusText('New account baseline restored; running one-time VM setup before saving its initialized state.');
+startBootMonitor();
+return;
+}
 bootComplete=true;
-statusText('Saved VM resumed; startup already completed.');
+statusText('Saved VM resumed; checking network automatically.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 connectApiAgent();
+// A restored snapshot skips package installation, but still runs one network check and saves afterward.
+runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true);
 return;
 }
 startBootMonitor();
@@ -401,16 +426,6 @@ const panel=document.getElementById('login-panel'),form=document.getElementById(
 const code=document.getElementById('admin-code'),username=document.getElementById('username'),password=document.getElementById('user-password');
 const message=document.getElementById('login-message'),createButton=document.getElementById('create-account'),loginButton=document.getElementById('open-vm');
 let creating=false;
-const ACCOUNTS_KEY='vm-test-accounts-v1';
-const defaults={
-  usera:{password:'test123',label:'Regular User A'},
-  userb:{password:'test123',label:'Regular User B'}
-};
-function readAccounts(){
-  let saved={};
-  try{saved=JSON.parse(localStorage.getItem(ACCOUNTS_KEY)||'{}')||{}}catch(e){}
-  return Object.assign({},defaults,saved);
-}
 function updateFields(){
   const admin=access.value==='admin';
   code.hidden=!admin;code.required=admin;
@@ -420,10 +435,22 @@ function updateFields(){
   loginButton.textContent=creating?'Create account':'Log in';
   password.autocomplete=creating?'new-password':'current-password';
 }
+function beginAccountSession(data){
+  if(!data||typeof data.account_id!=='string'||!/^acct-[a-f0-9-]{36}$/.test(data.account_id)||typeof data.session_token!=='string'){
+    throw new Error('The server returned an invalid account session.');
+  }
+  window.snapshotIdentity=data.account_id;
+  window.snapshotAuthToken=data.session_token;
+  try{
+    sessionStorage.setItem('vm-account-id',data.account_id);
+    sessionStorage.setItem('vm-session-token',data.session_token);
+  }catch(e){}
+  panel.hidden=true;document.body.classList.add('logged-in');window.startVm();
+}
 access.addEventListener('change',()=>{creating=false;message.textContent='';updateFields()});
 createButton.addEventListener('click',()=>{
   creating=!creating;
-  message.textContent=creating?'Choose a new username and password for a regular test account.':'';
+  message.textContent=creating?'Create a server account. Use at least 8 characters for the password.':'';
   updateFields();
 });
 form.addEventListener('submit',async function(event){
@@ -442,21 +469,34 @@ form.addEventListener('submit',async function(event){
   }
   const name=username.value.trim().toLowerCase(),pass=password.value;
   if(!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(name)){message.textContent='Username must be 2–32 characters: letters, numbers, _ or -.';return}
-  if(pass.length<6){message.textContent='Password must be at least 6 characters.';return}
-  const accounts=readAccounts();
-  if(creating){
-    if(Object.prototype.hasOwnProperty.call(accounts,name)){message.textContent='That username already exists.';return}
-    accounts[name]={password:pass,label:'Regular User '+name};
-    try{localStorage.setItem(ACCOUNTS_KEY,JSON.stringify(accounts))}catch(e){message.textContent='Could not save this account in browser storage.';return}
+  if(pass.length<8){message.textContent='Password must be at least 8 characters.';return}
+  message.textContent=creating?'Creating account and provisioning its private VM snapshot…':'Signing in and loading your saved VM…';
+  try{
+    const response=await fetch(creating?'/api/auth/signup':'/api/auth/login',{
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:name,password:pass})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error==='username_unavailable'?'That username is already taken.':data.error==='baseline_snapshot_not_found'?'The VM baseline is not configured yet.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.');
     creating=false;
-    message.textContent='Account created. Logging in…';
-  }else if(!Object.prototype.hasOwnProperty.call(accounts,name)||accounts[name].password!==pass){
-    message.textContent='Incorrect username or password.';return;
-  }
-  window.snapshotIdentity='user-'+name;
-  panel.hidden=true;document.body.classList.add('logged-in');window.startVm();
+    beginAccountSession(data);
+  }catch(error){message.textContent=error&&error.message?error.message:'Account request failed.';updateFields()}
 });
 updateFields();
+// Keep the session through a same-tab refresh, but ask the server to validate it before
+// opening any per-account snapshot. The session token never goes in localStorage.
+(async()=>{
+  let accountId='',token='';
+  try{accountId=sessionStorage.getItem('vm-account-id')||'';token=sessionStorage.getItem('vm-session-token')||''}catch(e){}
+  if(!accountId||!token)return;
+  try{
+    const response=await fetch('/api/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
+    if(!response.ok)throw new Error('session expired');
+    beginAccountSession({account_id:accountId,session_token:token});
+  }catch(e){
+    try{sessionStorage.removeItem('vm-account-id');sessionStorage.removeItem('vm-session-token')}catch(ignore){}
+    message.textContent='Please log in again to restore your saved VM.';
+  }
+})();
 };
 </script>
 </body>
