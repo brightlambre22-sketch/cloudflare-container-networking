@@ -3,8 +3,6 @@ import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-
 
 const BOOT_TIMEOUT_MS = 300000;
 const SHELL_COMMAND_TIMEOUT_MS = 20000;
-const DHCP_TIMEOUT_MS = 60 * 60 * 1000;
-const DHCP_TIMEOUT_WITHOUT_RELAY_MS = 120000;
 
 type Stage = { attempted: boolean; passed: boolean; marker: string; error?: string; output?: string };
 
@@ -88,7 +86,7 @@ export default {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
       try {
-        await emulator.keyboard_send_text(command + "\nprintf '\\n__" + marker + "__\\n'\n");
+        // Do not put the literal marker in the typed command: VGA text echoes input, which otherwise causes a false-positive before the command runs.\n        const markerFormat = "\\n" + Array.from(marker, (char) => "\\x" + char.charCodeAt(0).toString(16).padStart(2, "0")).join("") + "\\n";\n        await emulator.keyboard_send_text(command + "\\nprintf '" + markerFormat + "'\\n");
         const observed = await emulator.wait_until_vga_screen_contains(new RegExp("__" + marker + "__"), { timeout_msec: timeout });
         let screen = "";
         try { screen = emulator.screen_adapter?.get_text_screen?.().join("\n") ?? ""; } catch {}
