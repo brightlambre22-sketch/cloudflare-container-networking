@@ -253,7 +253,7 @@ exit 1`;
           } as ConstructorParameters<typeof V86>[0]);
           let restoredLoaded = false;
           restored.add_listener("emulator-loaded", () => { restoredLoaded = true; });
-          const restoredPrompt = await restored.wait_until_vga_screen_contains(/tc@box:~\\$|tc@box:~\\$|tc@box:~\\$|tc@box/i, { timeout_msec: 60000 });
+          const restoredPrompt = await restored.wait_until_vga_screen_contains(/tc@box:~\$|tc@box/i, { timeout_msec: 60000 });
           snapshotRoundtrip.restored = restoredLoaded && Boolean(restoredPrompt);
           if (snapshotRoundtrip.restored) {
             await restored.keyboard_send_text("printf '\\n'; cat /tmp/v86-snapshot-roundtrip-marker; echo RESTORE_COMMAND_EXECUTED\n");
