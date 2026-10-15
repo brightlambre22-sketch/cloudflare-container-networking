@@ -91,7 +91,7 @@ export default {
         // Base64 keeps the payload inert, and short append commands stay below the
         // guest terminal's input-buffer limits.
         const markerText = "__" + marker + "__";
-        const payload = "(\n" + command + "\n)\nstage_rc=$?\necho STAGE_SCRIPT_RC=$stage_rc\nprintf '\\\\n" + markerText + "\\\\n'\n";
+        const payload = "(\n" + command + "\n)\nstage_rc=$?\necho STAGE_SCRIPT_RC=$stage_rc\nprintf '\\n" + markerText + "\\n'\n";
         const encoded = btoa(payload);
         const chunks = encoded.match(/.{1,64}/g) ?? [];
         const sendLine = async (line: string) => {
