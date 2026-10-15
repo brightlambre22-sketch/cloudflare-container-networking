@@ -1,0 +1,33 @@
+name: Worker headless v86 spike
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cloudflare/**"
+      - ".github/workflows/headless-v86-spike.yml"
+  push:
+    branches: [experiment/worker-headless-v86]
+    paths:
+      - "cloudflare/**"
+      - ".github/workflows/headless-v86-spike.yml"
+
+jobs:
+  loader-tests-and-worker-bundle:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Test Worker asset loader
+        run: npm run test:headless
+      - name: Bundle Worker without deploying
+        run: npm run check
