@@ -467,7 +467,8 @@ async function waitForRegistration(data){
       if(!response.ok)throw new Error(progress.error||'Could not read registration progress.');
       message.textContent=progressLabels[progress.step]||('VM initialization: '+(progress.step||progress.status||'working')+'…');
       if(progress.status==='complete'&&progress.complete===true){
-        beginAccountSession({...data,status:'ready',snapshot_initialization_required:true},true);
+        try{sessionStorage.removeItem('vm-initial-snapshot-pending')}catch(e){}
+        beginAccountSession({...data,status:'ready',snapshot_initialization_required:false},true);
         return;
       }
       if(progress.status==='error')throw new Error('VM initialization failed at '+(progress.step||'an unknown stage')+': '+(progress.error||progress.boot_error||'check failed'));
@@ -526,7 +527,10 @@ updateFields();
     const registration=await statusResponse.json().catch(()=>({}));
     if(statusResponse.ok&&['provisioning','queued','running'].includes(registration.status))await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true});
     else if(statusResponse.ok&&registration.status==='error')throw new Error('VM initialization failed: '+(registration.error||registration.step||'check failed'));
-    else beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:registration.status!=='complete'});
+    else {
+      if(registration.status==='complete'){try{sessionStorage.removeItem('vm-initial-snapshot-pending')}catch(e){}}
+      beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:false});
+    }
   }catch(e){
     try{sessionStorage.removeItem('vm-account-id');sessionStorage.removeItem('vm-session-token')}catch(ignore){}
     message.textContent='Please log in again to restore your saved VM.';
