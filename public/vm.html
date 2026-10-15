@@ -442,7 +442,7 @@ function beginAccountSession(data){
   window.snapshotIdentity=data.account_id;
   window.snapshotAuthToken=data.session_token;
   window.snapshotNeedsInitialSave=data.snapshot_initialization_required===true;
-  try{if(window.snapshotNeedsInitialSave)sessionStorage.setItem('vm-initial-snapshot-pending',data.account_id);else sessionStorage.removeItem('vm-initial-snapshot-pending')}catch(e){}
+  try{if(window.snapshotNeedsInitialSave)sessionStorage.setItem('vm-initial-snapshot-pending',data.account_id);else window.snapshotNeedsInitialSave=sessionStorage.getItem('vm-initial-snapshot-pending')===data.account_id}catch(e){}
   try{
     sessionStorage.setItem('vm-account-id',data.account_id);
     sessionStorage.setItem('vm-session-token',data.session_token);
