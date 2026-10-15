@@ -1,5 +1,4 @@
 import { connect } from "cloudflare:sockets";
-import { ADMIN_ACCESS_CODE } from "./auth-codes";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
@@ -12,6 +11,7 @@ export interface Env {
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   VM_API_TOKEN?: string;
+  ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
@@ -52,13 +52,15 @@ export default {
       let body: { code?: unknown };
       try { body = (await request.json()) as { code?: unknown }; }
       catch { return json({ error: "invalid_json" }, 400); }
-      if (typeof body.code !== "string" || body.code !== ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
+      if (!env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
+      if (typeof body.code !== "string" || body.code !== env.ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
       return json({ ok: true });
     }
 
     if (url.pathname === "/api/vm/agent-ticket") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (request.headers.get("x-admin-code") !== ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      if (!env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
+      if (request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
       const vmId = "admin";
       const ticket = crypto.randomUUID();
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
