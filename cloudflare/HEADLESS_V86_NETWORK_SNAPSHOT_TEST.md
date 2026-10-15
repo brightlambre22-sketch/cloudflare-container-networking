@@ -42,3 +42,14 @@ The end-to-end test passes only when a fresh emulator instance restores the gues
 ## Current integration blocker
 
 The checked-in `cloudflare/src/headless-v86-smoke-worker.ts` on the account/snapshot branch is an emulator-initialization smoke test, not the already-proven Tiny Core boot probe. It allocates 16 MiB RAM, uses `autostart: false`, attaches no ISO/disk, and returns `guest_booted: false`. The working boot configuration must be located/reused before adding shell-command, network, and snapshot assertions; replacing it with this smoke worker would regress the proof already achieved.
+
+
+## API read-back implementation status (experimental branch)
+
+The branch `experiment/workerd-registration-snapshot-roundtrip` adds:
+
+- `src/headless-snapshot-store.ts`: a transactional R2 helper that refuses to commit unless the caller reports all guest acceptance checks passed; writes chunks, reads them back, checks SHA-256, then writes the manifest last.
+- `test/headless-snapshot-store.test.ts`: tests chunk boundaries, fail-closed acceptance checks, round-trip byte equality, and corrupted-chunk detection.
+- `POST /v1/runtime/snapshot-readback`: authenticated API endpoint that reads a committed test/account snapshot from R2 and verifies its complete byte length and SHA-256 digest.
+
+This is only the storage/read-back segment. It is deliberately not presented as the complete proof: the endpoint does not boot a VM, and the storage helper is not yet called by the signup flow or by the Tiny Core test worker. The next integration must call the helper with the actual v86 `save_state()` output only after the real guest network checks pass, then create a fresh v86 instance, restore the read-back bytes, and verify a guest-written marker. Only after that should signup stop cloning the baseline and await server-side initialization before marking the account ready.
