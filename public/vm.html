@@ -450,7 +450,7 @@ function beginAccountSession(data){
 access.addEventListener('change',()=>{creating=false;message.textContent='';updateFields()});
 createButton.addEventListener('click',()=>{
   creating=!creating;
-  message.textContent=creating?'Create a server account. Use at least 8 characters for the password.':'';
+  message.textContent=creating?'Create a server account. Use at least 4 characters for the password.':'';
   updateFields();
 });
 form.addEventListener('submit',async function(event){
@@ -469,14 +469,15 @@ form.addEventListener('submit',async function(event){
   }
   const name=username.value.trim().toLowerCase(),pass=password.value;
   if(!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(name)){message.textContent='Username must be 2–32 characters: letters, numbers, _ or -.';return}
-  if(pass.length<8){message.textContent='Password must be at least 8 characters.';return}
+  if(creating&&pass.length<4){message.textContent='New passwords must be at least 4 characters.';return}
+   if(!creating&&!pass){message.textContent='Enter your password.';return}
   message.textContent=creating?'Creating account and provisioning its private VM snapshot…':'Signing in and loading your saved VM…';
   try{
     const response=await fetch(creating?'/api/auth/signup':'/api/auth/login',{
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:name,password:pass})
     });
     const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(data.error==='username_unavailable'?'That username is already taken.':data.error==='baseline_snapshot_not_found'?'The VM baseline is not configured yet.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.');
+    if(!response.ok)throw new Error(data.error==='username_unavailable'?'That username is already taken.':data.error==='baseline_snapshot_not_found'?'New accounts need a clean VM baseline snapshot to clone; none is configured yet. The live admin snapshot is intentionally not used.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.');
     creating=false;
     beginAccountSession(data);
   }catch(error){message.textContent=error&&error.message?error.message:'Account request failed.';updateFields()}
