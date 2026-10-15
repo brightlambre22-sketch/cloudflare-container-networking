@@ -96,9 +96,9 @@ export default {
         // script using shell printf octal escapes, which are supported by the
         // guest's shell and avoid depending on optional decoder utilities.
         const octal = Array.from(payload, (char) => "\\0" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("");
-        const chunks = octal.match(/[\\s\\S]{1,64}/g) ?? [];
+        const chunks = octal.match(/[\s\S]{1,64}/g) ?? [];
         const sendLine = async (line: string) => {
-          await emulator.keyboard_send_text(line + "\\n");
+          await emulator.keyboard_send_text(line + "\n");
           // Let the emulated keyboard/TTY consume this short line before sending
           // the next one; sending a whole script in one call was corrupting input.
           await new Promise<void>((resolve) => setTimeout(resolve, 80));
@@ -110,7 +110,7 @@ export default {
         const runner = asRoot
           ? "sudo -n sh /tmp/headless-v86-stage.sh"
           : "sh /tmp/headless-v86-stage.sh";
-        await emulator.keyboard_send_text(runner + "\\n");
+        await emulator.keyboard_send_text(runner + "\n");
         const observed = await emulator.wait_until_vga_screen_contains(new RegExp(markerText), { timeout_msec: timeout });
         let screen = "";
         try { screen = emulator.screen_adapter?.get_text_screen?.().join("\n") ?? ""; } catch {}
