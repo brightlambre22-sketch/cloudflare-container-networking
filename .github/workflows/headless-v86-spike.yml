@@ -8,7 +8,7 @@ on:
       - "cloudflare/**"
       - ".github/workflows/headless-v86-spike.yml"
   push:
-    branches: [experiment/worker-headless-v86]
+    branches: [experiment/worker-headless-v86, experiment/worker-compiled-v86-wasm]
     paths:
       - "cloudflare/**"
       - ".github/workflows/headless-v86-spike.yml"
@@ -28,6 +28,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
+      - name: Prepare static Worker WASM module
+        run: npm run prepare:worker-wasm
       - name: Test Worker asset loader
         run: npm run test:headless
       - name: Build upstream v86 candidate bundle
@@ -41,7 +43,7 @@ jobs:
           retention-days: 7
       - name: Bundle Worker without deploying
         run: npm run check
-      - name: Smoke-test v86 module inside local Workerd
+      - name: Smoke-test v86 and static WASM module inside local Workerd
         shell: bash
         run: |
           set -euo pipefail
@@ -61,4 +63,4 @@ jobs:
             exit 1
           fi
           cat /tmp/headless-v86-workerd.json
-          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-workerd-import" || r.module_loaded !== true || r.runtime !== "workerd") process.exit(1);'
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-workerd-import" || r.module_loaded !== true || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.wasm_import_count < 1 || r.wasm_export_count < 1) process.exit(1);'
