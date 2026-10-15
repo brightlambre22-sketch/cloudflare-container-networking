@@ -17,6 +17,21 @@ Still not implemented: UDP datagram transport, Docker lifecycle management, cont
 
 Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
 
+## Queued merchant registration
+
+Regular account registration is now stored in a SQLite-backed Durable Object and dispatched through the `merchant-registration` Cloudflare Queue. The queue consumer marks the account ready independently of the browser. If the browser closes after the registration request is accepted, the job can still complete; the merchant can log in later and check the persisted status. Passwords are stored as salted PBKDF2 hashes, not plaintext.
+
+This queue currently completes the **account-registration workflow only**. The existing v86/TinyCore ISO boot, DHCP initialization, and browser bootstrap sequence remain unchanged and still run in the browser. This does not make the VM itself a background cloud runtime.
+
+Create the Queue once in the Cloudflare account before the first deployment:
+
+   ~~~sh
+   cd cloudflare
+   npx wrangler queues create merchant-registration
+   ~~~
+
+If the queue already exists, do not create it again. The Worker config binds the same queue as both producer and consumer.
+
 ## Deploy the Worker
 
 On a development machine with Node.js, clone this repository, then run:
