@@ -107,11 +107,12 @@ test("VM downloads active diagnostic scripts from same-origin Worker assets", ()
   assert.ok(!bootstrap.includes("/opt/mysterium/myst"));
 });
 
-test("startup intentionally has no command or network timeouts", () => {
+test("startup keeps DHCP retrying and bounds individual HTTPS probes", () => {
   assert.ok(!html.includes("setTimeout("), "startup must not use JavaScript timeouts");
   assert.ok(!html.includes("BOOT_TIMEOUT_MS"));
-  assert.ok(!html.includes("wget -T "));
+  assert.ok(html.includes('wget -T 10 -t 1 -S -O /dev/null ${apiUrl}/health'));
   assert.ok(!/udhcpc[^\n]*\s-t\s*[0-9]/.test(html), "DHCP should not have a retry-count timeout");
-  assert.ok(html.includes("until wget -S -O /dev/null ${apiUrl}/health"));
+  assert.ok(html.includes('while [ "$tries" -lt 6 ]; do if wget -T 10 -t 1 -S -O /dev/null ${apiUrl}/health'), "HTTPS preflight should retry a bounded number of timed probes");
+  assert.ok(html.includes('while [ "$tries" -lt 6 ]'));
   assert.ok(html.includes("sleep 2"));
 });
