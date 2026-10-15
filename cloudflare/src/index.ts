@@ -3,13 +3,16 @@ import { ADMIN_ACCESS_CODE } from "./auth-codes";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
-export { TunnelHub, NodeRegistry, NodeRuntime };
+import { PaymentLedger } from "./payment-ledger";
+export { TunnelHub, NodeRegistry, NodeRuntime, PaymentLedger };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   VM_SNAPSHOTS: R2Bucket;
+  PAYMENT_LEDGER: DurableObjectNamespace<PaymentLedger>;
+  PAYMENT_POC_TOKEN?: string;
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
@@ -127,6 +130,19 @@ export default {
         cursor = page.truncated ? page.cursor : undefined;
       } while (cursor);
       return json({ ok: true });
+    }
+
+    if (/^\/v1\/poc\/payments(?:\/|$)/.test(url.pathname)) {
+      if (!env.PAYMENT_POC_TOKEN) {
+        return json({ error: "payment_poc_not_configured" }, 503);
+      }
+      if (!authorized(request.headers.get("authorization"), env.PAYMENT_POC_TOKEN)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+
+      const ledger = env.PAYMENT_LEDGER.get(env.PAYMENT_LEDGER.idFromName("global"));
+      const internalUrl = new URL(url.pathname.replace(/^\/v1\/poc/, "") + url.search, "https://payment-ledger.internal");
+      return ledger.fetch(new Request(internalUrl, request));
     }
 
     if (url.pathname === "/health") {
