@@ -30,6 +30,26 @@ export class AccountRegistry extends DurableObject {
     const url = new URL(request.url);
 
 
+
+    if (url.pathname === "/auth/rate-limit" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { ip?: unknown; action?: unknown } | null;
+      if (typeof body?.ip !== "string" || body.ip.length < 1 || body.ip.length > 80 ||
+          (body.action !== "signup" && body.action !== "login")) return json({ error: "invalid_rate_limit_key" }, 400);
+      const now = Date.now();
+      const windowMs = body.action === "signup" ? 60 * 60 * 1000 : 15 * 60 * 1000;
+      const limit = body.action === "signup" ? 5 : 20;
+      const key = "auth-rate:" + body.action + ":" + await this.sha256(body.ip);
+      const old = await this.ctx.storage.get<number[]>(key) ?? [];
+      const recent = old.filter((time) => Number.isFinite(time) && now - time < windowMs);
+      if (recent.length >= limit) {
+        await this.ctx.storage.put(key, recent);
+        return json({ error: "rate_limited", retry_after_seconds: Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000)) }, 429);
+      }
+      recent.push(now);
+      await this.ctx.storage.put(key, recent);
+      return json({ ok: true });
+    }
+
     // Global username/password registry. The same Durable Object class is also used
     // per-account for API-key metadata; this route family is stored under separate keys.
     if (url.pathname === "/auth/signup" && request.method === "POST") {
