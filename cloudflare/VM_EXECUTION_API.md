@@ -10,11 +10,12 @@ From the `cloudflare/` directory, set a strong API token and deploy the branch:
 
 ```sh
 npx wrangler secret put VM_API_TOKEN
+npx wrangler secret put ADMIN_ACCESS_CODE
 npm run check
 npm run deploy
 ```
 
-The browser agent ticket endpoint uses the existing admin code. Keep that code private and rotate it before exposing this endpoint to anyone else. The current PoC supports only VM ID `admin`; the existing regular-user accounts are browser-local and are not suitable as server-side API identities.
+The admin code is now read from the `ADMIN_ACCESS_CODE` Worker secret; set it before using admin login or agent tickets. Keep it private. The agent ticket endpoint validates this secret and issues a one-use ticket. The current PoC supports only VM ID `admin`; the existing regular-user accounts are browser-local and are not suitable as server-side API identities.
 
 ## Connect the VM agent
 
