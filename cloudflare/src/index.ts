@@ -180,6 +180,13 @@ export default {
         return json({ error: "username_must_be_2_to_32_chars_and_password_8_to_128_chars" }, 400);
       }
 
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const rateLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "signup" }),
+      });
+      if (!rateLimit.ok) return json(await rateLimit.json(), rateLimit.status);
+
       const baselineId = env.VM_BASELINE_ID ?? "v2";
       if (!/^[a-zA-Z0-9._-]{1,64}$/.test(baselineId) || baselineId.startsWith("acct-")) {
         return json({ error: "invalid_vm_baseline_id" }, 500);
@@ -204,7 +211,6 @@ export default {
       const accountApiKey = "acct_" + Array.from(keyBytes, (b) => b.toString(16).padStart(2, "0")).join("");
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
       const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
       const claim = await authRegistry.fetch("https://account-registry.internal/auth/signup", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password, account_id: accountId }),
@@ -285,6 +291,11 @@ export default {
         return json({ error: "invalid_credentials" }, 401);
       }
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const rateLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "login" }),
+      });
+      if (!rateLimit.ok) return json({ error: "rate_limited" }, 429);
       const response = await authRegistry.fetch("https://account-registry.internal/auth/login", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
