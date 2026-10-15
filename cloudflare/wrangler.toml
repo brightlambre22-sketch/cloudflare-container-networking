@@ -27,6 +27,10 @@ class_name = "NodeRuntime"
 name = "VM_EXECUTION"
 class_name = "VmExecution"
 
+[[durable_objects.bindings]]
+name = "ACCOUNT_REGISTRY"
+class_name = "AccountRegistry"
+
 [exports.TunnelHub]
 type = "durable-object"
 storage = "sqlite"
@@ -40,5 +44,12 @@ type = "durable-object"
 storage = "sqlite"
 
 [exports.VmExecution]
+type = "durable-object"
+storage = "sqlite"
+
+[vars]
+VM_BASELINE_ID = "v2"
+
+[exports.AccountRegistry]
 type = "durable-object"
 storage = "sqlite"
