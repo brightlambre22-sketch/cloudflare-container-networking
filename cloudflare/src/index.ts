@@ -191,6 +191,11 @@ export default {
       if (!/^[a-zA-Z0-9._-]{1,64}$/.test(baselineId) || baselineId.startsWith("acct-")) {
         return json({ error: "invalid_vm_baseline_id" }, 500);
       }
+      // Never clone the live admin VM into a new user's account. Provision from a
+      // deliberately sanitized, immutable baseline such as "v2" instead.
+      if (baselineId === "admin") {
+        return json({ error: "unsafe_vm_baseline_id_use_clean_v2_baseline" }, 409);
+      }
       const baselinePrefix = "vm-snapshots/" + baselineId + "/";
       const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
       if (!baselineObject) return json({ error: "baseline_snapshot_not_found" }, 409);
