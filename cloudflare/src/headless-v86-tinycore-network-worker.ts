@@ -89,14 +89,14 @@ export default {
         // Write each stage as a script first; long interactive command lines were being truncated by the guest shell.
         // Encode the complete marker, including delimiters, so it appears only after printf actually executes.
         const markerText = "__" + marker + "__";
-        const markerFormat = "\\n" + Array.from(markerText, (char) => "\\\\" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("") + "\\n";
+        const markerFormat = "\\n" + Array.from(markerText, (char) => "\\" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("") + "\\n";
         const runner = asRoot ? "sudo -n sh /tmp/headless-v86-stage.sh" : "sh /tmp/headless-v86-stage.sh";
-        const script = "cat > /tmp/headless-v86-stage.sh <<'V86_STAGE_EOF'\\n" + command + "\\nV86_STAGE_EOF\\n" +
-          runner + "\\nstage_rc=$?\\necho STAGE_SCRIPT_RC=$stage_rc\\nprintf '" + markerFormat + "'\\n";
+        const script = "cat > /tmp/headless-v86-stage.sh <<'V86_STAGE_EOF'\n" + command + "\nV86_STAGE_EOF\n" +
+          runner + "\nstage_rc=$?\necho STAGE_SCRIPT_RC=$stage_rc\nprintf '" + markerFormat + "'\n";
         await emulator.keyboard_send_text(script);
         const observed = await emulator.wait_until_vga_screen_contains(new RegExp("__" + marker + "__"), { timeout_msec: timeout });
         let screen = "";
-        try { screen = emulator.screen_adapter?.get_text_screen?.().join("\\n") ?? ""; } catch {}
+        try { screen = emulator.screen_adapter?.get_text_screen?.().join("\n") ?? ""; } catch {}
         stage.output = screen.slice(-5000);
         stage.passed = Boolean(observed) && screen.includes("__" + marker + "__");
         if (!stage.passed) stage.error = "stage_marker_not_seen_within_timeout";
