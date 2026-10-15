@@ -29,6 +29,96 @@ export class AccountRegistry extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
+
+
+    if (url.pathname === "/auth/rate-limit" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { ip?: unknown; action?: unknown } | null;
+      if (typeof body?.ip !== "string" || body.ip.length < 1 || body.ip.length > 80 ||
+          (body.action !== "signup" && body.action !== "login")) return json({ error: "invalid_rate_limit_key" }, 400);
+      const now = Date.now();
+      const windowMs = body.action === "signup" ? 60 * 60 * 1000 : 15 * 60 * 1000;
+      const limit = body.action === "signup" ? 5 : 20;
+      const key = "auth-rate:" + body.action + ":" + await this.sha256(body.ip);
+      const old = await this.ctx.storage.get<number[]>(key) ?? [];
+      const recent = old.filter((time) => Number.isFinite(time) && now - time < windowMs);
+      if (recent.length >= limit) {
+        await this.ctx.storage.put(key, recent);
+        return json({ error: "rate_limited", retry_after_seconds: Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000)) }, 429);
+      }
+      recent.push(now);
+      await this.ctx.storage.put(key, recent);
+      return json({ ok: true });
+    }
+
+    // Global username/password registry. The same Durable Object class is also used
+    // per-account for API-key metadata; this route family is stored under separate keys.
+    if (url.pathname === "/auth/signup" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { username?: unknown; password?: unknown; account_id?: unknown } | null;
+      const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body?.password === "string" ? body.password : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 8 || password.length > 128 ||
+          typeof body?.account_id !== "string" || !validAccountId(body.account_id)) {
+        return json({ error: "invalid_signup_fields" }, 400);
+      }
+      const userKey = "auth-user:" + username;
+      const existing = await this.ctx.storage.get<{ status?: string }>(userKey);
+      if (existing && existing.status !== "error") return json({ error: "username_unavailable" }, 409);
+      const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+      const salt = Array.from(saltBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const passwordHash = await this.passwordHash(password, salt);
+      await this.ctx.storage.put(userKey, {
+        username, account_id: body.account_id, salt, password_hash: passwordHash,
+        status: "provisioning", created_at: new Date().toISOString(),
+      });
+      return json({ ok: true, account_id: body.account_id }, 201);
+    }
+
+    if (url.pathname === "/auth/status" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { username?: unknown; status?: unknown } | null;
+      const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || !["ready", "error"].includes(String(body?.status))) {
+        return json({ error: "invalid_auth_status" }, 400);
+      }
+      const key = "auth-user:" + username;
+      const user = await this.ctx.storage.get<Record<string, unknown>>(key);
+      if (!user) return json({ error: "user_not_found" }, 404);
+      user.status = body.status;
+      await this.ctx.storage.put(key, user);
+      return json({ ok: true });
+    }
+
+    if (url.pathname === "/auth/login" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { username?: unknown; password?: unknown } | null;
+      const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body?.password === "string" ? body.password : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || !password || password.length > 128) {
+        return json({ error: "invalid_credentials" }, 401);
+      }
+      const user = await this.ctx.storage.get<{ account_id: string; salt: string; password_hash: string; status: string }>("auth-user:" + username);
+      if (!user || user.status !== "ready") return json({ error: "invalid_credentials_or_account_not_ready" }, 401);
+      const candidate = await this.passwordHash(password, user.salt);
+      if (!this.constantTimeEqual(candidate, user.password_hash)) return json({ error: "invalid_credentials" }, 401);
+      const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+      const token = Array.from(tokenBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const tokenHash = await this.sha256(token);
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      await this.ctx.storage.put("auth-session:" + tokenHash, { account_id: user.account_id, expires_at: expiresAt });
+      return json({ account_id: user.account_id, session_token: token, expires_at: new Date(expiresAt).toISOString() });
+    }
+
+    if (url.pathname === "/auth/verify" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { account_id?: unknown; token?: unknown } | null;
+      if (typeof body?.account_id !== "string" || !validAccountId(body.account_id) ||
+          typeof body?.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token)) return json({ error: "unauthorized" }, 401);
+      const tokenHash = await this.sha256(body.token);
+      const session = await this.ctx.storage.get<{ account_id: string; expires_at: number }>("auth-session:" + tokenHash);
+      if (!session || session.account_id !== body.account_id || session.expires_at <= Date.now()) {
+        if (session) await this.ctx.storage.delete("auth-session:" + tokenHash);
+        return json({ error: "unauthorized" }, 401);
+      }
+      return json({ ok: true, account_id: session.account_id });
+    }
+
     if (url.pathname === "/create" && request.method === "POST") {
       const body = await request.json().catch(() => null) as {
         account_id?: unknown; name?: unknown; baseline_id?: unknown;
@@ -92,6 +182,19 @@ export class AccountRegistry extends DurableObject {
     }
 
     return json({ error: "not_found" }, 404);
+  }
+
+
+  private async passwordHash(password: string, saltHex: string): Promise<string> {
+    const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((part) => Number.parseInt(part, 16)));
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 100000 }, key, 256);
+    return Array.from(new Uint8Array(bits), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  private async sha256(value: string): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
   }
 
   private publicRecord(record: StoredAccount): AccountRecord {

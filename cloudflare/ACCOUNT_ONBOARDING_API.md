@@ -65,3 +65,21 @@ Next milestone: a no-container feasibility test for running the existing v86 sna
 ## Security note
 
 The existing snapshot endpoints predate this account API. Review and restrict direct snapshot read/write access before production use; never expose another account's snapshot identity or account API key. Add rate limits, quotas, audit events, idempotency keys, and cleanup for interrupted provisioning before production.
+
+
+## Browser signup and restore flow (experimental)
+
+The dashboard now uses these same-origin endpoints instead of storing usernames and passwords in browser `localStorage`:
+
+- `POST /api/auth/signup` — creates a server-side user record, clones the configured clean baseline into a unique `acct-…` snapshot namespace, then returns a short-lived login session.
+- `POST /api/auth/login` — verifies the password against a PBKDF2-SHA-256 hash stored in the AccountRegistry Durable Object and issues a seven-day session token.
+- `POST /api/auth/session` — validates a session after a same-tab refresh.
+- Snapshot GET/PUT requests for an `acct-…` identity require either that account's API key or a valid session token bound to that exact account ID.
+
+Public signup and login are rate-limited per source IP. Passwords are not stored in browser storage; the session token is kept in `sessionStorage` for same-tab refreshes and is sent in the Authorization header. Usernames are globally unique within the auth registry Durable Object.
+
+**Critical baseline requirement:** configure `VM_BASELINE_ID = "v2"` and upload a clean, sanitized, immutable baseline at `vm-snapshots/v2/manifest.json` plus all of its generation chunks. Signup deliberately refuses to clone `admin`, because that is the live admin VM identity and may contain private state. If the clean `v2` baseline is absent, signup returns an explicit error rather than copying the admin snapshot.
+
+New accounts receive a `bootstrapRequired` marker. The browser VM performs the initial package/network setup once and saves an initialized snapshot; subsequent logins restore that account snapshot, skip package installation, run the network diagnostic once, and save after the diagnostic returns to a shell prompt. If an existing `acct-…` snapshot is missing or unreadable, the dashboard fails closed and refuses to overwrite it with a fresh VM.
+
+This is still experimental authentication: add email verification/password recovery, stronger abuse controls, audit logging, and a reviewed session-revocation policy before general public launch. It also remains browser-hosted v86 execution; these account changes do not prove production headless Linux command execution.
