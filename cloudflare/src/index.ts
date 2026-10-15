@@ -57,7 +57,7 @@ export default {
       try { body = await request.json() as { name?: unknown }; }
       catch { return json({ error: "invalid_json" }, 400); }
       const name = typeof body.name === "string" ? body.name.trim() : "";
-      if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
+      if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
         return json({ error: "name_must_be_1_to_80_printable_characters" }, 400);
       }
 
@@ -140,7 +140,7 @@ export default {
       }, 201);
     }
 
-    const accountMatch = url.pathname.match(/^\\/v1\\/accounts\\/(acct-[a-f0-9-]{36})$/);
+    const accountMatch = url.pathname.match(/^\/v1\/accounts\/(acct-[a-f0-9-]{36})$/);
     if (accountMatch) {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       const accountId = accountMatch[1];
