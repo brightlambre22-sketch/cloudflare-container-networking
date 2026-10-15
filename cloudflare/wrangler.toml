@@ -23,6 +23,10 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
+[[durable_objects.bindings]]
+name = "REGISTRATION_REGISTRY"
+class_name = "RegistrationRegistry"
+
 [exports.TunnelHub]
 type = "durable-object"
 storage = "sqlite"
