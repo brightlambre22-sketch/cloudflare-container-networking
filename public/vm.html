@@ -89,7 +89,7 @@ const candidates=requestedIdentity==='user-usera'?['user-usera','regular-user-a'
 const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;if(window.snapshotAuthToken)headers.authorization='Bearer '+window.snapshotAuthToken;
 for(const identity of candidates){
 const response=await fetch(snapshotUrlFor(identity),{headers,cache:'no-store'});
-if(response.status===404)continue;
+if(response.status===404){if(identity.startsWith('acct-'))throw new Error('No saved VM snapshot exists for this account; refusing to boot a fresh VM over missing user data.');continue;}
 if(!response.ok)throw new Error('server returned HTTP '+response.status+' for snapshot identity '+identity);
 const manifest=await response.json();
 if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912||manifest.chunks!==Math.ceil(manifest.byteLength/SNAPSHOT_CHUNK_BYTES))throw new Error('snapshot manifest is invalid');
@@ -106,7 +106,7 @@ stateText('Downloading saved VM snapshot '+Math.min(base+4,manifest.chunks)+' of
 }
 if(state.byteLength!==manifest.byteLength)throw new Error('snapshot size did not match its manifest');
 window.snapshotIdentity=identity;
-return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1};
+return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1,bootstrapRequired:manifest.bootstrapRequired===true};
 }
 stateText('No server snapshot found; starting a clean VM.');
 return null;
@@ -366,12 +366,16 @@ stateText('No saved VM state found; starting a clean VM.');
 await window.emulator.run();
 }
 if(restoredSnapshot){
+if(record&&record.bootstrapRequired){
+statusText('New account baseline restored; running one-time VM setup before saving its initialized state.');
+startBootMonitor();
+return;
+}
 bootComplete=true;
 statusText('Saved VM resumed; checking network automatically.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 connectApiAgent();
-// A restored snapshot skips the clean-boot bootstrap, but must not skip the dashboard's
-// network test. Run it once after restore and save only after the test returns to a shell.
+// A restored snapshot skips package installation, but still runs one network check and saves afterward.
 runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true);
 return;
 }
