@@ -80,7 +80,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=5s 45s npx wrangler dev --local --config wrangler.headless-v86-boot-smoke.toml --ip 127.0.0.1 --port 8789 > /tmp/headless-v86-boot.log 2>&1 &
+          # Keep Workerd alive for the full five-minute guest boot window plus startup/cleanup margin.
+          timeout --signal=TERM --kill-after=10s 360s npx wrangler dev --local --config wrangler.headless-v86-boot-smoke.toml --ip 127.0.0.1 --port 8789 > /tmp/headless-v86-boot.log 2>&1 &
           worker_pid=$!
           cleanup() {
             kill "$worker_pid" 2>/dev/null || true
@@ -103,12 +104,12 @@ jobs:
             cat /tmp/headless-v86-boot.log
             exit 1
           fi
-          if ! curl --silent --show-error --fail --max-time 30 http://127.0.0.1:8789/ > /tmp/headless-v86-boot.json; then
+          if ! curl --silent --show-error --fail --max-time 330 http://127.0.0.1:8789/ > /tmp/headless-v86-boot.json; then
             echo "Tiny Core boot request failed or timed out. Wrangler/Workerd log follows:"
             cat /tmp/headless-v86-boot.log
             exit 1
           fi
           cat /tmp/headless-v86-boot.json
-          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-boot.json", "utf8")); if (r.probe !== "headless-v86-tinycore-boot" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.emulator_initialized !== true || r.emulator_started !== true || r.guest_booted !== true) { console.error("Tiny Core guest boot was not proven by serial output", r); process.exit(1); }'
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-boot.json", "utf8")); if (r.probe !== "headless-v86-tinycore-boot" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.emulator_initialized !== true || r.emulator_started !== true || r.guest_booted !== true) { console.error("Tiny Core guest boot was not proven by the VGA shell marker", r); process.exit(1); }'
           cleanup
           trap - EXIT
