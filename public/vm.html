@@ -347,6 +347,11 @@ window.emulator.add_listener('emulator-loaded',async function(){
 if(vmLoaded)return;
 vmLoaded=true;
 const record=await loadVmState();
+if(snapshotLoadFailed&&window.snapshotIdentity&&window.snapshotIdentity.startsWith('acct-')){
+statusText('Account snapshot could not be restored; VM startup stopped to protect user data.');
+stateText('Restore failed; no fresh bootstrap started.');
+return;
+}
 if(record&&record.state){
 try{
 stateText('Restoring saved VM stateâ¦');
@@ -359,6 +364,10 @@ restoredSnapshot=false;
 snapshotLoadFailed=true;
 stateText('Saved state could not be restored; starting a clean VM without overwriting the stored snapshot.');
 report('\n*** RESTORE FAILED: '+(e&&e.message?e.message:String(e))+'; server snapshot preserved. ***\n');
+if(window.snapshotIdentity&&window.snapshotIdentity.startsWith('acct-')){
+statusText('Account snapshot restore failed; stopped without starting a fresh VM.');
+return;
+}
 await window.emulator.run();
 }
 }else{
