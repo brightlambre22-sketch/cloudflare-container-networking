@@ -105,8 +105,8 @@ export default {
           await sendLine("printf '%s' '" + chunk + "' >> /tmp/headless-v86-stage.b64");
         }
         const runner = asRoot
-          ? "sudo -n sh -c 'base64 -d /tmp/headless-v86-stage.b64 > /tmp/headless-v86-stage.sh && sh /tmp/headless-v86-stage.sh'"
-          : "base64 -d /tmp/headless-v86-stage.b64 > /tmp/headless-v86-stage.sh && sh /tmp/headless-v86-stage.sh";
+          ? "sudo -n sh -c '(base64 -d /tmp/headless-v86-stage.b64 2>/dev/null || busybox base64 -d /tmp/headless-v86-stage.b64) > /tmp/headless-v86-stage.sh && sh /tmp/headless-v86-stage.sh'"
+          : "(base64 -d /tmp/headless-v86-stage.b64 2>/dev/null || busybox base64 -d /tmp/headless-v86-stage.b64) > /tmp/headless-v86-stage.sh && sh /tmp/headless-v86-stage.sh";
         await emulator.keyboard_send_text(runner + "\n");
         const observed = await emulator.wait_until_vga_screen_contains(new RegExp(markerText), { timeout_msec: timeout });
         let screen = "";
