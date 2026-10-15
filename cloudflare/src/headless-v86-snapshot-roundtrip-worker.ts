@@ -11,12 +11,14 @@ export default {
   async fetch(request: Request, env: { ASSETS: Fetcher; VM_SNAPSHOTS: R2Bucket; NETWORK_RELAY_URL?: string }) {
     const path = new URL(request.url).pathname;
     if (path === "/ready") return Response.json({ ready: true, probe: "tinycore-dhcp-openssl-ca" });
-    if (path !== "/run" || request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
-    let requestedIdentity = "";
+    if ((path !== "/run" && path !== "/snapshot-roundtrip") || request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
+    let requestedIdentity = path === "/snapshot-roundtrip" ? "test-v86-roundtrip" : "";
     try {
       const body = await request.json() as { identity?: unknown };
-      requestedIdentity = typeof body.identity === "string" ? body.identity.toLowerCase() : "";
-    } catch { return Response.json({ error: "invalid_json" }, { status: 400 }); }
+      if (typeof body.identity === "string") requestedIdentity = body.identity.toLowerCase();
+    } catch {
+      if (path !== "/snapshot-roundtrip") return Response.json({ error: "invalid_json" }, { status: 400 });
+    }
     if (!/^(acct-[a-f0-9-]{36}|test-[a-z0-9-]{1,32})$/.test(requestedIdentity)) return Response.json({ error: "invalid_snapshot_identity" }, { status: 400 });
     const snapshotIdentity = requestedIdentity;
     const jobKey = "runtime-jobs/" + snapshotIdentity + ".json";
