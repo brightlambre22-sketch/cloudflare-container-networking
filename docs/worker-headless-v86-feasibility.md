@@ -56,6 +56,16 @@ The upstream starter currently initializes asynchronously and its constructor do
 
 A test must call the deployed Worker API with the browser closed and receive the output of a command executed by the guest shell. A successful snapshot integrity check, WASM compilation, direct Worker egress request, or Durable Object status response is not sufficient.
 
+## First code spike: Worker asset/WASM adapter
+
+`cloudflare/src/headless-v86-assets.ts` now implements a small, isolated adapter that:
+
+- fetches only explicitly allowlisted v86 WASM and TinyCore ISO assets through the Worker's `ASSETS` binding;
+- rejects non-2xx responses and oversized/empty payloads before returning bytes;
+- exposes `createWorkerV86WasmFn()` in the shape of v86's `wasm_fn` callback.
+
+This is a useful integration seam, not a working emulator. It is deliberately not imported by `index.ts` and does not change `/v1/vm/exec`. In particular, it does not replace upstream `load_file()` calls for the ISO/disk and auxiliary resources, does not remove DOM dependencies from the bundled emulator, and has not been tested against a booting guest. The asset limits are guardrails for the current test artifacts, not a claim that those assets can fit alongside guest RAM within a Worker isolate's memory budget.
+
 ## Current status
 
-Research/spike notes only. No headless guest execution has been implemented or deployed by this change.
+An isolated loader/WASM adapter spike exists on this branch, but headless guest execution remains unimplemented and undeployed. The next meaningful step is to create a Worker-specific v86 entry point that injects this loader into every guest-resource path, then prove a tiny guest boots and returns a shell marker before adding command dispatch.
