@@ -109,7 +109,8 @@ export default {
     if (snapshotIdentity) {
       const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin";
-      if (isAdmin && request.headers.get("x-admin-code") !== ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      if (isAdmin && !env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
+      if (isAdmin && request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
       if (snapshotChunkMatch) {
         if (request.method !== "GET" && request.method !== "PUT") return json({ error: "method_not_allowed" }, 405);
         const generation = snapshotChunkMatch[2];
