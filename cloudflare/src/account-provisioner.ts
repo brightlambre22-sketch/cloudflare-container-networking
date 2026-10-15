@@ -80,8 +80,13 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ username: job.username, status: "error" }),
       });
-      await this.env.VM_SNAPSHOTS.put("runtime-jobs/" + job.identity + ".json", JSON.stringify({
-        identity: job.identity, status: "error", step: "failed", error: message, updated_at: new Date().toISOString(),
+      const progressKey = "runtime-jobs/" + job.identity + ".json";
+      const priorObject = await this.env.VM_SNAPSHOTS.get(progressKey);
+      const priorProgress = priorObject ? await priorObject.json() as Record<string, unknown> : {};
+      await this.env.VM_SNAPSHOTS.put(progressKey, JSON.stringify({
+        ...priorProgress, identity: job.identity, status: "error",
+        step: typeof priorProgress.step === "string" ? priorProgress.step : "failed",
+        error: message, updated_at: new Date().toISOString(),
       }), { httpMetadata: { contentType: "application/json" } });
     }
   }
