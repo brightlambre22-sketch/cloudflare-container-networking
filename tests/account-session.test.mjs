@@ -17,7 +17,8 @@ test("signup stores server-side PBKDF2 credentials and enforces unique usernames
   assert.match(worker, /password\.length < 4/);
   assert.match(registry, /password\.length < 4/);
   assert.match(dashboard, /if\(creating&&pass\.length<4\)/);
-  assert.match(dashboard, /baseline snapshot to clone/);
+  assert.match(worker, /snapshot_initialization_required: true/);
+  assert.match(dashboard, /snapshot_initialization_required===true/);
 });
 
 test("sessions expire and are bound to the account ID for every snapshot operation", () => {
@@ -29,13 +30,13 @@ test("sessions expire and are bound to the account ID for every snapshot operati
   assert.match(dashboard, /headers\.authorization='Bearer '\+window\.snapshotAuthToken/);
 });
 
-test("signup clones a private snapshot and marks it for one-time initialization", () => {
-  assert.match(worker, /vm-snapshots\/" \+ accountId \+ "\//);
-  assert.match(worker, /bootstrapRequired: true/);
-  assert.match(worker, /unsafe_vm_baseline_id_use_clean_v2_baseline/);
-  assert.match(worker, /baselineId === "admin"/);
-  assert.match(dashboard, /bootstrapRequired:manifest\.bootstrapRequired===true/);
-  assert.match(dashboard, /running one-time VM setup before saving its initialized state/);
+test("signup creates the account first and lets its first network-tested boot create the snapshot", () => {
+  assert.match(worker, /const baselineId = "none"/);
+  assert.match(worker, /snapshot_initialization_required: true/);
+  assert.doesNotMatch(worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"')), /baseline_snapshot_not_found|baseline cloned/);
+  assert.match(dashboard, /vm-initial-snapshot-pending/);
+  assert.match(dashboard, /if\(saveAfter&&bootComplete\)/);
+  assert.match(dashboard, /window\.snapshotNeedsInitialSave=false/);
 });
 
 test("missing or unreadable account snapshots fail closed instead of booting a fresh account VM", () => {
