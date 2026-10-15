@@ -146,9 +146,50 @@ export async function loadWorkerV86File(
     throw new Error("v86_asset_http_" + response.status);
   }
 
+  if (range) {
+    const contentRange = response.headers.get("content-range") ?? "";
+    const expectedContentRange = `bytes ${range.start}-${range.start + range.length - 1}/`;
+    if (!contentRange.startsWith(expectedContentRange)) {
+      await response.body?.cancel();
+      throw new Error("v86_asset_content_range_invalid");
+    }
+  }
+
   if (loadOptions.as_json) {
     if (range) throw new Error("v86_json_range_unsupported");
-    const value: unknown = await response.json();
+    const declaredJsonLength = response.headers.get("content-length");
+    if (declaredJsonLength !== null) {
+      const parsedJsonLength = Number(declaredJsonLength);
+      if (!Number.isSafeInteger(parsedJsonLength) || parsedJsonLength < 0 || parsedJsonLength > maxBytes) {
+        await response.body?.cancel();
+        throw new Error("v86_asset_size_limit_exceeded");
+      }
+    }
+    if (!response.body) throw new Error("v86_asset_body_missing");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let jsonBytes = 0;
+    try {
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        jsonBytes += part.value.byteLength;
+        if (jsonBytes > maxBytes) {
+          await reader.cancel();
+          throw new Error("v86_asset_size_limit_exceeded");
+        }
+        chunks.push(part.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(jsonBytes);
+    let jsonOffset = 0;
+    for (const part of chunks) {
+      bytes.set(part, jsonOffset);
+      jsonOffset += part.byteLength;
+    }
+    const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
     loadOptions.done?.(value, response);
     return;
   }
