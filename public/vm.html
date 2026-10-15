@@ -234,7 +234,7 @@ while(Date.now()<deadline){
 const t=screenText(),endAt=t.lastIndexOf(end);
 if(endAt>=0){
 const line=t.slice(endAt+end.length).split(/\r?\n/,1)[0].trim();
-if(/^(-?\\d+)$/.test(line)&&shellPrompt(t.slice(endAt))){
+if(/^(-?\d+)$/.test(line)&&shellPrompt(t.slice(endAt))){
 finalScreen=t;exitCode=Number(line);break;
 }
 }
