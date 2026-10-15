@@ -5,7 +5,7 @@ const BOOT_TIMEOUT_MS = 20000;
 const MAX_SERIAL_BYTES = 8192;
 
 export default {
-  async fetch(request: Request) {
+  async fetch(request: Request, env: { ASSETS: Fetcher }) {
     const wasm = getCompiledV86WasmInfo();
     const base = new URL(request.url);
     const serial: string[] = [];
@@ -27,6 +27,36 @@ export default {
         finish({ booted: true });
       }
     };
+
+    class AssetXMLHttpRequest {
+      method = "GET";
+      url = "";
+      responseType = "";
+      response: unknown = null;
+      responseText = "";
+      status = 0;
+      timeout = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      open(method: string, url: string) { this.method = method; this.url = url; }
+      setRequestHeader(_name: string, _value: string) {}
+      getResponseHeader(_name: string) { return null; }
+      getAllResponseHeaders() { return ""; }
+      async send() {
+        try {
+          const target = new URL(this.url, request.url);
+          const response = await env.ASSETS.fetch(new Request(target.toString(), { method: this.method }));
+          this.status = response.status;
+          if (this.responseType === "arraybuffer") this.response = await response.arrayBuffer();
+          else { this.responseText = await response.text(); this.response = this.responseText; }
+          this.onload?.();
+        } catch {
+          this.onerror?.();
+        }
+      }
+    }
+    (globalThis as unknown as { XMLHttpRequest: typeof AssetXMLHttpRequest }).XMLHttpRequest = AssetXMLHttpRequest;
 
     try {
       emulator = new V86({
