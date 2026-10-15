@@ -106,8 +106,14 @@ export default {
       // Check guest-local prerequisites before networking, so a missing guest file/tool
       // is not hidden by an earlier DHCP failure.
       await runStage("resource_preflight",
-        "echo '--- GUEST FILE / RESOURCE PREFLIGHT ---'; id; uname -a; echo CMDLINE; cat /proc/cmdline; echo TCE_CONFIG; ls -ld /etc/sysconfig/tcedir /usr/local/tce /tmp/tce /usr/local/tce.installed 2>&1; echo FILETOOL_LIST; cat /opt/.filetool.lst 2>&1; echo REQUIRED_TOOLS; for x in /sbin/modprobe /sbin/ifconfig /sbin/route /sbin/udhcpc /usr/bin/tce-load /usr/local/bin/openssl /usr/bin/wget; do if [ -x \"$x\" ]; then echo PRESENT=$x; else echo MISSING=$x; fi; done; echo TLS_FILES; for x in /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt; do if [ -s \"$x\" ]; then ls -l \"$x\"; else echo MISSING=$x; fi; done; echo FILESYSTEMS; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo GUEST_PREFLIGHT_DONE",
+        "echo '--- guest resources ---'; id; uname -a; cat /proc/cmdline; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
+      await runStage("guest_files_preflight",
+        "echo '--- guest paths and save list ---'; ls -ld /etc/sysconfig/tcedir /usr/local/tce /tmp/tce /usr/local/tce.installed 2>&1; cat /opt/.filetool.lst 2>&1; ls -l /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt 2>&1",
+        "GUEST_FILES_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
+      await runStage("guest_tools_preflight",
+        "for x in modprobe ifconfig route udhcpc tce-load openssl wget; do command -v $x || echo MISSING=$x; done",
+        "GUEST_TOOLS_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
       const dhcpScriptLines = [
         "#!/bin/sh",
         "set +e",
