@@ -87,6 +87,23 @@ export class AccountRegistry extends DurableObject {
       return json({ ok: true });
     }
 
+    if (url.pathname === "/auth/provisioning-session" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { username?: unknown; password?: unknown } | null;
+      const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body?.password === "string" ? body.password : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || !password || password.length > 128) return json({ error: "invalid_credentials" }, 401);
+      const user = await this.ctx.storage.get<{ account_id: string; salt: string; password_hash: string; status: string }>("auth-user:" + username);
+      if (!user || user.status !== "provisioning") return json({ error: "account_not_provisioning" }, 409);
+      const candidate = await this.passwordHash(password, user.salt);
+      if (!this.constantTimeEqual(candidate, user.password_hash)) return json({ error: "invalid_credentials" }, 401);
+      const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+      const token = Array.from(tokenBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const tokenHash = await this.sha256(token);
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      await this.ctx.storage.put("auth-session:" + tokenHash, { account_id: user.account_id, expires_at: expiresAt });
+      return json({ account_id: user.account_id, session_token: token, expires_at: new Date(expiresAt).toISOString() });
+    }
+
     if (url.pathname === "/auth/login" && request.method === "POST") {
       const body = await request.json().catch(() => null) as { username?: unknown; password?: unknown } | null;
       const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
