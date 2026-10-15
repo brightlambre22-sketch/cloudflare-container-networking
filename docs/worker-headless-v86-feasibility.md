@@ -19,6 +19,15 @@ The upstream `copy/v86` source separates the emulator constructor in `src/browse
 
 Cloudflare's current compatibility date (2026-10-07) enables Node compatibility by default, but that does not imply a general-purpose filesystem, DOM, worker-thread, or arbitrary Linux host environment. The emulator must be tested against the actual Worker runtime, not assumed compatible from Node API availability. See [Cloudflare Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) and [WebAssembly support](https://developers.cloudflare.com/workers/runtime-apis/webassembly/).
 
+
+## Concrete blocker confirmed in upstream loader
+
+The upstream loader in `src/lib.js` selects its Node filesystem branch whenever `XMLHttpRequest` is absent. That branch calls `require("fs")` or dynamically imports `node:fs/promises`, and performs `open/readFile/stat` against local paths. A Cloudflare Worker has no ordinary persistent local disk for these paths. The browser branch instead requires `XMLHttpRequest`, which Workers do not provide as a standard global. This means the stock loader cannot be used unchanged in a Worker. A real port must replace the loader with an injected Worker-aware loader (fetch/R2/Assets plus range reads) or patch/fork upstream v86 to accept an explicit loader. It must also supply the WASM bytes through `wasm_fn`/the supported module initialization path rather than rely on a local `v86.wasm` path.
+
+## Implementation decision
+
+Do not wire the existing browser bundle into `/v1/vm/exec` or advertise it as headless. The next code spike should be isolated behind a new experimental endpoint/class and should first boot a tiny test image with no snapshot restore. Only after a guest-shell marker is observed should command dispatch and network tests be added. If the upstream module cannot be bundled with a replaceable loader and bounded CPU/memory behavior, stop the spike rather than introducing a false-success endpoint.
+
 ## Required implementation gates
 
 1. Identify or build an emulator entry point that is compatible with Workers (no Node filesystem imports and no mandatory DOM/window APIs).
