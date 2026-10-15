@@ -338,7 +338,6 @@ const code=document.getElementById('admin-code'),username=document.getElementByI
 const message=document.getElementById('login-message'),createButton=document.getElementById('create-account'),loginButton=document.getElementById('open-vm');
 let creating=false,busy=false;
 const ACCOUNTS_KEY='vm-test-accounts-v1';
-const PENDING_REGISTRATION_KEY='vm-registration-pending-v1';
 const defaults={
   usera:{password:'test123',label:'Regular User A'},
   userb:{password:'test123',label:'Regular User B'}
@@ -374,7 +373,6 @@ async function waitForRegistration(account){
     if(!response.ok)throw new Error(data.message||data.error||'Could not read registration status.');
     const current=data.account;
     if(current.status==='ready'){
-      try{localStorage.removeItem(PENDING_REGISTRATION_KEY)}catch(e){}
       return current;
     }
     if(current.status==='failed')throw new Error(current.error||'Registration failed. Please try again.');
@@ -427,7 +425,6 @@ form.addEventListener('submit',async function(event){
       const data=await responseJson(response);
       if(!response.ok)throw new Error(data.message||data.error||'Could not create account.');
       const account=data.account;
-      try{localStorage.setItem(PENDING_REGISTRATION_KEY,JSON.stringify({username:name,registrationId:account.registrationId}))}catch(e){}
       message.textContent='Please wait, your account is being created…';
       await finishRegularLogin(name,account);
       return;
