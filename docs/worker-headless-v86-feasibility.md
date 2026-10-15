@@ -13,6 +13,12 @@ Execute a real Linux shell command in the Cloudflare Worker runtime without a br
 - The bundled code also contains browser-specific DOM and `window` references. Compiling `v86.wasm` alone does not provide the host APIs needed to initialize the emulator.
 - The existing saved VM snapshot is about 103 MB, before emulator allocations. Do not use it for the first runtime test; test a deliberately small guest and measure memory/CPU first.
 
+## Additional upstream v86 finding
+
+The upstream `copy/v86` source separates the emulator constructor in `src/browser/starter.js` from the browser UI in `src/browser/main.js`. The starter imports both `DummyScreenAdapter` and `ANSIScreenAdapter`, so a headless console is a plausible route; the browser page itself is not the required entry point. However, `starter.js` still imports a large dependency graph (including file-loading and filesystem abstractions), and contains some DOM access paths. A Worker build must prove those paths are not required or replace them; merely switching the screen adapter is not enough.
+
+Cloudflare's current compatibility date (2026-10-07) enables Node compatibility by default, but that does not imply a general-purpose filesystem, DOM, worker-thread, or arbitrary Linux host environment. The emulator must be tested against the actual Worker runtime, not assumed compatible from Node API availability. See [Cloudflare Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) and [WebAssembly support](https://developers.cloudflare.com/workers/runtime-apis/webassembly/).
+
 ## Required implementation gates
 
 1. Identify or build an emulator entry point that is compatible with Workers (no Node filesystem imports and no mandatory DOM/window APIs).
