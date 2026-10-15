@@ -92,7 +92,7 @@ test("bootstrap waits for a fresh completion marker and a shell prompt before ad
 test("VM snapshot save is attempted after the post-boot test sequence", () => {
   assert.ok(html.includes("const saved=await saveVmState(false)"));
   assert.ok(html.includes("Startup and network tests complete; server snapshot saved."));
-  assert.ok(html.includes("Startup complete; VM state save did not complete."));
+  assert.ok(html.includes("Startup complete; server snapshot save did not complete."));
 });
 
 test("VM downloads active diagnostic scripts from same-origin Worker assets", () => {
