@@ -6,6 +6,9 @@ const MAX_SERIAL_BYTES = 8192;
 
 export default {
   async fetch(request: Request, env: { ASSETS: Fetcher }) {
+    if (new URL(request.url).pathname === "/ready") {
+      return Response.json({ ready: true, probe: "headless-v86-tinycore-boot" });
+    }
     const wasm = getCompiledV86WasmInfo();
     const base = new URL(request.url);
     const serial: string[] = [];
