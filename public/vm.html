@@ -54,7 +54,7 @@ function statusText(t){status.textContent=t}
 let snapshotBusy=false,snapshotLoadFailed=false,vmLoaded=false,restoredSnapshot=false,autosaveTimer=null;
 function stateText(t){stateStatus.textContent=t}
 const SNAPSHOT_CHUNK_BYTES=8*1024*1024;
-function snapshotUrl(){if(!window.snapshotIdentity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(window.snapshotIdentity)}
+function snapshotUrl(identity=window.snapshotIdentity){if(!identity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(identity)}
 function snapshotHeaders(contentType='application/octet-stream'){const headers={'content-type':contentType};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;return headers}
 async function saveVmState(manual=true){
 if(!bootComplete){if(manual)stateText('Startup must finish before saving a snapshot.');return false}
@@ -83,25 +83,32 @@ finally{snapshotBusy=false}
 }
 async function loadVmState(){
 try{
+const requestedIdentity=window.snapshotIdentity;
+const candidates=requestedIdentity==='user-usera'?['user-usera','regular-user-a']:requestedIdentity==='user-userb'?['user-userb','regular-user-b']:[requestedIdentity];
 const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;
-const response=await fetch(snapshotUrl(),{headers,cache:'no-store'});
-if(response.status===404){stateText('No server snapshot found; starting a clean VM.');return null}
-if(!response.ok)throw new Error('server returned HTTP '+response.status);
+for(const identity of candidates){
+const response=await fetch(snapshotUrl(identity),{headers,cache:'no-store'});
+if(response.status===404)continue;
+if(!response.ok)throw new Error('server returned HTTP '+response.status+' for snapshot identity '+identity);
 const manifest=await response.json();
 if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912||manifest.chunks!==Math.ceil(manifest.byteLength/SNAPSHOT_CHUNK_BYTES))throw new Error('snapshot manifest is invalid');
 const state=new Uint8Array(manifest.byteLength);
 for(let base=0;base<manifest.chunks;base+=4){
 const batch=await Promise.all(Array.from({length:Math.min(4,manifest.chunks-base)},async(_,offset)=>{
 const part=base+offset;
-const chunkResponse=await fetch(snapshotUrl()+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
-if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status);
+const chunkResponse=await fetch(snapshotUrl(identity)+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
+if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status+' for identity '+identity);
 return {part,bytes:await chunkResponse.arrayBuffer()};
 }));
 for(const item of batch){const expected=Math.min(SNAPSHOT_CHUNK_BYTES,manifest.byteLength-item.part*SNAPSHOT_CHUNK_BYTES);if(item.bytes.byteLength!==expected)throw new Error('snapshot part '+(item.part+1)+' has an invalid size');state.set(new Uint8Array(item.bytes),item.part*SNAPSHOT_CHUNK_BYTES)}
 stateText('Downloading saved VM snapshot '+Math.min(base+4,manifest.chunks)+' of '+manifest.chunks+'…');
 }
 if(state.byteLength!==manifest.byteLength)throw new Error('snapshot size did not match its manifest');
+window.snapshotIdentity=identity;
 return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1};
+}
+stateText('No server snapshot found; starting a clean VM.');
+return null;
 }catch(e){snapshotLoadFailed=true;stateText('Server snapshot unavailable; starting a clean VM.');report('\\n*** SNAPSHOT LOAD NOTE: '+(e&&e.message?e.message:String(e))+'; autosave paused to protect any existing snapshot. ***\\n');return null}
 }
 document.getElementById('save-vm-state').onclick=()=>saveVmState(true);
