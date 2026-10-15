@@ -156,7 +156,7 @@ requestAnimationFrame(mirrorLoop);
 const diagnosticCommand=`wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
 let manualCommandRunning=false;
-function runDiagnostic(label){
+function runDiagnostic(label,saveAfter=false){
 if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM keyboard API unavailable.');return}
 manualCommandRunning=true;
@@ -175,7 +175,7 @@ break;
 await new Promise(resolve=>requestAnimationFrame(resolve));
 }
 }catch(e){report('\n*** DIAGNOSTIC FAILED: '+e.message+' ***\n')}
-finally{manualCommandRunning=false}
+finally{manualCommandRunning=false;if(saveAfter&&bootComplete){const saved=await saveVmState(false);statusText(saved?'Automatic network test complete; saved VM state updated.':'Automatic network test complete; state save failed. Check saved-state status.')}}
 })();
 }
 document.getElementById('run-network-test').onclick=function(){if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}runDiagnostic('MANUAL NETWORK TEST');statusText('Network test running; waiting for the shell to finish.')};
@@ -359,9 +359,12 @@ await window.emulator.run();
 }
 if(restoredSnapshot){
 bootComplete=true;
-statusText('Saved VM resumed; startup already completed.');
+statusText('Saved VM resumed; checking network automatically.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 connectApiAgent();
+// A restored snapshot skips the clean-boot bootstrap, but must not skip the dashboard's
+// network test. Run it once after restore and save only after the test returns to a shell.
+runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true);
 return;
 }
 startBootMonitor();
