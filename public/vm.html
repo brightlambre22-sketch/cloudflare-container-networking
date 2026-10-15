@@ -55,6 +55,7 @@ let snapshotBusy=false,snapshotLoadFailed=false,vmLoaded=false,restoredSnapshot=
 function stateText(t){stateStatus.textContent=t}
 const SNAPSHOT_CHUNK_BYTES=8*1024*1024;
 function snapshotUrl(){if(!window.snapshotIdentity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(window.snapshotIdentity)}
+function snapshotUrlFor(identity){if(!identity)throw new Error('Choose an account before opening the VM.');return '/api/vm-snapshots/'+encodeURIComponent(identity)}
 function snapshotHeaders(contentType='application/octet-stream'){const headers={'content-type':contentType};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;return headers}
 async function saveVmState(manual=true){
 if(!bootComplete){if(manual)stateText('Startup must finish before saving a snapshot.');return false}
@@ -83,25 +84,32 @@ finally{snapshotBusy=false}
 }
 async function loadVmState(){
 try{
+const requestedIdentity=window.snapshotIdentity;
+const candidates=requestedIdentity==='user-usera'?['user-usera','regular-user-a']:requestedIdentity==='user-userb'?['user-userb','regular-user-b']:[requestedIdentity];
 const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;
-const response=await fetch(snapshotUrl(),{headers,cache:'no-store'});
-if(response.status===404){stateText('No server snapshot found; starting a clean VM.');return null}
-if(!response.ok)throw new Error('server returned HTTP '+response.status);
+for(const identity of candidates){
+const response=await fetch(snapshotUrlFor(identity),{headers,cache:'no-store'});
+if(response.status===404)continue;
+if(!response.ok)throw new Error('server returned HTTP '+response.status+' for snapshot identity '+identity);
 const manifest=await response.json();
 if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912||manifest.chunks!==Math.ceil(manifest.byteLength/SNAPSHOT_CHUNK_BYTES))throw new Error('snapshot manifest is invalid');
 const state=new Uint8Array(manifest.byteLength);
 for(let base=0;base<manifest.chunks;base+=4){
 const batch=await Promise.all(Array.from({length:Math.min(4,manifest.chunks-base)},async(_,offset)=>{
 const part=base+offset;
-const chunkResponse=await fetch(snapshotUrl()+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
-if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status);
+const chunkResponse=await fetch(snapshotUrlFor(identity)+'/chunks/'+manifest.generation+'/'+part,{headers,cache:'no-store'});
+if(!chunkResponse.ok)throw new Error('snapshot part '+(part+1)+' failed with HTTP '+chunkResponse.status+' for identity '+identity);
 return {part,bytes:await chunkResponse.arrayBuffer()};
 }));
 for(const item of batch){const expected=Math.min(SNAPSHOT_CHUNK_BYTES,manifest.byteLength-item.part*SNAPSHOT_CHUNK_BYTES);if(item.bytes.byteLength!==expected)throw new Error('snapshot part '+(item.part+1)+' has an invalid size');state.set(new Uint8Array(item.bytes),item.part*SNAPSHOT_CHUNK_BYTES)}
 stateText('Downloading saved VM snapshot '+Math.min(base+4,manifest.chunks)+' of '+manifest.chunks+'…');
 }
 if(state.byteLength!==manifest.byteLength)throw new Error('snapshot size did not match its manifest');
+window.snapshotIdentity=identity;
 return {state:state.buffer,savedAt:Date.parse(manifest.savedAt||response.headers.get('x-snapshot-saved-at')||'')||Date.now(),version:1};
+}
+stateText('No server snapshot found; starting a clean VM.');
+return null;
 }catch(e){snapshotLoadFailed=true;stateText('Server snapshot unavailable; starting a clean VM.');report('\\n*** SNAPSHOT LOAD NOTE: '+(e&&e.message?e.message:String(e))+'; autosave paused to protect any existing snapshot. ***\\n');return null}
 }
 document.getElementById('save-vm-state').onclick=()=>saveVmState(true);
@@ -156,7 +164,7 @@ requestAnimationFrame(mirrorLoop);
 const diagnosticCommand=`wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; dl=$?; echo NETWORK_TEST_DOWNLOAD_RC=$dl; if [ "$dl" -eq 0 ]; then sh /tmp/network-test.sh; else echo NETWORK_TEST_DOWNLOAD_FAILED; fi`;
 
 let manualCommandRunning=false;
-function runDiagnostic(label){
+function runDiagnostic(label,saveAfter=false){
 if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function'){statusText('VM keyboard API unavailable.');return}
 manualCommandRunning=true;
@@ -175,7 +183,7 @@ break;
 await new Promise(resolve=>requestAnimationFrame(resolve));
 }
 }catch(e){report('\n*** DIAGNOSTIC FAILED: '+e.message+' ***\n')}
-finally{manualCommandRunning=false}
+finally{manualCommandRunning=false;if(saveAfter&&bootComplete){const saved=await saveVmState(false);statusText(saved?'Automatic network test complete; saved VM state updated.':'Automatic network test complete; state save failed. Check saved-state status.')}}
 })();
 }
 document.getElementById('run-network-test').onclick=function(){if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}runDiagnostic('MANUAL NETWORK TEST');statusText('Network test running; waiting for the shell to finish.')};
@@ -359,9 +367,12 @@ await window.emulator.run();
 }
 if(restoredSnapshot){
 bootComplete=true;
-statusText('Saved VM resumed; startup already completed.');
+statusText('Saved VM resumed; checking network automatically.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 connectApiAgent();
+// A restored snapshot skips the clean-boot bootstrap, but must not skip the dashboard's
+// network test. Run it once after restore and save only after the test returns to a shell.
+runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true);
 return;
 }
 startBootMonitor();
