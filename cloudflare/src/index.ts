@@ -1,14 +1,17 @@
 import { connect } from "cloudflare:sockets";
-import { ADMIN_ACCESS_CODE } from "./auth-codes";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
-export { TunnelHub, NodeRegistry, NodeRuntime };
+import { VmExecution } from "./vm-execution";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
+  VM_EXECUTION: DurableObjectNamespace<VmExecution>;
+  VM_API_TOKEN?: string;
+  ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
@@ -49,8 +52,55 @@ export default {
       let body: { code?: unknown };
       try { body = (await request.json()) as { code?: unknown }; }
       catch { return json({ error: "invalid_json" }, 400); }
-      if (typeof body.code !== "string" || body.code !== ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
+      if (!env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
+      if (typeof body.code !== "string" || body.code !== env.ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
       return json({ ok: true });
+    }
+
+    if (url.pathname === "/api/vm/agent-ticket") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
+      if (request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      const vmId = "admin";
+      const ticket = crypto.randomUUID();
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
+      const ticketResponse = await coordinator.fetch("https://vm-execution.internal/ticket", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticket, identity: vmId }),
+      });
+      if (!ticketResponse.ok) return json({ error: "agent_ticket_creation_failed" }, 502);
+      return json({ ticket, vm_id: vmId, expires_in_seconds: 60 });
+    }
+
+    if (url.pathname === "/api/vm/agent") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return json({ error: "websocket_upgrade_required" }, 426);
+      }
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("admin"));
+      return coordinator.fetch(request);
+    }
+
+    if (url.pathname === "/v1/vm/status" || url.pathname === "/v1/vm/exec") {
+      if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const vmId = request.headers.get("x-vm-id") ?? "admin";
+      if (vmId !== "admin") return json({ error: "unknown_vm_id", supported_vm_ids: ["admin"] }, 404);
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
+      if (url.pathname.endsWith("/status")) {
+        if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+        return coordinator.fetch("https://vm-execution.internal/status?identity=admin");
+      }
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const raw = await request.text();
+      if (raw.length > 8192) return json({ error: "body_too_large" }, 413);
+      return coordinator.fetch(new Request("https://vm-execution.internal/exec", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vm-id": vmId },
+        body: raw,
+      }));
     }
 
     const snapshotChunkMatch = url.pathname.match(/^\/api\/vm-snapshots\/([a-z0-9._-]{1,64})\/chunks\/([a-z0-9-]{1,40})\/([0-9]{1,3})$/i);
@@ -59,7 +109,8 @@ export default {
     if (snapshotIdentity) {
       const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin";
-      if (isAdmin && request.headers.get("x-admin-code") !== ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      if (isAdmin && !env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
+      if (isAdmin && request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
       if (snapshotChunkMatch) {
         if (request.method !== "GET" && request.method !== "PUT") return json({ error: "method_not_allowed" }, 405);
         const generation = snapshotChunkMatch[2];

@@ -23,6 +23,10 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
+[[durable_objects.bindings]]
+name = "VM_EXECUTION"
+class_name = "VmExecution"
+
 [exports.TunnelHub]
 type = "durable-object"
 storage = "sqlite"
@@ -32,5 +36,9 @@ type = "durable-object"
 storage = "sqlite"
 
 [exports.NodeRuntime]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.VmExecution]
 type = "durable-object"
 storage = "sqlite"
