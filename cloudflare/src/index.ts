@@ -78,7 +78,7 @@ export default {
       }
       const ticket = url.searchParams.get("ticket") ?? "";
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("admin"));
-      return coordinator.fetch(new Request("https://vm-execution.internal/agent?ticket=" + encodeURIComponent(ticket), request));
+      return coordinator.fetch(request);
     }
 
     if (url.pathname === "/v1/vm/status" || url.pathname === "/v1/vm/exec") {
