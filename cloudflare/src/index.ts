@@ -238,7 +238,7 @@ export default {
         }));
         const savedAt = new Date().toISOString();
         await env.VM_SNAPSHOTS.put(accountPrefix + "manifest.json", JSON.stringify({
-          version: 1, generation, chunks: count, byteLength: baseline.byteLength, savedAt, baselineId,
+          version: 1, generation, chunks: count, byteLength: baseline.byteLength, savedAt, baselineId, bootstrapRequired: true,
         }), { httpMetadata: { contentType: "application/json" }, customMetadata: { savedAt, baselineId } });
         const ready = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
           method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }),
