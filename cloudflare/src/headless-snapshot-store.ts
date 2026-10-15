@@ -9,6 +9,7 @@ export interface GuestSnapshotManifest {
   chunks: number;
   byteLength: number;
   sha256: string;
+  chunkSha256: string[];
   savedAt: string;
   checks: { guest_booted: true; shell_command_passed: true; dhcp_passed: true; dns_passed: true; https_passed: true };
 }
@@ -29,7 +30,7 @@ export function splitSnapshot(state: ArrayBuffer | Uint8Array): Uint8Array[] {
   if (bytes.byteLength < 1 || bytes.byteLength > SNAPSHOT_MAX_BYTES) throw new Error("snapshot_size_out_of_range");
   const chunks: Uint8Array[] = [];
   for (let offset = 0; offset < bytes.byteLength; offset += SNAPSHOT_CHUNK_BYTES) {
-    chunks.push(bytes.slice(offset, Math.min(offset + SNAPSHOT_CHUNK_BYTES, bytes.byteLength)));
+    chunks.push(bytes.subarray(offset, Math.min(offset + SNAPSHOT_CHUNK_BYTES, bytes.byteLength)));
   }
   if (chunks.length > SNAPSHOT_MAX_CHUNKS) throw new Error("snapshot_chunk_count_out_of_range");
   return chunks;
@@ -60,24 +61,26 @@ export async function commitGuestSnapshot(
     if (existing.generation === generation) throw new Error("snapshot_generation_already_committed");
   }
 
-  await Promise.all(chunks.map((chunk, part) => bucket.put(`${generationPrefix}${part}.bin`, chunk, {
-    httpMetadata: { contentType: "application/octet-stream" },
-  })));
-  const persisted = await Promise.all(chunks.map(async (chunk, part) => {
+  const chunkSha256: string[] = [];
+  // Keep memory bounded: write and read back one chunk at a time instead of
+  // retaining another full snapshot-sized array beside v86's saved state.
+  for (let part = 0; part < chunks.length; part += 1) {
+    const chunk = chunks[part];
+    const chunkDigest = await sha256Hex(chunk);
+    await bucket.put(`${generationPrefix}${part}.bin`, chunk, {
+      httpMetadata: { contentType: "application/octet-stream" },
+    });
     const object = await bucket.get(`${generationPrefix}${part}.bin`);
     if (!object) throw new Error("snapshot_chunk_readback_missing_" + part);
     const stored = new Uint8Array(await object.arrayBuffer());
     if (stored.byteLength !== chunk.byteLength) throw new Error("snapshot_chunk_readback_length_mismatch_" + part);
-    return stored;
-  }));
-  const reconstructed = new Uint8Array(bytes.byteLength);
-  let offset = 0;
-  for (const part of persisted) { reconstructed.set(part, offset); offset += part.byteLength; }
-  if (offset !== bytes.byteLength || await sha256Hex(reconstructed) !== digest) throw new Error("snapshot_readback_digest_mismatch");
+    if (await sha256Hex(stored) !== chunkDigest) throw new Error("snapshot_chunk_readback_digest_mismatch_" + part);
+    chunkSha256.push(chunkDigest);
+  }
 
   const manifest: GuestSnapshotManifest = {
     version: 1, identity, generation, chunks: chunks.length, byteLength: bytes.byteLength,
-    sha256: digest, savedAt: new Date().toISOString(),
+    sha256: digest, chunkSha256, savedAt: new Date().toISOString(),
     checks: { guest_booted: true, shell_command_passed: true, dhcp_passed: true, dns_passed: true, https_passed: true },
   };
   await bucket.put(prefix + "manifest.json", JSON.stringify(manifest), {
@@ -98,20 +101,25 @@ export async function readCommittedGuestSnapshot(
   if (manifest.version !== 1 || manifest.identity !== identity || !validGeneration(manifest.generation) ||
       !Number.isInteger(manifest.chunks) || manifest.chunks < 1 || manifest.chunks > SNAPSHOT_MAX_CHUNKS ||
       !Number.isInteger(manifest.byteLength) || manifest.byteLength < 1 || manifest.byteLength > SNAPSHOT_MAX_BYTES ||
-      manifest.chunks !== Math.ceil(manifest.byteLength / SNAPSHOT_CHUNK_BYTES) || !/^[a-f0-9]{64}$/.test(manifest.sha256)) {
+      manifest.chunks !== Math.ceil(manifest.byteLength / SNAPSHOT_CHUNK_BYTES) ||
+      !/^[a-f0-9]{64}$/.test(manifest.sha256) || !Array.isArray(manifest.chunkSha256) ||
+      manifest.chunkSha256.length !== manifest.chunks || manifest.chunkSha256.some((hash) => typeof hash !== "string" || !/^[a-f0-9]{64}$/.test(hash))) {
     throw new Error("snapshot_manifest_invalid");
   }
-  const parts = await Promise.all(Array.from({ length: manifest.chunks }, async (_, part) => {
+  // v86 requires a contiguous restore buffer, but avoid retaining all individual
+  // R2 chunks simultaneously: allocate the final buffer once and copy serially.
+  const state = new Uint8Array(manifest.byteLength);
+  let offset = 0;
+  for (let part = 0; part < manifest.chunks; part += 1) {
     const chunk = await bucket.get(`${prefix}${manifest.generation}/${part}.bin`);
     if (!chunk) throw new Error("snapshot_chunk_missing_" + part);
     const bytes = new Uint8Array(await chunk.arrayBuffer());
     const expected = Math.min(SNAPSHOT_CHUNK_BYTES, manifest.byteLength - part * SNAPSHOT_CHUNK_BYTES);
     if (bytes.byteLength !== expected) throw new Error("snapshot_chunk_length_invalid_" + part);
-    return bytes;
-  }));
-  const state = new Uint8Array(manifest.byteLength);
-  let offset = 0;
-  for (const part of parts) { state.set(part, offset); offset += part.byteLength; }
+    if (await sha256Hex(bytes) !== manifest.chunkSha256[part]) throw new Error("snapshot_chunk_digest_invalid_" + part);
+    state.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
   if (await sha256Hex(state) !== manifest.sha256) throw new Error("snapshot_digest_invalid");
   return { manifest, state };
 }
