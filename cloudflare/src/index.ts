@@ -4,6 +4,7 @@ import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
 import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
+import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
 export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry };
 
 export interface Env {
@@ -61,6 +62,34 @@ function validNodeId(nodeId: string): boolean {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Authenticated API read-back verification for a snapshot written by Workerd.
+    // This validates R2 bytes only; it does not claim that v86 restored the guest.
+    if (url.pathname === "/v1/runtime/snapshot-readback") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const vmApiToken = await getVmApiToken(env);
+      if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+      let body: { identity?: unknown };
+      try { body = await request.json() as typeof body; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      const identity = typeof body.identity === "string" ? body.identity.toLowerCase() : "";
+      if (!/^(acct-[a-f0-9-]{36}|test-[a-z0-9-]{1,32})$/.test(identity)) return json({ error: "invalid_snapshot_identity" }, 400);
+      try {
+        const result = await readCommittedGuestSnapshot(env.VM_SNAPSHOTS, identity);
+        return json({
+          probe: "headless-snapshot-api-readback", runtime: "workerd", passed: true,
+          identity: result.manifest.identity, generation: result.manifest.generation,
+          chunks: result.manifest.chunks, byte_length: result.manifest.byteLength,
+          sha256: result.manifest.sha256, readback_byte_length: result.state.byteLength,
+          readback_digest_verified: true, guest_checks: result.manifest.checks,
+          note: "R2 read-back and digest verification passed; a fresh-emulator restore and guest marker check are still required.",
+        });
+      } catch (error) {
+        const message = (error instanceof Error ? error.message : String(error)).slice(0, 200);
+        return json({ probe: "headless-snapshot-api-readback", passed: false, error: message }, message === "snapshot_manifest_missing" ? 404 : 409);
+      }
+    }
 
     // Diagnostic only: this checks the persisted snapshot and optionally compiles the v86 WASM
     // module in the Worker runtime. It intentionally does not instantiate a VM or claim shell execution.
