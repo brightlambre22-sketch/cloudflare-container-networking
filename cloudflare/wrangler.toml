@@ -23,6 +23,10 @@ class_name = "NodeRegistry"
 name = "NODE_RUNTIME"
 class_name = "NodeRuntime"
 
+[[durable_objects.bindings]]
+name = "REGISTRATION_REGISTRY"
+class_name = "RegistrationRegistry"
+
 [exports.TunnelHub]
 type = "durable-object"
 storage = "sqlite"
@@ -32,5 +36,19 @@ type = "durable-object"
 storage = "sqlite"
 
 [exports.NodeRuntime]
+type = "durable-object"
+storage = "sqlite"
+
+[[queues.producers]]
+binding = "REGISTRATION_QUEUE"
+queue = "merchant-registration"
+
+[[queues.consumers]]
+queue = "merchant-registration"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+
+[exports.RegistrationRegistry]
 type = "durable-object"
 storage = "sqlite"
