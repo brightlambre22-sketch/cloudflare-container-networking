@@ -66,7 +66,7 @@ export default {
           const bootPrompt = await emulator.wait_until_vga_screen_contains(/boot:/i, { timeout_msec: 5000 });
           if (!bootPrompt) { finishBoot({ booted: false, reason: "bootloader_prompt_not_seen_within_timeout" }); return; }
           await emulator.keyboard_send_scancodes([0x1C, 0x9C]);
-          const shellReached = await emulator.wait_until_vga_screen_contains(/tc@box:~\$|tc@box|localhost login:|login:/i, { timeout_msec: BOOT_TIMEOUT_MS });
+          const shellReached = await emulator.wait_until_vga_screen_contains(/tc@box:~\\$|tc@box:~\$|tc@box:~\\$|tc@box|localhost login:|login:/i, { timeout_msec: BOOT_TIMEOUT_MS });
           finishBoot(shellReached ? { booted: true } : { booted: false, reason: "linux_shell_or_login_marker_not_seen_after_enter" });
         } catch (error) {
           finishBoot({ booted: false, reason: "boot_probe_error: " + (error instanceof Error ? error.message : String(error)).slice(0, 250) });
@@ -253,10 +253,10 @@ exit 1`;
           } as ConstructorParameters<typeof V86>[0]);
           let restoredLoaded = false;
           restored.add_listener("emulator-loaded", () => { restoredLoaded = true; });
-          const restoredPrompt = await restored.wait_until_vga_screen_contains(/tc@box:~\\$|tc@box/i, { timeout_msec: 60000 });
+          const restoredPrompt = await restored.wait_until_vga_screen_contains(/tc@box:~\\$|tc@box:~\\$|tc@box:~\\$|tc@box/i, { timeout_msec: 60000 });
           snapshotRoundtrip.restored = restoredLoaded && Boolean(restoredPrompt);
           if (snapshotRoundtrip.restored) {
-            await restored.keyboard_send_text("printf '\\n'; cat /tmp/v86-snapshot-roundtrip-marker; echo RESTORE_COMMAND_EXECUTED\\n");
+            await restored.keyboard_send_text("printf '\\n'; cat /tmp/v86-snapshot-roundtrip-marker; echo RESTORE_COMMAND_EXECUTED\n");
             const markerSeen = await restored.wait_until_vga_screen_contains(new RegExp(marker + "[\\s\\S]*RESTORE_COMMAND_EXECUTED"), { timeout_msec: 20000 });
             const screen = restored.screen_adapter?.get_text_screen?.().join("\\n") ?? "";
             snapshotRoundtrip.marker_verified = Boolean(markerSeen) && screen.includes(marker) && screen.includes("RESTORE_COMMAND_EXECUTED");
