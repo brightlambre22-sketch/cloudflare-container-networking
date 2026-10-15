@@ -97,3 +97,132 @@ export function createWorkerV86WasmFn(
     return result.instance.exports;
   };
 }
+
+
+export interface WorkerV86LoadOptions {
+  method?: string;
+  as_json?: boolean;
+  range?: { start: number; length: number };
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+  done?: (result: ArrayBuffer | Uint8Array | unknown, response?: Response) => void;
+  progress?: (event: { loaded: number; total: number; lengthComputable: boolean }) => void;
+}
+
+/**
+ * Callback-compatible loader for the subset of upstream load_file() used by
+ * v86. It supports whole-file reads and bounded byte ranges. A Worker-specific
+ * v86 fork must wire this function into src/lib.js; this module cannot replace
+ * the upstream import from outside that source graph.
+ */
+export async function loadWorkerV86File(
+  options: WorkerV86AssetOptions,
+  path: string,
+  loadOptions: WorkerV86LoadOptions,
+): Promise<void> {
+  const maxBytes = V86_ASSET_LIMITS[path];
+  if (maxBytes === undefined) throw new Error("v86_asset_path_not_allowlisted");
+  if (loadOptions.signal?.aborted) return;
+
+  const headers = new Headers(loadOptions.headers);
+  const range = loadOptions.range;
+  if (range) {
+    if (!Number.isSafeInteger(range.start) || range.start < 0 ||
+        !Number.isSafeInteger(range.length) || range.length < 1 ||
+        range.start + range.length > maxBytes) {
+      throw new Error("v86_asset_range_invalid");
+    }
+    headers.set("Range", `bytes=${range.start}-${range.start + range.length - 1}`);
+    headers.set("Accept-Encoding", "identity");
+  }
+
+  const url = new URL(path, options.requestUrl);
+  const response = await options.assets.fetch(new Request(url.toString(), {
+    method: loadOptions.method ?? "GET",
+    headers,
+    signal: loadOptions.signal,
+  }));
+  if (!response.ok || (range && response.status !== 206)) {
+    throw new Error("v86_asset_http_" + response.status);
+  }
+
+  if (loadOptions.as_json) {
+    if (range) throw new Error("v86_json_range_unsupported");
+    const value: unknown = await response.json();
+    loadOptions.done?.(value, response);
+    return;
+  }
+
+  const expectedBytes = range?.length;
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength !== null) {
+    const parsed = Number(declaredLength);
+    if (!Number.isSafeInteger(parsed) || parsed < 0 ||
+        parsed > (expectedBytes ?? maxBytes) ||
+        (expectedBytes !== undefined && parsed !== expectedBytes)) {
+      await response.body?.cancel();
+      throw new Error("v86_asset_size_limit_exceeded");
+    }
+  }
+
+  if (!response.body) throw new Error("v86_asset_body_missing");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      total += part.value.byteLength;
+      if (total > (expectedBytes ?? maxBytes)) {
+        await reader.cancel();
+        throw new Error("v86_asset_size_limit_exceeded");
+      }
+      chunks.push(part.value);
+      loadOptions.progress?.({
+        loaded: total,
+        total: expectedBytes ?? maxBytes,
+        lengthComputable: expectedBytes !== undefined,
+      });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (expectedBytes !== undefined && total !== expectedBytes) {
+    throw new Error("v86_asset_range_length_mismatch");
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const part of chunks) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  loadOptions.done?.(range ? bytes : bytes.buffer, response);
+}
+
+/** Determine an allowlisted asset's byte length using a one-byte range. */
+export async function getWorkerV86FileSize(
+  options: WorkerV86AssetOptions,
+  path: string,
+): Promise<number> {
+  const maxBytes = V86_ASSET_LIMITS[path];
+  if (maxBytes === undefined) throw new Error("v86_asset_path_not_allowlisted");
+  const url = new URL(path, options.requestUrl);
+  const response = await options.assets.fetch(new Request(url.toString(), {
+    headers: { Range: "bytes=0-0", "Accept-Encoding": "identity" },
+  }));
+  if (response.status !== 206) {
+    await response.body?.cancel();
+    throw new Error("v86_asset_range_not_supported");
+  }
+  await response.body?.cancel();
+  const contentRange = response.headers.get("content-range") ?? "";
+  const match = /^bytes 0-0\/(\d+)$/.exec(contentRange);
+  if (!match) throw new Error("v86_asset_content_range_invalid");
+  const size = Number(match[1]);
+  if (!Number.isSafeInteger(size) || size < 1 || size > maxBytes) {
+    throw new Error("v86_asset_size_limit_exceeded");
+  }
+  return size;
+}
