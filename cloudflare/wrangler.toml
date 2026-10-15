@@ -58,3 +58,15 @@ VM_BASELINE_ID = "v2"
 [exports.AccountRegistry]
 type = "durable-object"
 storage = "sqlite"
+
+[[durable_objects.bindings]]
+name = "ACCOUNT_PROVISIONER"
+class_name = "AccountProvisioner"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["AccountProvisioner"]
+
+[exports.AccountProvisioner]
+type = "durable-object"
+storage = "sqlite"
