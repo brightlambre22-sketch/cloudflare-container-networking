@@ -35,11 +35,19 @@ class FetchXMLHttpRequest {
   }
 
   async send(body?: BodyInit | null) {
+    const controller = new AbortController();
+    const timer = this.timeout > 0
+      ? setTimeout(() => controller.abort(), this.timeout)
+      : undefined;
     try {
-      const response = await fetch(this.url, {
+      // XHR accepts relative URLs; fetch in Workers requires an absolute URL.
+      const base = (globalThis as { location?: Location }).location?.href;
+      const url = base ? new URL(this.url, base).toString() : this.url;
+      const response = await fetch(url, {
         method: this.method,
         headers: this.requestHeaders,
         body: body ?? undefined,
+        signal: controller.signal,
       });
       this.status = response.status;
       this.responseHeaders = response.headers;
@@ -50,8 +58,14 @@ class FetchXMLHttpRequest {
         this.response = this.responseText;
       }
       this.onload?.();
-    } catch {
-      this.onerror?.();
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        this.ontimeout?.();
+      } else {
+        this.onerror?.();
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 }
