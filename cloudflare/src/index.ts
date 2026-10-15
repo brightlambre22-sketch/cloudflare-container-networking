@@ -3,13 +3,16 @@ import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
 import { VmExecution } from "./vm-execution";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution };
+import { AccountRegistry } from "./account-registry";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
+  ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
+  VM_BASELINE_ID?: string;
   VM_API_TOKEN?: string;
   ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
@@ -46,6 +49,112 @@ function validNodeId(nodeId: string): boolean {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/v1/accounts" && request.method === "POST") {
+      if (!env.VM_API_TOKEN) return json({ error: "account_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      let body: { name?: unknown };
+      try { body = await request.json() as { name?: unknown }; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+        return json({ error: "name_must_be_1_to_80_printable_characters" }, 400);
+      }
+
+      const baselineId = env.VM_BASELINE_ID ?? "v2";
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(baselineId) || baselineId.startsWith("acct-")) {
+        return json({ error: "invalid_vm_baseline_id" }, 500);
+      }
+      const baselinePrefix = "vm-snapshots/" + baselineId + "/";
+      const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
+      if (!baselineObject) return json({ error: "baseline_snapshot_not_found", baseline_id: baselineId }, 409);
+      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown };
+      try { baseline = await baselineObject.json() as typeof baseline; }
+      catch { return json({ error: "baseline_manifest_invalid" }, 500); }
+      if (baseline.version !== 1 || typeof baseline.generation !== "string" ||
+          !/^[a-z0-9-]{1,40}$/.test(baseline.generation) ||
+          !Number.isInteger(baseline.chunks) || (baseline.chunks as number) < 1 ||
+          (baseline.chunks as number) > 128 ||
+          !Number.isInteger(baseline.byteLength) || (baseline.byteLength as number) < 1 ||
+          (baseline.byteLength as number) > 536870912 ||
+          baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
+        return json({ error: "baseline_manifest_invalid" }, 500);
+      }
+
+      const accountId = "acct-" + crypto.randomUUID();
+      const generation = crypto.randomUUID();
+      const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+      const accountApiKey = "acct_" + Array.from(keyBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
+      const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+      const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const created = await registry.fetch("https://account-registry.internal/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          account_id: accountId, name, baseline_id: baselineId,
+          snapshot_identity: accountId, api_key_sha256: apiKeyHash,
+        }),
+      });
+      if (!created.ok) return json({ error: "account_record_creation_failed" }, 502);
+
+      const accountPrefix = "vm-snapshots/" + accountId + "/";
+      try {
+        const count = baseline.chunks as number;
+        const keys = Array.from({ length: count }, (_, part) => baselinePrefix + baseline.generation + "/" + part + ".bin");
+        const chunks = await Promise.all(keys.map((key) => env.VM_SNAPSHOTS.get(key)));
+        if (chunks.some((chunk) => !chunk)) throw new Error("baseline_snapshot_chunk_missing");
+        await Promise.all(chunks.map(async (chunk, part) => {
+          await env.VM_SNAPSHOTS.put(accountPrefix + generation + "/" + part + ".bin", chunk!.body, {
+            httpMetadata: { contentType: "application/octet-stream" },
+          });
+        }));
+        const savedAt = new Date().toISOString();
+        await env.VM_SNAPSHOTS.put(accountPrefix + "manifest.json", JSON.stringify({
+          version: 1, generation, chunks: count, byteLength: baseline.byteLength, savedAt, baselineId,
+        }), { httpMetadata: { contentType: "application/json" }, customMetadata: { savedAt, baselineId } });
+        const ready = await registry.fetch("https://account-registry.internal/account/" + accountId, {
+          method: "PATCH", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status: "ready" }),
+        });
+        if (!ready.ok) throw new Error("account_ready_transition_failed");
+      } catch (error) {
+        let cursor: string | undefined;
+        do {
+          const page = await env.VM_SNAPSHOTS.list({ prefix: accountPrefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+          if (page.objects.length) await env.VM_SNAPSHOTS.delete(page.objects.map((object) => object.key));
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+        await registry.fetch("https://account-registry.internal/account/" + accountId, {
+          method: "PATCH", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) }),
+        });
+        return json({ error: "account_snapshot_provisioning_failed" }, 502);
+      }
+
+      return json({
+        account_id: accountId, name, status: "ready", baseline_id: baselineId,
+        snapshot_identity: accountId, api_key: accountApiKey,
+        api_key_notice: "Store this key securely; it is returned only once.",
+        runtime: "snapshot-provisioned; no container started; headless VM execution not yet wired",
+      }, 201);
+    }
+
+    const accountMatch = url.pathname.match(/^\/v1\/accounts\/(acct-[a-f0-9-]{36})$/);
+    if (accountMatch) {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const accountId = accountMatch[1];
+      const authorization = request.headers.get("authorization") ?? "";
+      if (!authorization.startsWith("Bearer ")) return json({ error: "unauthorized" }, 401);
+      const suppliedKey = authorization.slice(7);
+      if (!/^acct_[a-f0-9]{64}$/.test(suppliedKey)) return json({ error: "unauthorized" }, 401);
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(suppliedKey));
+      const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+      const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      return registry.fetch("https://account-registry.internal/account/" + accountId, {
+        method: "GET", headers: { "x-account-key-sha256": apiKeyHash },
+      });
+    }
 
     if (url.pathname === "/api/admin/access") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -111,6 +220,27 @@ export default {
       const isAdmin = identity === "admin";
       if (isAdmin && !env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
       if (isAdmin && request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+
+      // API-created account snapshots are private to the account API key.
+      if (identity.startsWith("acct-")) {
+        const authorization = request.headers.get("authorization") ?? "";
+        const suppliedKey = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+        if (!/^acct_[a-f0-9]{64}$/.test(suppliedKey)) return json({ error: "unauthorized" }, 401);
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(suppliedKey));
+        const keyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+        const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(identity));
+        const accountAuth = await registry.fetch("https://account-registry.internal/account/" + identity, {
+          method: "GET", headers: { "x-account-key-sha256": keyHash },
+        });
+        if (!accountAuth.ok) return json({ error: "unauthorized" }, 401);
+      }
+
+      // The clean V2 baseline is managed with the provisioning token, not public snapshot routes.
+      if (identity === (env.VM_BASELINE_ID ?? "v2")) {
+        if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
+        if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      }
+
       if (snapshotChunkMatch) {
         if (request.method !== "GET" && request.method !== "PUT") return json({ error: "method_not_allowed" }, 405);
         const generation = snapshotChunkMatch[2];
