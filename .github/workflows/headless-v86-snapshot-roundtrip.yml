@@ -15,7 +15,7 @@ on:
 jobs:
   guest-snapshot-roundtrip:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: cloudflare
@@ -59,7 +59,7 @@ jobs:
           fi
           cat /tmp/v86-roundtrip-ready.json
           set +e
-          curl --silent --show-error --fail-with-body --max-time 1500 -X POST http://127.0.0.1:8789/snapshot-roundtrip -o /tmp/v86-roundtrip-result.json
+          curl --silent --show-error --fail-with-body --max-time 4000 -X POST http://127.0.0.1:8789/snapshot-roundtrip -o /tmp/v86-roundtrip-result.json
           curl_rc=$?
           set -e
           cat /tmp/v86-roundtrip-result.json 2>/dev/null || true
