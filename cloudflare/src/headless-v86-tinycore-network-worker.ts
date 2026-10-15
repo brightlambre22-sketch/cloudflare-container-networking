@@ -103,20 +103,37 @@ export default {
       // Build the guest script from short shell input lines. Sending the whole loop as one
       // keyboard line can overflow the Tiny Core console's input buffer and produce syntax errors.
       const dhcpLimitSeconds = env.NETWORK_RELAY_URL ? 3600 : 120;
+      // Check guest-local prerequisites before networking, so a missing guest file/tool
+      // is not hidden by an earlier DHCP failure.
+      await runStage("resource_preflight",
+        "echo '--- GUEST FILE / RESOURCE PREFLIGHT ---'; id; uname -a; echo CMDLINE; cat /proc/cmdline; echo TCE_CONFIG; ls -ld /etc/sysconfig/tcedir /usr/local/tce /tmp/tce /usr/local/tce.installed 2>&1; echo FILETOOL_LIST; cat /opt/.filetool.lst 2>&1; echo REQUIRED_TOOLS; for x in /sbin/modprobe /sbin/ifconfig /sbin/route /sbin/udhcpc /usr/bin/tce-load /usr/local/bin/openssl /usr/bin/wget; do if [ -x \"$x\" ]; then echo PRESENT=$x; else echo MISSING=$x; fi; done; echo TLS_FILES; for x in /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt; do if [ -s \"$x\" ]; then ls -l \"$x\"; else echo MISSING=$x; fi; done; echo FILESYSTEMS; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo GUEST_PREFLIGHT_DONE",
+        "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
       const dhcpScriptLines = [
         "#!/bin/sh",
-        "iface=$(/sbin/ifconfig -a | awk '/^(eth|en|wlan)/ {print $1; exit}')",
+        "set +e",
+        "echo '--- kernel network diagnostics ---'",
+        "uname -a",
+        "cat /proc/net/dev",
+        "lsmod 2>&1",
+        "/sbin/modprobe 8390 2>&1",
+        "/sbin/modprobe ne2k-pci 2>&1",
+        "sleep 1",
+        "/sbin/ifconfig -a 2>&1",
+        "iface=$(/sbin/ifconfig -a 2>/dev/null | sed -n 's/^\\(eth[0-9]\\).*/\\1/p' | head -n 1)",
         "echo DHCP_INTERFACE=$iface",
-        'if [ -z "$iface" ]; then echo NIC_MISSING; cat /proc/net/dev; exit 10; fi',
+        'if [ -z "$iface" ]; then echo NIC_MISSING; dmesg | grep -Ei "eth|ne2k|ne2000|8390|pci|network|nic" 2>&1; cat /proc/net/dev; exit 10; fi',
         '/sbin/ifconfig "$iface" up',
         "elapsed=0",
         'while [ "$elapsed" -lt ' + dhcpLimitSeconds + " ]; do",
-        '  /sbin/udhcpc -f -n -q -i "$iface"',
-        '  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_OK; exit 0; fi',
+        '  /sbin/udhcpc -n -q -i "$iface"',
+        '  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_OK; /sbin/ifconfig -a; /sbin/route -n; cat /etc/resolv.conf; exit 0; fi',
         "  echo DHCP_RETRYING_NO_LEASE",
         "  sleep 3",
         "  elapsed=$((elapsed+3))",
         "done",
+        "/sbin/ifconfig -a",
+        "/sbin/route -n",
+        "cat /etc/resolv.conf",
         "echo DHCP_TIMEOUT",
         "exit 1",
       ];
@@ -140,9 +157,6 @@ export default {
         : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_dhcp_lease_and_default_route_within_one_hour" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
       if (stages.dhcp.passed) {
-        await runStage("resource_preflight",
-          "echo '--- RESOURCE PREFLIGHT ---'; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo TLS_PREREQUISITES_NEXT",
-          "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
         await runStage("tls_download",
           "echo '--- TLS package downloads ---'; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; tce-load -w ca-certificates.tcz; ca_dl=$?; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
           "TLS_DOWNLOAD_DONE", 180000);
