@@ -6,3 +6,4 @@ workers_dev = false
 [[rules]]
 type = "CompiledWasm"
 globs = ["src/generated/v86.wasm"]
+fallthrough = true
