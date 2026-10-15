@@ -43,16 +43,16 @@ $Ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureToken)
 try {
   $Token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($Ptr)
   [System.IO.File]::WriteAllText(
-    "$PWD\\vm-api-token.txt",
+    "$PWD\vm-api-token.txt",
     $Token,
     [System.Text.UTF8Encoding]::new($false)
   )
-  npx wrangler r2 object put cloudflare-container-vm-snapshots/config/vm-api-token.txt --file .\\vm-api-token.txt
+  npx wrangler r2 object put cloudflare-container-vm-snapshots/config/vm-api-token.txt --file .\vm-api-token.txt
   if ($LASTEXITCODE -ne 0) { throw "R2 upload failed; do not continue until it succeeds." }
 }
 finally {
   [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($Ptr)
-  Remove-Item .\\vm-api-token.txt -ErrorAction SilentlyContinue
+  Remove-Item .\vm-api-token.txt -ErrorAction SilentlyContinue
   Remove-Variable Token, SecureToken -ErrorAction SilentlyContinue
 }
 ```
