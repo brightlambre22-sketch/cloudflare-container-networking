@@ -119,9 +119,10 @@ if(!confirm('Delete this account’s saved VM snapshot from the server? This can
 try{const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;if(window.snapshotAuthToken)headers.authorization='Bearer '+window.snapshotAuthToken;const response=await fetch(snapshotUrl(),{method:'DELETE',headers});if(!response.ok)throw new Error('server returned HTTP '+response.status);stateText('Server snapshot deleted. The current VM keeps running.')}
 catch(e){stateText('Could not delete snapshot: '+(e&&e.message?e.message:String(e)))}
 };
-function save(){try{localStorage.setItem('mysterium-network-test-results',results.value)}catch(e){}}
+function reportStorageKey(){return 'mysterium-network-test-results:'+(window.snapshotIdentity||'admin')}
+function save(){try{localStorage.setItem(reportStorageKey(),results.value)}catch(e){}}
 function report(t){results.value+=t;results.scrollTop=results.scrollHeight;save()}
-try{const s=localStorage.getItem('mysterium-network-test-results');if(s)results.value=s}catch(e){}
+try{const s=localStorage.getItem(reportStorageKey());if(s)results.value=s}catch(e){}
 
 document.getElementById('clear-results').onclick=function(){results.value='';save()};
 document.getElementById('copy-results').onclick=async function(){
