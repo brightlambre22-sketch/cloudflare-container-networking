@@ -14,6 +14,10 @@ test("signup stores server-side PBKDF2 credentials and enforces unique usernames
   assert.match(worker, /url\.pathname === "\/api\/auth\/signup"/);
   assert.match(worker, /url\.pathname === "\/api\/auth\/login"/);
   assert.doesNotMatch(dashboard, /vm-test-accounts-v1|function readAccounts\(\)/);
+  assert.match(worker, /password\.length < 4/);
+  assert.match(registry, /password\.length < 4/);
+  assert.match(dashboard, /if\(creating&&pass\.length<4\)/);
+  assert.match(dashboard, /baseline snapshot to clone/);
 });
 
 test("sessions expire and are bound to the account ID for every snapshot operation", () => {
