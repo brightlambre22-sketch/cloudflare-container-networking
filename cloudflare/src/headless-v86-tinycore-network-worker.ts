@@ -95,7 +95,7 @@ export default {
         // Tiny Core's BusyBox build has no base64 applet. Transfer the ASCII
         // script using shell printf octal escapes, which are supported by the
         // guest's shell and avoid depending on optional decoder utilities.
-        const octal = Array.from(payload, (char) => "\\0" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("");
+        const octal = Array.from(payload, (char) => "\\" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("");
         const chunks = octal.match(/[\s\S]{1,64}/g) ?? [];
         const sendLine = async (line: string) => {
           await emulator.keyboard_send_text(line + "\n");
