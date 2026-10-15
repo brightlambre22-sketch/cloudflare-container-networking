@@ -169,7 +169,7 @@ if [ -z "$iface" ]; then
 fi
 /sbin/ifconfig "$iface" up
 tries=0
-while [ "$tries" -lt 40 ]; do
+while [ "$tries" -lt 30 ]; do
   /sbin/udhcpc -f -n -q -i "$iface"
   if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then
     echo DHCP_OK
@@ -186,7 +186,7 @@ exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 150000, true);
+      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 105000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
@@ -196,7 +196,7 @@ exit 1`;
       if (stages.dhcp.passed) {
         await runStage("tls_download",
           "echo '--- TLS package downloads ---'; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; tce-load -w ca-certificates.tcz; ca_dl=$?; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
-          "TLS_DOWNLOAD_DONE", 90000);
+          "TLS_DOWNLOAD_DONE", 60000);
         const dlOut = stages.tls_download.output ?? "";
         stages.tls_download.passed = stages.tls_download.passed && /OPENSSL_DOWNLOAD_RC=0/.test(dlOut) && /CA_DOWNLOAD_RC=0/.test(dlOut);
         if (!stages.tls_download.passed) stages.tls_download.error = "openssl_or_ca_package_download_failed";
@@ -211,7 +211,7 @@ exit 1`;
 
           await runStage("ca_install",
             "echo '--- CA certificate install ---'; echo '--- package / TCE paths ---'; pwd; readlink /etc/sysconfig/tcedir 2>&1; ls -l /tmp/tce /tmp/tce/optional /usr/local/tce /usr/local/tce/optional ca-certificates.tcz ca-certificates.tcz.dep 2>&1; echo '--- bounded CA install (max 4 minutes) ---'; tce-load -i ca-certificates >/tmp/ca.log 2>&1 & install_pid=$!; elapsed=0; while kill -0 \"$install_pid\" 2>/dev/null; do if [ $((elapsed % 30)) -eq 0 ]; then echo CA_INSTALL_WAIT_SECONDS=$elapsed; tail -n 8 /tmp/ca.log 2>/dev/null; fi; if [ \"$elapsed\" -ge 240 ]; then echo CA_INSTALL_TIMEOUT; kill \"$install_pid\" 2>/dev/null; break; fi; sleep 5; elapsed=$((elapsed+5)); done; wait \"$install_pid\"; rc=$?; echo CA_INSTALL_RC=$rc; echo '--- CA installer log ---'; tail -n 30 /tmp/ca.log 2>&1; echo '--- certificate bundle search ---'; CA_BUNDLE=$(find /usr/local/etc/ssl/certs /etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl -type f -name ca-certificates.crt 2>/dev/null | head -n 1); echo CA_BUNDLE_PATH=$CA_BUNDLE; if [ \"$rc\" -eq 0 ] && [ -n \"$CA_BUNDLE\" ] && [ -s \"$CA_BUNDLE\" ]; then echo CA_BUNDLE_CHECK_RC=0; else echo CA_BUNDLE_CHECK_RC=1; fi",
-            "CA_CERTIFICATES_INSTALL_DONE", 270000);
+            "CA_CERTIFICATES_INSTALL_DONE", 210000);
           const caOut = stages.ca_install.output ?? "";
           stages.ca_install.passed = stages.ca_install.passed && /CA_INSTALL_RC=0/.test(caOut) && /CA_BUNDLE_CHECK_RC=0/.test(caOut);
           if (!stages.ca_install.passed) stages.ca_install.error = "ca_install_or_bundle_check_failed";
@@ -219,7 +219,7 @@ exit 1`;
           if (stages.openssl_install.passed && stages.ca_install.passed) {
             await runStage("https_preflight",
               "echo '--- DNS / HTTPS PREFLIGHT ---'; cat /etc/resolv.conf 2>&1; wget -T 10 -t 1 -S -O /dev/null https://cloudflare-container-networking.brightlambre22-6dd.workers.dev/health >/tmp/https-preflight.log 2>&1; rc=$?; cat /tmp/https-preflight.log; echo HTTPS_PREFLIGHT_RC=$rc; [ \"$rc\" -eq 0 ] && echo INTERNET_HTTPS_OK || echo HTTPS_PREFLIGHT_FAILED",
-              "EGRESS_PREFLIGHT_DONE", 60000);
+              "EGRESS_PREFLIGHT_DONE", 45000);
             const httpsOut = stages.https_preflight.output ?? "";
             stages.https_preflight.passed = stages.https_preflight.passed && /HTTPS_PREFLIGHT_RC=0/.test(httpsOut) && /INTERNET_HTTPS_OK/.test(httpsOut);
             if (!stages.https_preflight.passed) stages.https_preflight.error = "guest_dns_or_https_preflight_failed";
