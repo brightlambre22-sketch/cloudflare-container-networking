@@ -28,6 +28,20 @@ The upstream loader in `src/lib.js` selects its Node filesystem branch whenever 
 
 Do not wire the existing browser bundle into `/v1/vm/exec` or advertise it as headless. The next code spike should be isolated behind a new experimental endpoint/class and should first boot a tiny test image with no snapshot restore. Only after a guest-shell marker is observed should command dispatch and network tests be added. If the upstream module cannot be bundled with a replaceable loader and bounded CPU/memory behavior, stop the spike rather than introducing a false-success endpoint.
 
+
+## Viable integration seam identified
+
+Upstream `V86Options` exposes `wasm_fn?: (options: WebAssembly.Imports) => Promise<WebAssembly.Exports>`. The starter uses this callback to obtain the WebAssembly exports before constructing the emulator. This is the cleanest seam for supplying WASM bytes fetched through Worker APIs, without depending on the starter's default path-based WASM loader. It does **not** solve the separate `load_file` calls used for guest media and other resources, so both seams must be addressed in a fork/build.
+
+A minimal implementation should therefore:
+- bundle upstream v86 source into the Worker rather than import the browser bundle blindly;
+- provide a `wasm_fn` that fetches the chosen WASM asset and calls `WebAssembly.instantiate(bytes, imports)`;
+- replace/inject the general resource loader for ISO/disk images and range reads;
+- use `screen: { ... }` with the headless adapter and `serial_console: { type: "none" }` initially, and retrieve terminal output via emulator APIs or serial events;
+- start with a tiny boot image and no snapshot restore, with a strict boot timeout and memory/CPU measurement.
+
+The upstream starter currently initializes asynchronously and its constructor does not itself expose a promise that resolves when the guest shell is ready. The Worker wrapper must add a deterministic guest-ready handshake rather than equating emulator initialization or autostart with a working shell.
+
 ## Required implementation gates
 
 1. Identify or build an emulator entry point that is compatible with Workers (no Node filesystem imports and no mandatory DOM/window APIs).
