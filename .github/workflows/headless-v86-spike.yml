@@ -29,5 +29,14 @@ jobs:
         run: npm install
       - name: Test Worker asset loader
         run: npm run test:headless
+      - name: Build upstream v86 candidate bundle
+        run: npm run build:headless-v86
+      - name: Upload candidate bundle for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: headless-v86-candidate-bundle
+          path: cloudflare/dist/headless-v86-bundle.js
+          if-no-files-found: error
+          retention-days: 7
       - name: Bundle Worker without deploying
         run: npm run check
