@@ -100,11 +100,38 @@ export default {
     if (boot.booted) {
       // Match the user's reference behavior: keep retrying DHCP until a lease and default route
       // are both visible, but cap the experiment at one hour and print an explicit outcome.
-      const networkCommand = "echo '--- NETWORK INIT ---'; id; sudo -n sh -c 'set +e; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E \"^(eth|en|wlan)\" | head -n 1 | cut -d \" \" -f 1); if [ -z \"$iface\" ]; then /sbin/modprobe ne2k-pci 2>&1; /sbin/modprobe 8390 2>&1; sleep 1; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E \"^(eth|en|wlan)\" | head -n 1 | cut -d \" \" -f 1); fi; echo DHCP_INTERFACE=$iface; if [ -z \"$iface\" ]; then echo NIC_MISSING; cat /proc/net/dev; exit 10; fi; /sbin/ifconfig \"$iface\" up; elapsed=0; while [ \"$elapsed\" -lt 3600 ]; do /sbin/udhcpc -f -n -q -i \"$iface\"; if /sbin/ifconfig \"$iface\" | grep -Eq \"inet (addr:)?[0-9]\" && /sbin/route -n | grep -q \"0.0.0.0\"; then echo DHCP_OK; exit 0; fi; echo DHCP_RETRYING_NO_LEASE; sleep 3; elapsed=$((elapsed+18)); done; echo DHCP_TIMEOUT; exit 1'; echo DHCP_DONE";
-      // Without v86's Ethernet relay, a DHCP lease is impossible; fail promptly rather than
-      // leaving CI waiting for the full one-hour retry budget on an unconnected virtual NIC.
+      // Build the guest script from short shell input lines. Sending the whole loop as one
+      // keyboard line can overflow the Tiny Core console's input buffer and produce syntax errors.
+      const dhcpLimitSeconds = env.NETWORK_RELAY_URL ? 3600 : 120;
+      const dhcpScriptLines = [
+        "#!/bin/sh",
+        "iface=$(/sbin/ifconfig -a | awk '/^(eth|en|wlan)/ {print $1; exit}')",
+        "echo DHCP_INTERFACE=$iface",
+        'if [ -z "$iface" ]; then echo NIC_MISSING; cat /proc/net/dev; exit 10; fi',
+        '/sbin/ifconfig "$iface" up',
+        "elapsed=0",
+        'while [ "$elapsed" -lt ' + dhcpLimitSeconds + " ]; do",
+        '  /sbin/udhcpc -f -n -q -i "$iface"',
+        '  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_OK; exit 0; fi',
+        "  echo DHCP_RETRYING_NO_LEASE",
+        "  sleep 3",
+        "  elapsed=$((elapsed+3))",
+        "done",
+        "echo DHCP_TIMEOUT",
+        "exit 1",
+      ];
+      await runStage("dhcp_script_init", "echo '#!/bin/sh' > /tmp/dhcp-probe.sh", "DHCP_SCRIPT_INIT", SHELL_COMMAND_TIMEOUT_MS);
+      for (let i = 1; i < dhcpScriptLines.length; i++) {
+        const quotedLine = dhcpScriptLines[i].replace(/'/g, "'\\''");
+        const writeOk = await runStage("dhcp_script_line_" + i,
+          "echo '" + quotedLine + "' >> /tmp/dhcp-probe.sh",
+          "DHCP_SCRIPT_LINE_" + i, SHELL_COMMAND_TIMEOUT_MS);
+        if (!writeOk) break;
+      }
+      await runStage("dhcp_script_syntax", "sudo -n sh -n /tmp/dhcp-probe.sh; echo DHCP_SCRIPT_SYNTAX_CHECKED",
+        "DHCP_SCRIPT_SYNTAX_CHECKED", SHELL_COMMAND_TIMEOUT_MS);
       const dhcpWaitMs = env.NETWORK_RELAY_URL ? DHCP_TIMEOUT_MS : DHCP_TIMEOUT_WITHOUT_RELAY_MS;
-      const dhcpPassed = await runStage("dhcp", networkCommand, "DHCP_DONE", dhcpWaitMs + 30000);
+      const dhcpPassed = await runStage("dhcp", "sudo -n sh /tmp/dhcp-probe.sh; echo DHCP_DONE", "DHCP_DONE", dhcpWaitMs + 30000);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
