@@ -110,3 +110,39 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-command-result.json", "utf8")); if (r.probe !== "headless-v86-tinycore-command" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.emulator_initialized !== true || r.emulator_started !== true || r.guest_booted !== true || r.shell_command?.attempted !== true || r.shell_command?.passed !== true) { console.error("Tiny Core boot or shell-command probe failed", r); process.exit(1); }'
           cleanup_command
           trap - EXIT
+      - name: Probe Tiny Core DHCP and OpenSSL/CA install in local Workerd
+        shell: bash
+        timeout-minutes: 75
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 4500s npx wrangler dev --local --config wrangler.headless-v86-network-test.toml --ip 127.0.0.1 --port 8790 > /tmp/headless-v86-network-workerd.log 2>&1 &
+          worker_pid=$!
+          cleanup_network() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup_network EXIT
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --silent --show-error --fail --max-time 2 http://127.0.0.1:8790/ready > /tmp/headless-v86-network-ready.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Network-probe Workerd did not become ready. Logs:"
+            cat /tmp/headless-v86-network-workerd.log
+            exit 1
+          fi
+          # DHCP may retry for up to an hour, matching the guest bootstrap's behavior.
+          if ! curl --silent --show-error --fail --max-time 4200 http://127.0.0.1:8790/ > /tmp/headless-v86-network-result.json; then
+            echo "Tiny Core DHCP/TLS bootstrap probe failed or timed out. Logs:"
+            cat /tmp/headless-v86-network-workerd.log
+            exit 1
+          fi
+          cat /tmp/headless-v86-network-result.json
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-network-result.json", "utf8")); const required = ["dhcp", "resource_preflight", "tls_download", "openssl_install", "ca_install", "https_preflight"]; const failed = required.filter(k => r.stages?.[k]?.passed !== true); if (r.probe !== "tinycore-dhcp-openssl-ca" || r.runtime !== "workerd" || r.guest_booted !== true || r.passed !== true || failed.length) { console.error("Tiny Core DHCP/OpenSSL/CA test failed", { failed, result: r }); process.exit(1); }'
+          cleanup_network
+          trap - EXIT
