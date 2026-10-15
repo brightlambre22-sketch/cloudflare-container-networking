@@ -436,7 +436,7 @@ function updateFields(){
   loginButton.textContent=creating?'Create account':'Log in';
   password.autocomplete=creating?'new-password':'current-password';
 }
-function beginAccountSession(data){
+function beginAccountSession(data,launchVm=true){
   if(!data||typeof data.account_id!=='string'||!/^acct-[a-f0-9-]{36}$/.test(data.account_id)||typeof data.session_token!=='string'){
     throw new Error('The server returned an invalid account session.');
   }
@@ -444,11 +444,36 @@ function beginAccountSession(data){
   window.snapshotAuthToken=data.session_token;
   window.snapshotNeedsInitialSave=data.snapshot_initialization_required===true;
   try{if(window.snapshotNeedsInitialSave)sessionStorage.setItem('vm-initial-snapshot-pending',data.account_id);else window.snapshotNeedsInitialSave=sessionStorage.getItem('vm-initial-snapshot-pending')===data.account_id}catch(e){}
+  try{sessionStorage.setItem('vm-account-id',data.account_id);sessionStorage.setItem('vm-session-token',data.session_token)}catch(e){}
+  if(launchVm){panel.hidden=true;document.body.classList.add('logged-in');window.startVm();}
+}
+const progressLabels={
+  queued:'Waiting for a VM worker…',starting_vm:'Starting the Linux VM…',booting_linux:'Booting Tiny Core Linux…',
+  linux_booted:'Linux booted. Preparing network checks…',resource_preflight:'Checking guest resources…',
+  dhcp:'Testing DHCP and default route…',tls_download:'Downloading OpenSSL and CA packages…',
+  openssl_install:'Installing and checking OpenSSL…',ca_install:'Installing CA certificates…',
+  https_preflight:'Testing DNS and HTTPS from Linux…',snapshot_marker:'Writing guest persistence marker…',
+  snapshot_saved:'Saving the VM snapshot…',snapshot_readback_verified:'Verifying saved snapshot bytes…',
+  restoring_fresh_vm:'Restoring a fresh VM and checking guest data…',complete:'VM initialized and restore verified.'
+};
+async function waitForRegistration(data){
+  beginAccountSession(data,false);
+  panel.hidden=false;document.body.classList.remove('logged-in');
+  createButton.disabled=true;loginButton.disabled=true;
   try{
-    sessionStorage.setItem('vm-account-id',data.account_id);
-    sessionStorage.setItem('vm-session-token',data.session_token);
-  }catch(e){}
-  panel.hidden=true;document.body.classList.add('logged-in');window.startVm();
+    while(true){
+      const response=await fetch('/api/auth/registration-status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:data.account_id,session_token:data.session_token})});
+      const progress=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(progress.error||'Could not read registration progress.');
+      message.textContent=progressLabels[progress.step]||('VM initialization: '+(progress.step||progress.status||'working')+'…');
+      if(progress.status==='complete'&&progress.complete===true){
+        beginAccountSession({...data,status:'ready',snapshot_initialization_required:true},true);
+        return;
+      }
+      if(progress.status==='error')throw new Error('VM initialization failed at '+(progress.step||'an unknown stage')+': '+(progress.error||progress.boot_error||'check failed'));
+      await new Promise(resolve=>setTimeout(resolve,3000));
+    }
+  }finally{createButton.disabled=false;loginButton.disabled=false;}
 }
 access.addEventListener('change',()=>{creating=false;message.textContent='';updateFields()});
 createButton.addEventListener('click',()=>{
@@ -481,8 +506,10 @@ form.addEventListener('submit',async function(event){
     });
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error==='username_unavailable'?'That username is already taken.':data.error==='baseline_snapshot_not_found'?'The old baseline-based signup path is still active on this deployment. The account-first signup fix needs to be deployed.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.');
+    const wasCreating=creating;
     creating=false;
-    beginAccountSession(data);
+    if(wasCreating&&data.status==='provisioning')await waitForRegistration(data);
+    else beginAccountSession(data);
   }catch(error){message.textContent=error&&error.message?error.message:'Account request failed.';updateFields()}
 });
 updateFields();
@@ -495,7 +522,11 @@ updateFields();
   try{
     const response=await fetch('/api/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
     if(!response.ok)throw new Error('session expired');
-    beginAccountSession({account_id:accountId,session_token:token});
+    const statusResponse=await fetch('/api/auth/registration-status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
+    const registration=await statusResponse.json().catch(()=>({}));
+    if(statusResponse.ok&&registration.status==='provisioning')await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true});
+    else if(statusResponse.ok&&registration.status==='error')throw new Error('VM initialization failed: '+(registration.error||registration.step||'check failed'));
+    else beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:registration.status!=='complete'});
   }catch(e){
     try{sessionStorage.removeItem('vm-account-id');sessionStorage.removeItem('vm-session-token')}catch(ignore){}
     message.textContent='Please log in again to restore your saved VM.';
