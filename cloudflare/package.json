@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "check": "wrangler deploy --dry-run",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test:headless": "node --experimental-strip-types --test test/*.test.ts"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
