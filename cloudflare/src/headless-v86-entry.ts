@@ -3,6 +3,8 @@
  * This is a feasibility probe only; URLs still need to be restricted before
  * this constructor is exposed to untrusted VM configuration.
  */
+import { createCompiledV86WasmFn } from "./headless-v86-wasm";
+
 class FetchXMLHttpRequest {
   method = "GET";
   url = "";
@@ -73,5 +75,13 @@ class FetchXMLHttpRequest {
 (globalThis as unknown as { XMLHttpRequest: typeof FetchXMLHttpRequest }).XMLHttpRequest = FetchXMLHttpRequest;
 
 const { V86 } = await import("v86");
-export { V86 };
-export default V86;
+
+/** v86 adapter that uses Wrangler's statically compiled WASM module. */
+export class WorkerV86 extends V86 {
+  constructor(options: Record<string, unknown>) {
+    super({ ...options, wasm_fn: createCompiledV86WasmFn() });
+  }
+}
+
+export { WorkerV86 as V86 };
+export default WorkerV86;
