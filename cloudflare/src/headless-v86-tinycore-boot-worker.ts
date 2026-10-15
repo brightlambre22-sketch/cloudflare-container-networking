@@ -95,9 +95,12 @@ export default {
       )),
     ]);
 
+    let screenExcerpt = "";
+    try {
+      screenExcerpt = emulator?.screen_adapter?.get_text_screen?.().join("\n").slice(-2000) ?? "";
+    } catch { /* screen diagnostics are best-effort */ }
     try { emulator?.stop(); } catch { /* Best-effort cleanup after bounded probe. */ }
 
-    const serialOutput = serial.join("").replace(/[^\x20-\x7E\r\n\t]/g, ".");
     return new Response(JSON.stringify({
       probe: "headless-v86-tinycore-boot",
       runtime: "workerd",
