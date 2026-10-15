@@ -220,8 +220,9 @@ exit 1`;
       snapshotRoundtrip.marker_written = markerStage && /SNAPSHOT_MARKER_WRITTEN/.test(stages.snapshot_marker?.output ?? "");
       if (snapshotRoundtrip.marker_written) {
         try {
-          const state = await emulator.save_state();
-          snapshotRoundtrip.state_bytes = state.byteLength;
+          let state: ArrayBuffer | undefined = await emulator.save_state();
+          const stateBytes = state.byteLength;
+          snapshotRoundtrip.state_bytes = stateBytes;
           const checks = {
             guest_booted: true, shell_command_passed: true,
             dhcp_passed: stages.dhcp?.passed === true,
@@ -230,6 +231,7 @@ exit 1`;
           };
           const generation = "gen-" + Date.now().toString(36);
           const manifest = await commitGuestSnapshot(env.VM_SNAPSHOTS, "test-v86-roundtrip", generation, state, checks);
+          state = undefined; // Release the original ~100 MiB state before read-back/restore.
           snapshotRoundtrip.saved = true;
           snapshotRoundtrip.generation = manifest.generation;
           snapshotRoundtrip.sha256 = manifest.sha256;
@@ -237,7 +239,7 @@ exit 1`;
           emulator = undefined;
           const readback = await readCommittedGuestSnapshot(env.VM_SNAPSHOTS, "test-v86-roundtrip");
           snapshotRoundtrip.readback = true;
-          snapshotRoundtrip.readback_digest_verified = readback.manifest.sha256 === manifest.sha256 && readback.state.byteLength === state.byteLength;
+          snapshotRoundtrip.readback_digest_verified = readback.manifest.sha256 === manifest.sha256 && readback.state.byteLength === stateBytes;
           const restored = new V86({
             wasm_fn: createCompiledV86WasmFn(),
             memory_size: 128 * 1024 * 1024,
