@@ -28,6 +28,8 @@ test("sessions expire and are bound to the account ID for every snapshot operati
 test("signup clones a private snapshot and marks it for one-time initialization", () => {
   assert.match(worker, /vm-snapshots\/" \+ accountId \+ "\//);
   assert.match(worker, /bootstrapRequired: true/);
+  assert.match(worker, /unsafe_vm_baseline_id_use_clean_v2_baseline/);
+  assert.match(worker, /baselineId === "admin"/);
   assert.match(dashboard, /bootstrapRequired:manifest\.bootstrapRequired===true/);
   assert.match(dashboard, /running one-time VM setup before saving its initialized state/);
 });
@@ -36,6 +38,8 @@ test("missing or unreadable account snapshots fail closed instead of booting a f
   assert.match(dashboard, /No saved VM snapshot exists for this account; refusing to boot a fresh VM over missing user data/);
   assert.match(dashboard, /snapshotLoadFailed=true/);
   assert.match(dashboard, /Snapshot load failed; refusing to overwrite server state/);
+  assert.match(dashboard, /Restore failed; no fresh bootstrap started/);
+  assert.match(dashboard, /Account snapshot restore failed; stopped without starting a fresh VM/);
 });
 
 test("public auth routes are rate-limited and browser credentials are not persisted in localStorage", () => {
