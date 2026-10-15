@@ -52,7 +52,7 @@ export class VmExecution extends DurableObject {
       return json({ ok: true, expires_in_seconds: 60 });
     }
 
-    if (url.pathname === "/agent" && request.method === "GET") {
+    if ((url.pathname === "/agent" || url.pathname === "/api/vm/agent") && request.method === "GET") {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return json({ error: "websocket_upgrade_required" }, 426);
       }
