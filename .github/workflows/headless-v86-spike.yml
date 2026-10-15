@@ -89,7 +89,7 @@ jobs:
           trap cleanup EXIT
           ready=0
           for attempt in $(seq 1 30); do
-            if curl --silent --show-error --fail --max-time 30 http://127.0.0.1:8789/ > /tmp/headless-v86-boot.json 2>/dev/null; then
+            if curl --silent --show-error --fail --max-time 2 http://127.0.0.1:8789/ready > /tmp/headless-v86-ready.json 2>/dev/null; then
               ready=1
               break
             fi
@@ -99,7 +99,12 @@ jobs:
             sleep 1
           done
           if [ "$ready" -ne 1 ]; then
-            echo "Tiny Core Workerd boot probe did not respond. Wrangler/Workerd log follows:"
+            echo "Tiny Core Workerd worker did not become ready. Wrangler/Workerd log follows:"
+            cat /tmp/headless-v86-boot.log
+            exit 1
+          fi
+          if ! curl --silent --show-error --fail --max-time 30 http://127.0.0.1:8789/ > /tmp/headless-v86-boot.json; then
+            echo "Tiny Core boot request failed or timed out. Wrangler/Workerd log follows:"
             cat /tmp/headless-v86-boot.log
             exit 1
           fi
