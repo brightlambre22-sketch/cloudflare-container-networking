@@ -11,8 +11,6 @@ export default {
     }
     const wasm = getCompiledV86WasmInfo();
     const base = new URL(request.url);
-    const serial: string[] = [];
-    let serialBytes = 0;
     let finish!: (value: { booted: boolean; reason?: string }) => void;
     const bootObserved = new Promise<{ booted: boolean; reason?: string }>((resolve) => {
       finish = resolve;
@@ -20,16 +18,6 @@ export default {
     let started = false;
     let loaded = false;
     let emulator: InstanceType<typeof V86> | undefined;
-
-    const observeSerial = (byte: number) => {
-      if (serialBytes >= MAX_SERIAL_BYTES) return;
-      serialBytes += 1;
-      serial.push(String.fromCharCode(byte & 0xff));
-      const output = serial.join("");
-      if (/Linux version |Tiny Core Linux|tc@box|login:|localhost login:/i.test(output)) {
-        finish({ booted: true });
-      }
-    };
 
     class AssetXMLHttpRequest {
       method = "GET";
@@ -78,9 +66,22 @@ export default {
         disable_mouse: true,
         net_device: { type: "ne2k" },
       } as ConstructorParameters<typeof V86>[0]);
-      emulator.add_listener("emulator-loaded", () => { loaded = true; });
+      emulator.add_listener("emulator-loaded", async () => {
+        loaded = true;
+        try {
+          const found = await emulator.wait_until_vga_screen_contains(
+            /Tiny Core Linux|tc@box|login:/i,
+            { timeout_msec: BOOT_TIMEOUT_MS },
+          );
+          finish(found
+            ? { booted: true }
+            : { booted: false, reason: "guest_vga_marker_not_seen_within_timeout" });
+        } catch (error) {
+          const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+          finish({ booted: false, reason: "vga_probe_error: " + message });
+        }
+      });
       emulator.add_listener("emulator-started", () => { started = true; });
-      emulator.add_listener("serial0-output-byte", observeSerial);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
       finish({ booted: false, reason: "constructor_error: " + message });
@@ -105,11 +106,9 @@ export default {
       emulator_initialized: loaded,
       emulator_started: started,
       guest_booted: result.booted,
-      guest_boot_evidence: result.booted ? "serial_console_marker" : null,
-      serial_bytes_seen: serialBytes,
-      serial_excerpt: serialOutput.slice(-1200),
+      guest_boot_evidence: result.booted ? "vga_text_marker" : null,
       ...(result.reason ? { boot_error: result.reason } : {}),
-      note: "Boots a small Tiny Core ISO without restoring the 103 MB snapshot. A serial guest marker is required to count as a boot.",
+      note: "Boots a small Tiny Core ISO without restoring the 103 MB snapshot. A VGA text marker is required to count as a boot.",
     }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
   },
 };
