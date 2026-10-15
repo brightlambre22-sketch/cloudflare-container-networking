@@ -46,12 +46,41 @@ export async function fetchWorkerV86Asset(
     }
   }
 
-  const bytes = await response.arrayBuffer();
-  if (bytes.byteLength === 0 || bytes.byteLength > maxBytes) {
+  if (!response.body) {
+    throw new Error("v86_asset_body_missing");
+  }
+
+  // Do not call arrayBuffer() on an untrusted/incorrectly sized response:
+  // stream it with a hard cap so a missing Content-Length cannot bypass the limit.
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error("v86_asset_size_limit_exceeded");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (totalBytes === 0) {
     throw new Error("v86_asset_size_limit_exceeded");
   }
 
-  return bytes;
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
 }
 
 /**
