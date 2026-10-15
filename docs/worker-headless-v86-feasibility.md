@@ -61,8 +61,11 @@ A test must call the deployed Worker API with the browser closed and receive the
 `cloudflare/src/headless-v86-assets.ts` now implements a small, isolated adapter that:
 
 - fetches only explicitly allowlisted v86 WASM and TinyCore ISO assets through the Worker's `ASSETS` binding;
-- rejects non-2xx responses and oversized/empty payloads before returning bytes;
-- exposes `createWorkerV86WasmFn()` in the shape of v86's `wasm_fn` callback.
+- bounds streamed reads even when `Content-Length` is absent, and validates exact byte counts for range reads;
+- exposes `createWorkerV86WasmFn()` in the shape of v86's `wasm_fn` callback;
+- provides a callback-style `loadWorkerV86File()` for full-file, JSON, and byte-range reads, plus `getWorkerV86FileSize()` using `Content-Range`.
+
+These APIs mirror the relevant loader behaviors, but they are not yet wired into upstream `src/lib.js`; that requires a Worker-specific v86 build/fork and bundling its source graph.
 
 This is a useful integration seam, not a working emulator. It is deliberately not imported by `index.ts` and does not change `/v1/vm/exec`. In particular, it does not replace upstream `load_file()` calls for the ISO/disk and auxiliary resources, does not remove DOM dependencies from the bundled emulator, and has not been tested against a booting guest. The asset limits are guardrails for the current test artifacts, not a claim that those assets can fit alongside guest RAM within a Worker isolate's memory budget.
 
