@@ -197,6 +197,68 @@ statusText('Keyboard input failed: '+(e&&e.message?e.message:String(e)));
 }
 };
 
+let apiAgentSocket=null,apiAgentConnecting=false,apiExecBusy=false,apiAgentReconnectTimer=null;
+async function connectApiAgent(){
+if(window.snapshotIdentity!=='admin'||!window.snapshotAdminCode||apiAgentConnecting)return;
+if(apiAgentSocket&&apiAgentSocket.readyState<=1)return;
+apiAgentConnecting=true;
+try{
+const ticketResponse=await fetch('/api/vm/agent-ticket',{method:'POST',headers:{'x-admin-code':window.snapshotAdminCode}});
+if(!ticketResponse.ok)throw new Error('agent ticket HTTP '+ticketResponse.status);
+const ticket=await ticketResponse.json();
+const wsUrl=new URL('/api/vm/agent',window.location.href);
+wsUrl.protocol=window.location.protocol==='https:'?'wss:':'ws:';
+wsUrl.searchParams.set('ticket',ticket.ticket);
+const ws=new WebSocket(wsUrl);
+apiAgentSocket=ws;
+ws.onopen=()=>{apiAgentConnecting=false;ws.send(JSON.stringify({type:'heartbeat'}));stateText('VM ready; API execution agent connected.')};
+ws.onmessage=async event=>{
+let message;
+try{message=JSON.parse(event.data)}catch(e){return}
+if(message.type!=='exec'||typeof message.id!=='string'||typeof message.command!=='string')return;
+if(apiExecBusy||bootstrapStarted||!bootComplete){
+ws.send(JSON.stringify({type:'result',id:message.id,stdout:'',stderr:'VM is busy or startup is incomplete.',exit_code:null}));
+return;
+}
+apiExecBusy=true;
+const id=message.id.replace(/[^a-f0-9-]/gi,'').slice(0,36);
+const begin='__API_EXEC_BEGIN_'+id+'__',end='__API_EXEC_END_'+id+'__:';
+try{
+if(!id)throw new Error('invalid execution id');
+const before=screenText();
+const command='printf "\\n'+begin+'\\n"; ( '+message.command+' ); rc=$?; printf "\\n'+end+'%s\\n" "$rc"';
+await sendVmCommand(command+'\\n');
+const deadline=Date.now()+Math.min(Math.max(Number(message.timeout_ms)||15000,1000),20000);
+let finalScreen='',exitCode=null;
+while(Date.now()<deadline){
+const t=screenText(),endAt=t.lastIndexOf(end);
+if(endAt>=0){
+const line=t.slice(endAt+end.length).split(/\\r?\\n/,1)[0].trim();
+if(/^(-?\\d+)$/.test(line)&&shellPrompt(t.slice(endAt))){
+finalScreen=t;exitCode=Number(line);break;
+}
+}
+await new Promise(resolve=>setTimeout(resolve,100));
+}
+if(exitCode===null){
+ws.send(JSON.stringify({type:'result',id:message.id,stdout:'',stderr:'Command timed out or the shell prompt did not return. The command may still be running in the VM.',exit_code:null,timed_out:true}));
+}else{
+const beginAt=finalScreen.lastIndexOf(begin);
+const endAt=finalScreen.lastIndexOf(end);
+const stdout=beginAt>=0&&endAt>beginAt?finalScreen.slice(beginAt+begin.length,endAt).replace(/^\\r?\\n/,'').trimEnd():'Command completed; output was outside the visible terminal buffer.';
+ws.send(JSON.stringify({type:'result',id:message.id,stdout,stderr:'',exit_code:exitCode}));
+}
+}catch(error){
+ws.send(JSON.stringify({type:'result',id:message.id,stdout:'',stderr:error&&error.message?error.message:String(error),exit_code:null}));
+}finally{apiExecBusy=false}
+};
+ws.onerror=()=>{apiAgentConnecting=false};
+ws.onclose=()=>{apiAgentConnecting=false;if(apiAgentSocket===ws)apiAgentSocket=null;if(apiAgentReconnectTimer)clearTimeout(apiAgentReconnectTimer);if(bootComplete&&window.snapshotIdentity==='admin')apiAgentReconnectTimer=setTimeout(connectApiAgent,3000)};
+}catch(error){
+apiAgentConnecting=false;
+stateText('VM ready, API agent connection failed: '+(error&&error.message?error.message:String(error)));
+}
+}
 async function sendVmCommand(cmd){
 if(!window.emulator||typeof window.emulator.keyboard_send_text!=='function')throw new Error('v86 keyboard API unavailable');
 if(typeof window.emulator.keyboard_set_enabled==='function')window.emulator.keyboard_set_enabled(true);
@@ -234,6 +296,7 @@ while(snapshotBusy)await new Promise(r=>requestAnimationFrame(r));
 const saved=await saveVmState(false);
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 statusText(saved?'Startup and network tests complete; server snapshot saved.':'Startup complete; server snapshot save did not complete. Check saved-state status.');
+connectApiAgent();
 return;
 }
 const n=i++,cmd=commands[n],marker=markers[n];
@@ -298,6 +361,7 @@ if(restoredSnapshot){
 bootComplete=true;
 statusText('Saved VM resumed; startup already completed.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
+connectApiAgent();
 return;
 }
 startBootMonitor();
