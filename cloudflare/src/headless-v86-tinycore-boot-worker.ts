@@ -2,7 +2,6 @@ import V86 from "../dist/headless-v86-bundle.js";
 import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-wasm";
 
 const BOOT_TIMEOUT_MS = 20000;
-const MAX_SERIAL_BYTES = 8192;
 
 export default {
   async fetch(request: Request, env: { ASSETS: Fetcher }) {
@@ -69,13 +68,24 @@ export default {
       emulator.add_listener("emulator-loaded", async () => {
         loaded = true;
         try {
-          const found = await emulator.wait_until_vga_screen_contains(
-            /Tiny Core Linux|tc@box|login:/i,
+          const bootPrompt = await emulator.wait_until_vga_screen_contains(
+            /boot:/i,
+            { timeout_msec: 5000 },
+          );
+          if (!bootPrompt) {
+            finish({ booted: false, reason: "bootloader_prompt_not_seen_within_timeout" });
+            return;
+          }
+
+          // Tiny Core ISO pauses at "boot:" until Enter selects its default entry.
+          await emulator.keyboard_send_scancodes([0x1C, 0x9C]);
+          const shellReached = await emulator.wait_until_vga_screen_contains(
+            /tc@box|localhost login:|login:/i,
             { timeout_msec: BOOT_TIMEOUT_MS },
           );
-          finish(found
+          finish(shellReached
             ? { booted: true }
-            : { booted: false, reason: "guest_vga_marker_not_seen_within_timeout" });
+            : { booted: false, reason: "linux_shell_or_login_marker_not_seen_after_enter" });
         } catch (error) {
           const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
           finish({ booted: false, reason: "vga_probe_error: " + message });
