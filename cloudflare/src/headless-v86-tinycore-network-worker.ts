@@ -82,16 +82,21 @@ export default {
     ]);
 
     const stages: Record<string, Stage> = {};
-    const runStage = async (key: string, command: string, marker: string, timeout: number): Promise<boolean> => {
+    const runStage = async (key: string, command: string, marker: string, timeout: number, asRoot = false): Promise<boolean> => {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
       try {
-        // Do not put the literal marker in the typed command: VGA text echoes input, which otherwise causes a false-positive before the command runs.
-        const markerFormat = "\\n" + Array.from(marker, (char) => "\\" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("") + "\\n";
-        await emulator.keyboard_send_text(command + "\n" + "printf '" + markerFormat + "'\n");
+        // Write each stage as a script first; long interactive command lines were being truncated by the guest shell.
+        // Encode the complete marker, including delimiters, so it appears only after printf actually executes.
+        const markerText = "__" + marker + "__";
+        const markerFormat = "\\n" + Array.from(markerText, (char) => "\\\\" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("") + "\\n";
+        const runner = asRoot ? "sudo -n sh /tmp/headless-v86-stage.sh" : "sh /tmp/headless-v86-stage.sh";
+        const script = "cat > /tmp/headless-v86-stage.sh <<'V86_STAGE_EOF'\\n" + command + "\\nV86_STAGE_EOF\\n" +
+          runner + "\\nstage_rc=$?\\necho STAGE_SCRIPT_RC=$stage_rc\\nprintf '" + markerFormat + "'\\n";
+        await emulator.keyboard_send_text(script);
         const observed = await emulator.wait_until_vga_screen_contains(new RegExp("__" + marker + "__"), { timeout_msec: timeout });
         let screen = "";
-        try { screen = emulator.screen_adapter?.get_text_screen?.().join("\n") ?? ""; } catch {}
+        try { screen = emulator.screen_adapter?.get_text_screen?.().join("\\n") ?? ""; } catch {}
         stage.output = screen.slice(-5000);
         stage.passed = Boolean(observed) && screen.includes("__" + marker + "__");
         if (!stage.passed) stage.error = "stage_marker_not_seen_within_timeout";
@@ -104,11 +109,43 @@ export default {
     if (boot.booted) {
       // Reuse the known-good NETWORK INIT command from the user's real VM run.
       // Bound DHCP retries to six minutes so a broken relay cannot stall CI indefinitely.
-      const dhcpCommand = "echo \"--- NETWORK INIT ---\"; id; sudo -n sh -c 'set +e; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E \"^(eth|en|wlan)\" | head -n 1 | cut -d \" \" -f 1); if [ -z \"$iface\" ]; then /sbin/modprobe ne2k-pci 2>&1; /sbin/modprobe 8390 2>&1; sleep 1; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E \"^(eth|en|wlan)\" | head -n 1 | cut -d \" \" -f 1); fi; echo DHCP_INTERFACE=$iface; if [ -z \"$iface\" ]; then echo NIC_MISSING; cat /proc/net/dev; dmesg 2>/dev/null | tail -n 20; exit 1; fi; /sbin/ifconfig \"$iface\" up; tries=0; while [ \"$tries\" -lt 120 ]; do /sbin/udhcpc -f -n -q -i \"$iface\"; /sbin/ifconfig \"$iface\" | grep -Eq \"inet (addr:)?[0-9]\" && /sbin/route -n | grep -q \"0.0.0.0\" && { echo DHCP_OK; exit 0; }; echo DHCP_RETRYING_NO_LEASE; tries=$((tries+1)); sleep 3; done; echo DHCP_TIMEOUT; /sbin/ifconfig -a; /sbin/route -n; exit 1'; echo DHCP_DONE";
+      const dhcpCommand = `set +e
+echo "--- NETWORK INIT ---"
+id
+iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E "^(eth|en|wlan)" | head -n 1 | cut -d " " -f 1)
+if [ -z "$iface" ]; then
+  /sbin/modprobe ne2k-pci 2>&1
+  /sbin/modprobe 8390 2>&1
+  sleep 1
+  iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E "^(eth|en|wlan)" | head -n 1 | cut -d " " -f 1)
+fi
+echo DHCP_INTERFACE=$iface
+if [ -z "$iface" ]; then
+  echo NIC_MISSING
+  cat /proc/net/dev
+  dmesg 2>/dev/null | tail -n 20
+  exit 1
+fi
+/sbin/ifconfig "$iface" up
+tries=0
+while [ "$tries" -lt 120 ]; do
+  /sbin/udhcpc -f -n -q -i "$iface"
+  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then
+    echo DHCP_OK
+    exit 0
+  fi
+  echo DHCP_RETRYING_NO_LEASE
+  tries=$((tries+1))
+  sleep 3
+done
+echo DHCP_TIMEOUT
+/sbin/ifconfig -a
+/sbin/route -n
+exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 420000);
+      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 420000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
