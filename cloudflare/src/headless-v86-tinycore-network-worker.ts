@@ -86,7 +86,9 @@ export default {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
       try {
-        // Do not put the literal marker in the typed command: VGA text echoes input, which otherwise causes a false-positive before the command runs.\n        const markerFormat = "\\n" + Array.from(marker, (char) => "\\x" + char.charCodeAt(0).toString(16).padStart(2, "0")).join("") + "\\n";\n        await emulator.keyboard_send_text(command + "\\nprintf '" + markerFormat + "'\\n");
+        // Do not put the literal marker in the typed command: VGA text echoes input, which otherwise causes a false-positive before the command runs.
+        const markerFormat = "\\n" + Array.from(marker, (char) => "\\x" + char.charCodeAt(0).toString(16).padStart(2, "0")).join("") + "\\n";
+        await emulator.keyboard_send_text(command + "\n" + "printf '" + markerFormat + "'\n");
         const observed = await emulator.wait_until_vga_screen_contains(new RegExp("__" + marker + "__"), { timeout_msec: timeout });
         let screen = "";
         try { screen = emulator.screen_adapter?.get_text_screen?.().join("\n") ?? ""; } catch {}
