@@ -75,3 +75,38 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-emulator-initialization" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.wasm_import_count < 1 || r.wasm_export_count < 1 || r.static_module_instantiated !== true || r.emulator_initialized !== true) { console.error("Unexpected or failed Workerd v86 emulator initialization probe", r); process.exit(1); }'
           cleanup
           trap - EXIT
+      - name: Probe Tiny Core boot and shell command in local Workerd
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=5s 360s npx wrangler dev --local --config wrangler.headless-v86-command-test.toml --ip 127.0.0.1 --port 8789 > /tmp/headless-v86-command-workerd.log 2>&1 &
+          worker_pid=$!
+          cleanup_command() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup_command EXIT
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --silent --show-error --fail --max-time 2 http://127.0.0.1:8789/ready > /tmp/headless-v86-command-ready.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Command-probe Workerd did not become ready. Logs:"
+            cat /tmp/headless-v86-command-workerd.log
+            exit 1
+          fi
+          # This request intentionally waits for the guest boot and command marker.
+          if ! curl --silent --show-error --fail --max-time 330 http://127.0.0.1:8789/ > /tmp/headless-v86-command-result.json; then
+            echo "Tiny Core command probe request failed or timed out. Logs:"
+            cat /tmp/headless-v86-command-workerd.log
+            exit 1
+          fi
+          cat /tmp/headless-v86-command-result.json
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-command-result.json", "utf8")); if (r.probe !== "headless-v86-tinycore-command" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.emulator_initialized !== true || r.emulator_started !== true || r.guest_booted !== true || r.shell_command?.attempted !== true || r.shell_command?.passed !== true) { console.error("Tiny Core boot or shell-command probe failed", r); process.exit(1); }'
+          cleanup_command
+          trap - EXIT
