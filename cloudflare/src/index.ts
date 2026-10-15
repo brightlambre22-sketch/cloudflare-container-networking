@@ -3,12 +3,15 @@ import { ADMIN_ACCESS_CODE } from "./auth-codes";
 import { TunnelHub } from "./tunnel-hub";
 import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
-export { TunnelHub, NodeRegistry, NodeRuntime };
+import { RegistrationRegistry, type RegistrationJob } from "./registration-registry";
+export { TunnelHub, NodeRegistry, NodeRuntime, RegistrationRegistry };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
   NODE_REGISTRY: DurableObjectNamespace<NodeRegistry>;
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
+  REGISTRATION_REGISTRY: DurableObjectNamespace<RegistrationRegistry>;
+  REGISTRATION_QUEUE: Queue<RegistrationJob>;
   VM_SNAPSHOTS: R2Bucket;
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
@@ -51,6 +54,17 @@ export default {
       catch { return json({ error: "invalid_json" }, 400); }
       if (typeof body.code !== "string" || body.code !== ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
       return json({ ok: true });
+    }
+
+    const registrationRoute = url.pathname.match(/^\/api\/registrations\/(register|login|status)$/);
+    if (registrationRoute) {
+      const action = registrationRoute[1];
+      if (action === "register" && request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (action === "login" && request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (action === "status" && request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const registry = env.REGISTRATION_REGISTRY.get(env.REGISTRATION_REGISTRY.idFromName("global"));
+      const internalPath = action === "register" ? "/register" : action === "login" ? "/login" : "/status";
+      return registry.fetch(new Request(`https://registration.internal${internalPath}${url.search}`, request));
     }
 
     const snapshotChunkMatch = url.pathname.match(/^\/api\/vm-snapshots\/([a-z0-9._-]{1,64})\/chunks\/([a-z0-9-]{1,40})\/([0-9]{1,3})$/i);
@@ -317,5 +331,60 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+  },
+
+  async queue(batch: MessageBatch<RegistrationJob>, env: Env): Promise<void> {
+    const registry = env.REGISTRATION_REGISTRY.get(env.REGISTRATION_REGISTRY.idFromName("global"));
+    for (const message of batch.messages) {
+      const job = message.body;
+      if (
+        !job ||
+        typeof job.username !== "string" ||
+        typeof job.registrationId !== "string" ||
+        !/^[a-z0-9][a-z0-9_-]{1,31}$/.test(job.username)
+      ) {
+        message.ack();
+        continue;
+      }
+
+      try {
+        const response = await registry.fetch("https://registration.internal/complete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(job),
+        });
+        if (response.ok) {
+          message.ack();
+          continue;
+        }
+        if (message.attempts >= 5) {
+          const failed = await registry.fetch("https://registration.internal/fail", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...job, error: `Registration job returned HTTP ${response.status}` }),
+          });
+          if (failed.ok) message.ack();
+          else message.retry({ delaySeconds: 30 });
+        } else {
+          message.retry({ delaySeconds: Math.min(60, message.attempts * 10) });
+        }
+      } catch {
+        if (message.attempts >= 5) {
+          try {
+            const failed = await registry.fetch("https://registration.internal/fail", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...job, error: "Registration queue processing failed after retries." }),
+            });
+            if (failed.ok) message.ack();
+            else message.retry({ delaySeconds: 30 });
+          } catch {
+            message.retry({ delaySeconds: 30 });
+          }
+        } else {
+          message.retry({ delaySeconds: Math.min(60, message.attempts * 10) });
+        }
+      }
+    }
   },
 };
