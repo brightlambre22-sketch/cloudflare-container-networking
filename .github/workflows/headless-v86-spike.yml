@@ -43,27 +43,35 @@ jobs:
           retention-days: 7
       - name: Bundle Worker without deploying
         run: npm run check
-      # Temporarily disabled: local Workerd smoke test can hang while starting.
-      # Re-enable after adding a hard timeout and better diagnostics.
       - name: Smoke-test v86 and static WASM module inside local Workerd
-        if: ${{ false }}
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler dev --local --config wrangler.headless-v86-smoke.toml --ip 127.0.0.1 --port 8788 > /tmp/headless-v86-workerd.log 2>&1 &
+          # Bound the server lifetime so a Wrangler/Workerd startup hang cannot stall CI.
+          timeout --signal=TERM --kill-after=5s 45s npx wrangler dev --local --config wrangler.headless-v86-smoke.toml --ip 127.0.0.1 --port 8788 > /tmp/headless-v86-workerd.log 2>&1 &
           worker_pid=$!
-          trap 'kill "$worker_pid" 2>/dev/null || true' EXIT
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           ready=0
           for attempt in $(seq 1 30); do
-            if curl --silent --show-error --fail http://127.0.0.1:8788/ > /tmp/headless-v86-workerd.json 2>/dev/null; then
+            if curl --silent --show-error --fail --max-time 2 http://127.0.0.1:8788/ > /tmp/headless-v86-workerd.json 2>/dev/null; then
               ready=1
+              break
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
               break
             fi
             sleep 1
           done
           if [ "$ready" -ne 1 ]; then
+            echo "Workerd smoke test did not become ready within 30 seconds. Wrangler/Workerd log follows:"
             cat /tmp/headless-v86-workerd.log
             exit 1
           fi
           cat /tmp/headless-v86-workerd.json
-          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-workerd-import" || r.module_loaded !== true || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.wasm_import_count < 1 || r.wasm_export_count < 1) process.exit(1);'
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-workerd-import" || r.module_loaded !== true || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.wasm_import_count < 1 || r.wasm_export_count < 1) { console.error("Unexpected Workerd probe response", r); process.exit(1); }'
+          cleanup
+          trap - EXIT
