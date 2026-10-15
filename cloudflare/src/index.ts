@@ -50,6 +50,111 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // Diagnostic only: this checks the persisted snapshot and optionally compiles the v86 WASM
+    // module in the Worker runtime. It intentionally does not instantiate a VM or claim shell execution.
+    if (url.pathname === "/v1/runtime/preflight") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+
+      let body: { compile_wasm?: unknown };
+      try { body = await request.json() as typeof body; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      if (body.compile_wasm !== undefined && typeof body.compile_wasm !== "boolean") {
+        return json({ error: "compile_wasm_must_be_boolean" }, 400);
+      }
+
+      const baselineId = env.VM_BASELINE_ID ?? "v2";
+      const prefix = "vm-snapshots/" + baselineId + "/";
+      const manifestObject = await env.VM_SNAPSHOTS.get(prefix + "manifest.json");
+      if (!manifestObject) {
+        return json({
+          probe: "headless-v86-preflight",
+          headless_linux_execution: "not_implemented",
+          snapshot: { baseline_id: baselineId, available: false },
+          next_blocker: "Upload a valid baseline snapshot to R2 before runtime feasibility testing.",
+        }, 409);
+      }
+
+      let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; savedAt?: unknown };
+      try { manifest = await manifestObject.json() as typeof manifest; }
+      catch {
+        return json({ error: "baseline_manifest_invalid", probe: "headless-v86-preflight" }, 500);
+      }
+      if (manifest.version !== 1 || typeof manifest.generation !== "string" ||
+          !/^[a-z0-9-]{1,40}$/.test(manifest.generation) ||
+          !Number.isInteger(manifest.chunks) || (manifest.chunks as number) < 1 ||
+          (manifest.chunks as number) > 128 ||
+          !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 ||
+          (manifest.byteLength as number) > 536870912 ||
+          manifest.chunks !== Math.ceil((manifest.byteLength as number) / 8388608)) {
+        return json({ error: "baseline_manifest_invalid", probe: "headless-v86-preflight" }, 500);
+      }
+
+      const count = manifest.chunks as number;
+      const totalBytes = manifest.byteLength as number;
+      const generationPrefix = prefix + manifest.generation + "/";
+      const chunks = await Promise.all(Array.from({ length: count }, async (_, part) => {
+        const expectedBytes = Math.min(8388608, totalBytes - part * 8388608);
+        const object = await env.VM_SNAPSHOTS.head(generationPrefix + part + ".bin");
+        return {
+          part,
+          exists: object !== null,
+          expected_bytes: expectedBytes,
+          actual_bytes: object?.size ?? null,
+          valid_size: object !== null && object.size === expectedBytes,
+        };
+      }));
+      const missingParts = chunks.filter((part) => !part.exists).map((part) => part.part);
+      const invalidSizeParts = chunks.filter((part) => part.exists && !part.valid_size).map((part) => part.part);
+
+      let wasm: { requested: boolean; compiled: boolean | null; bytes?: number; error?: string } = {
+        requested: body.compile_wasm === true,
+        compiled: null,
+      };
+      if (body.compile_wasm === true) {
+        try {
+          const wasmResponse = await env.ASSETS.fetch(new Request(new URL("/v86/v86.wasm", request.url)));
+          if (!wasmResponse.ok) {
+            wasm = { requested: true, compiled: false, error: "v86_wasm_asset_http_" + wasmResponse.status };
+          } else {
+            const wasmBytes = await wasmResponse.arrayBuffer();
+            await WebAssembly.compile(wasmBytes);
+            wasm = { requested: true, compiled: true, bytes: wasmBytes.byteLength };
+          }
+        } catch (error) {
+          wasm = {
+            requested: true,
+            compiled: false,
+            error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+          };
+        }
+      }
+
+      const snapshotValid = missingParts.length === 0 && invalidSizeParts.length === 0;
+      return json({
+        probe: "headless-v86-preflight",
+        browser_required_for_current_exec_api: true,
+        headless_linux_execution: "not_implemented",
+        snapshot: {
+          baseline_id: baselineId,
+          available: true,
+          valid: snapshotValid,
+          generation: manifest.generation,
+          chunks: count,
+          byte_length: totalBytes,
+          saved_at: typeof manifest.savedAt === "string" ? manifest.savedAt : null,
+          missing_parts: missingParts,
+          invalid_size_parts: invalidSizeParts,
+        },
+        wasm,
+        conclusion: snapshotValid && (wasm.compiled !== false)
+          ? "R2 snapshot integrity preflight passed; this does not prove the VM can boot or execute shell commands in Workers."
+          : "Preflight found an issue; inspect snapshot and WASM results before attempting VM initialization.",
+        next_blocker: "A separate test must instantiate v86 without DOM/browser host APIs, restore this state, run a real TinyCore shell command, and measure Worker memory/CPU. This endpoint deliberately does not allocate guest RAM or execute commands.",
+      });
+    }
+
     if (url.pathname === "/v1/accounts" && request.method === "POST") {
       if (!env.VM_API_TOKEN) return json({ error: "account_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
