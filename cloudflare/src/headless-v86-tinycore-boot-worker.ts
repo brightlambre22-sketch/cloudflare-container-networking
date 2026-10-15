@@ -17,7 +17,7 @@ export default {
     });
     let started = false;
     let loaded = false;
-    let emulator: InstanceType<typeof V86> | undefined;
+    let emulator: any;
 
     class AssetXMLHttpRequest {
       method = "GET";
