@@ -13,7 +13,6 @@ export interface Env {
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
   VM_BASELINE_ID?: string;
-  VM_API_TOKEN?: string;
   ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
   ASSETS: Fetcher;
@@ -30,6 +29,19 @@ function authorized(header: string | null, expected: string | undefined): boolea
     difference |= value.charCodeAt(i) ^ expected.charCodeAt(i);
   }
   return difference === 0;
+}
+
+const VM_API_TOKEN_R2_KEY = "config/vm-api-token.txt";
+
+async function getVmApiToken(env: Env): Promise<string | undefined> {
+  try {
+    const object = await env.VM_SNAPSHOTS.get(VM_API_TOKEN_R2_KEY);
+    if (!object) return undefined;
+    const token = (await object.text()).trim();
+    return token || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function json(data: unknown, status = 200): Response {
@@ -54,8 +66,9 @@ export default {
     // module in the Worker runtime. It intentionally does not instantiate a VM or claim shell execution.
     if (url.pathname === "/v1/runtime/preflight") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const vmApiToken = await getVmApiToken(env);
+      if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
 
       let body: { compile_wasm?: unknown };
       try { body = await request.json() as typeof body; }
@@ -156,8 +169,9 @@ export default {
     }
 
     if (url.pathname === "/v1/accounts" && request.method === "POST") {
-      if (!env.VM_API_TOKEN) return json({ error: "account_api_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const vmApiToken = await getVmApiToken(env);
+      if (!vmApiToken) return json({ error: "account_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
       let body: { name?: unknown };
       try { body = await request.json() as { name?: unknown }; }
       catch { return json({ error: "invalid_json" }, 400); }
@@ -298,8 +312,9 @@ export default {
     }
 
     if (url.pathname === "/v1/vm/status" || url.pathname === "/v1/vm/exec") {
-      if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      const vmApiToken = await getVmApiToken(env);
+      if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
       const vmId = request.headers.get("x-vm-id") ?? "admin";
       if (vmId !== "admin") return json({ error: "unknown_vm_id", supported_vm_ids: ["admin"] }, 404);
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
@@ -342,8 +357,9 @@ export default {
 
       // The clean V2 baseline is managed with the provisioning token, not public snapshot routes.
       if (identity === (env.VM_BASELINE_ID ?? "v2")) {
-        if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
-        if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+        const vmApiToken = await getVmApiToken(env);
+        if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
+        if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
       }
 
       if (snapshotChunkMatch) {
