@@ -89,7 +89,7 @@ const candidates=requestedIdentity==='user-usera'?['user-usera','regular-user-a'
 const headers={};if(window.snapshotAdminCode)headers['x-admin-code']=window.snapshotAdminCode;if(window.snapshotAuthToken)headers.authorization='Bearer '+window.snapshotAuthToken;
 for(const identity of candidates){
 const response=await fetch(snapshotUrlFor(identity),{headers,cache:'no-store'});
-if(response.status===404){if(identity.startsWith('acct-'))throw new Error('No saved VM snapshot exists for this account; refusing to boot a fresh VM over missing user data.');continue;}
+if(response.status===404){if(identity.startsWith('acct-')){let pending=window.snapshotNeedsInitialSave===true;try{pending=pending||sessionStorage.getItem('vm-initial-snapshot-pending')===identity}catch(e){}if(pending){window.snapshotNeedsInitialSave=true;continue}throw new Error('No saved VM snapshot exists for this account; refusing to boot a fresh VM over missing user data.')}continue;}
 if(!response.ok)throw new Error('server returned HTTP '+response.status+' for snapshot identity '+identity);
 const manifest=await response.json();
 if(manifest.version!==1||typeof manifest.generation!=='string'||!/^[a-z0-9-]{1,40}$/.test(manifest.generation)||!Number.isInteger(manifest.chunks)||manifest.chunks<1||manifest.chunks>128||!Number.isInteger(manifest.byteLength)||manifest.byteLength<1||manifest.byteLength>536870912||manifest.chunks!==Math.ceil(manifest.byteLength/SNAPSHOT_CHUNK_BYTES))throw new Error('snapshot manifest is invalid');
@@ -441,6 +441,8 @@ function beginAccountSession(data){
   }
   window.snapshotIdentity=data.account_id;
   window.snapshotAuthToken=data.session_token;
+  window.snapshotNeedsInitialSave=data.snapshot_initialization_required===true;
+  try{if(window.snapshotNeedsInitialSave)sessionStorage.setItem('vm-initial-snapshot-pending',data.account_id);else sessionStorage.removeItem('vm-initial-snapshot-pending')}catch(e){}
   try{
     sessionStorage.setItem('vm-account-id',data.account_id);
     sessionStorage.setItem('vm-session-token',data.session_token);
@@ -471,13 +473,13 @@ form.addEventListener('submit',async function(event){
   if(!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(name)){message.textContent='Username must be 2–32 characters: letters, numbers, _ or -.';return}
   if(creating&&pass.length<4){message.textContent='New passwords must be at least 4 characters.';return}
    if(!creating&&!pass){message.textContent='Enter your password.';return}
-  message.textContent=creating?'Creating account and provisioning its private VM snapshot…':'Signing in and loading your saved VM…';
+  message.textContent=creating?'Creating your account; the VM snapshot will be saved after its first network test…':'Signing in and loading your saved VM…';
   try{
     const response=await fetch(creating?'/api/auth/signup':'/api/auth/login',{
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:name,password:pass})
     });
     const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(data.error==='username_unavailable'?'That username is already taken.':data.error==='baseline_snapshot_not_found'?'New accounts need a clean VM baseline snapshot to clone; none is configured yet. The live admin snapshot is intentionally not used.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.');
+    if(!response.ok)throw new Error(data.error==='username_unavailable'?'That username is already taken.':data.error==='baseline_snapshot_not_found'?'The old baseline-based signup path is still active on this deployment. The account-first signup fix needs to be deployed.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.');
     creating=false;
     beginAccountSession(data);
   }catch(error){message.textContent=error&&error.message?error.message:'Account request failed.';updateFields()}
