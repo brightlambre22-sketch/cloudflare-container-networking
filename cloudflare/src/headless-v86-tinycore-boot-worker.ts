@@ -107,6 +107,7 @@ export default {
       emulator_started: started,
       guest_booted: result.booted,
       guest_boot_evidence: result.booted ? "vga_text_marker" : null,
+      screen_excerpt: screenExcerpt,
       ...(result.reason ? { boot_error: result.reason } : {}),
       note: "Boots a small Tiny Core ISO without restoring the 103 MB snapshot. A VGA text marker is required to count as a boot.",
     }), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
