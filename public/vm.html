@@ -227,13 +227,13 @@ try{
 if(!id)throw new Error('invalid execution id');
 const before=screenText();
 const command='printf "\\n'+begin+'\\n"; ( '+message.command+' ); rc=$?; printf "\\n'+end+'%s\\n" "$rc"';
-await sendVmCommand(command+'\\n');
+await sendVmCommand(command+'\n');
 const deadline=Date.now()+Math.min(Math.max(Number(message.timeout_ms)||15000,1000),20000);
 let finalScreen='',exitCode=null;
 while(Date.now()<deadline){
 const t=screenText(),endAt=t.lastIndexOf(end);
 if(endAt>=0){
-const line=t.slice(endAt+end.length).split(/\\r?\\n/,1)[0].trim();
+const line=t.slice(endAt+end.length).split(/\r?\n/,1)[0].trim();
 if(/^(-?\\d+)$/.test(line)&&shellPrompt(t.slice(endAt))){
 finalScreen=t;exitCode=Number(line);break;
 }
@@ -245,7 +245,7 @@ ws.send(JSON.stringify({type:'result',id:message.id,stdout:'',stderr:'Command ti
 }else{
 const beginAt=finalScreen.lastIndexOf(begin);
 const endAt=finalScreen.lastIndexOf(end);
-const stdout=beginAt>=0&&endAt>beginAt?finalScreen.slice(beginAt+begin.length,endAt).replace(/^\\r?\\n/,'').trimEnd():'Command completed; output was outside the visible terminal buffer.';
+const stdout=beginAt>=0&&endAt>beginAt?finalScreen.slice(beginAt+begin.length,endAt).replace(/^\r?\n/,'').trimEnd():'Command completed; output was outside the visible terminal buffer.';
 ws.send(JSON.stringify({type:'result',id:message.id,stdout,stderr:'',exit_code:exitCode}));
 }
 }catch(error){
