@@ -210,7 +210,7 @@ exit 1`;
           if (!stages.openssl_install.passed) stages.openssl_install.error = "openssl_install_or_version_check_failed";
 
           await runStage("ca_install",
-            "echo '--- CA certificate install ---'; echo '--- package / TCE paths ---'; pwd; readlink /etc/sysconfig/tcedir 2>&1; ls -l /tmp/tce /tmp/tce/optional /usr/local/tce /usr/local/tce/optional ca-certificates.tcz ca-certificates.tcz.dep 2>&1; echo '--- bounded CA install (max 4 minutes) ---'; tce-load -i ca-certificates >/tmp/ca.log 2>&1 & install_pid=$!; elapsed=0; while kill -0 \"$install_pid\" 2>/dev/null; do if [ $((elapsed % 30)) -eq 0 ]; then echo CA_INSTALL_WAIT_SECONDS=$elapsed; tail -n 8 /tmp/ca.log 2>/dev/null; fi; if [ \"$elapsed\" -ge 240 ]; then echo CA_INSTALL_TIMEOUT; kill \"$install_pid\" 2>/dev/null; break; fi; sleep 5; elapsed=$((elapsed+5)); done; wait \"$install_pid\"; rc=$?; echo CA_INSTALL_RC=$rc; echo '--- CA installer log ---'; tail -n 30 /tmp/ca.log 2>&1; echo '--- certificate bundle search ---'; CA_BUNDLE=$(find /usr/local/etc/ssl/certs /etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl -type f -name ca-certificates.crt 2>/dev/null | head -n 1); echo CA_BUNDLE_PATH=$CA_BUNDLE; if [ \"$rc\" -eq 0 ] && [ -n \"$CA_BUNDLE\" ] && [ -s \"$CA_BUNDLE\" ]; then echo CA_BUNDLE_CHECK_RC=0; else echo CA_BUNDLE_CHECK_RC=1; fi",
+            "echo '--- CA certificate install ---'; echo '--- package / TCE paths ---'; pwd; readlink /etc/sysconfig/tcedir 2>&1; ls -l /tmp/tce /tmp/tce/optional /usr/local/tce /usr/local/tce/optional ca-certificates.tcz ca-certificates.tcz.dep 2>&1; echo '--- bounded CA install (max 3 minutes) ---'; tce-load -i ca-certificates >/tmp/ca.log 2>&1 & install_pid=$!; elapsed=0; while kill -0 \"$install_pid\" 2>/dev/null; do if [ $((elapsed % 30)) -eq 0 ]; then echo CA_INSTALL_WAIT_SECONDS=$elapsed; tail -n 8 /tmp/ca.log 2>/dev/null; fi; if [ \"$elapsed\" -ge 240 ]; then echo CA_INSTALL_TIMEOUT; kill \"$install_pid\" 2>/dev/null; break; fi; sleep 5; elapsed=$((elapsed+5)); done; wait \"$install_pid\"; rc=$?; echo CA_INSTALL_RC=$rc; echo '--- CA installer log ---'; tail -n 30 /tmp/ca.log 2>&1; echo '--- certificate bundle search ---'; CA_BUNDLE=$(find /usr/local/etc/ssl/certs /etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl -type f -name ca-certificates.crt 2>/dev/null | head -n 1); echo CA_BUNDLE_PATH=$CA_BUNDLE; if [ \"$rc\" -eq 0 ] && [ -n \"$CA_BUNDLE\" ] && [ -s \"$CA_BUNDLE\" ]; then echo CA_BUNDLE_CHECK_RC=0; else echo CA_BUNDLE_CHECK_RC=1; fi",
             "CA_CERTIFICATES_INSTALL_DONE", 210000);
           const caOut = stages.ca_install.output ?? "";
           stages.ca_install.passed = stages.ca_install.passed && /CA_INSTALL_RC=0/.test(caOut) && /CA_BUNDLE_CHECK_RC=0/.test(caOut);
@@ -265,6 +265,7 @@ exit 1`;
           snapshotRoundtrip.readback = true;
           await writeProgress("running", "snapshot_readback_verified", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           snapshotRoundtrip.readback_digest_verified = readback.manifest.sha256 === manifest.sha256 && readback.state.byteLength === stateBytes;
+          await writeProgress("running", "restoring_fresh_vm", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           const restored = new V86({
             wasm_fn: createCompiledV86WasmFn(),
             memory_size: 128 * 1024 * 1024,
@@ -282,7 +283,6 @@ exit 1`;
           restored.add_listener("emulator-loaded", () => { restoredLoaded = true; });
           const restoredPrompt = await restored.wait_until_vga_screen_contains(/tc@box:~\$|tc@box/i, { timeout_msec: 60000 });
           snapshotRoundtrip.restored = restoredLoaded && Boolean(restoredPrompt);
-          await writeProgress("running", "restoring_fresh_vm", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           if (snapshotRoundtrip.restored) {
             await restored.keyboard_send_text("printf '\\n'; cat /tmp/v86-snapshot-roundtrip-marker; echo RESTORE_COMMAND_EXECUTED\n");
             const markerSeen = await restored.wait_until_vga_screen_contains(new RegExp(marker + "[\\s\\S]*RESTORE_COMMAND_EXECUTED"), { timeout_msec: 20000 });
