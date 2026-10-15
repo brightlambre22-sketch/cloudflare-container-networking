@@ -49,8 +49,6 @@ storage = "sqlite"
 
 [vars]
 VM_BASELINE_ID = "v2"
-
-[vars]
 VM_BASELINE_ID = "admin"
 
 [exports.AccountRegistry]
