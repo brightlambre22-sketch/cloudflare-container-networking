@@ -257,10 +257,7 @@ export default {
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
       return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
         snapshot_initialization_required: true, progress_endpoint: "/api/auth/registration-status",
-        provisioning: "Linux boot, network tests, snapshot save/read-back and fresh-VM restore verification are queued" }, 202);      return json({ ...session, username, status: "ready", snapshot_identity: accountId,
-        snapshot_initialization_required: true,
-        provisioning: "account created; first guest boot will run network checks and create the initial snapshot" }, 201);
-    }
+        provisioning: "Linux boot, network tests, snapshot save/read-back and fresh-VM restore verification are queued" }, 202);    }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
       let body: { username?: unknown; password?: unknown };
