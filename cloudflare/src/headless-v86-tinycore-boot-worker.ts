@@ -37,12 +37,14 @@ export default {
       responseType = "";
       response: unknown = null;
       responseText = "";
+      readyState = 0;
       status = 0;
+      onreadystatechange: (() => void) | null = null;
       timeout = 0;
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
       ontimeout: (() => void) | null = null;
-      open(method: string, url: string) { this.method = method; this.url = url; }
+      open(method: string, url: string) { this.method = method; this.url = url; this.readyState = 1; this.onreadystatechange?.(); }
       setRequestHeader(_name: string, _value: string) {}
       getResponseHeader(_name: string) { return null; }
       getAllResponseHeaders() { return ""; }
@@ -53,6 +55,8 @@ export default {
           this.status = response.status;
           if (this.responseType === "arraybuffer") this.response = await response.arrayBuffer();
           else { this.responseText = await response.text(); this.response = this.responseText; }
+          this.readyState = 4;
+          this.onreadystatechange?.();
           this.onload?.();
         } catch {
           this.onerror?.();
