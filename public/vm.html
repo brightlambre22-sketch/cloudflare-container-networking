@@ -524,7 +524,7 @@ updateFields();
     if(!response.ok)throw new Error('session expired');
     const statusResponse=await fetch('/api/auth/registration-status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
     const registration=await statusResponse.json().catch(()=>({}));
-    if(statusResponse.ok&&registration.status==='provisioning')await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true});
+    if(statusResponse.ok&&['provisioning','queued','running'].includes(registration.status))await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true});
     else if(statusResponse.ok&&registration.status==='error')throw new Error('VM initialization failed: '+(registration.error||registration.step||'check failed'));
     else beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:registration.status!=='complete'});
   }catch(e){
