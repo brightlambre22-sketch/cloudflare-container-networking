@@ -11,8 +11,26 @@ export default {
   async fetch(request: Request, env: { ASSETS: Fetcher; VM_SNAPSHOTS: R2Bucket; NETWORK_RELAY_URL?: string }) {
     const path = new URL(request.url).pathname;
     if (path === "/ready") return Response.json({ ready: true, probe: "tinycore-dhcp-openssl-ca" });
+    if (path !== "/run" || request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
+    let requestedIdentity = "";
+    try {
+      const body = await request.json() as { identity?: unknown };
+      requestedIdentity = typeof body.identity === "string" ? body.identity.toLowerCase() : "";
+    } catch { return Response.json({ error: "invalid_json" }, { status: 400 }); }
+    if (!/^(acct-[a-f0-9-]{36}|test-[a-z0-9-]{1,32})$/.test(requestedIdentity)) return Response.json({ error: "invalid_snapshot_identity" }, { status: 400 });
+    const snapshotIdentity = requestedIdentity;
+    const jobKey = "runtime-jobs/" + snapshotIdentity + ".json";
+    let jobStatus = "running", jobStep = "starting_vm";
+    const jobStartedAt = new Date().toISOString();
+    const jobDetails: Record<string, unknown> = {};
+    const writeProgress = async (status = jobStatus, step = jobStep, details: Record<string, unknown> = {}) => {
+      jobStatus = status; jobStep = step; Object.assign(jobDetails, details);
+      await env.VM_SNAPSHOTS.put(jobKey, JSON.stringify({ identity: snapshotIdentity, status: jobStatus, step: jobStep, started_at: jobStartedAt, updated_at: new Date().toISOString(), ...jobDetails }), { httpMetadata: { contentType: "application/json" } });
+    };
+    await writeProgress("running", "starting_vm");
 
     const wasm = getCompiledV86WasmInfo();
+    await writeProgress("running", "booting_linux", { wasm_module_loaded: wasm.module_loaded });
     const base = new URL(request.url);
     let finishBoot!: (value: { booted: boolean; reason?: string }) => void;
     const bootObserved = new Promise<{ booted: boolean; reason?: string }>((resolve) => { finishBoot = resolve; });
@@ -83,9 +101,11 @@ export default {
     ]);
 
     const stages: Record<string, Stage> = {};
+    await writeProgress(boot.booted ? "running" : "error", boot.booted ? "linux_booted" : "linux_boot_failed", { guest_booted: boot.booted, boot_error: boot.reason ?? null });
     const runStage = async (key: string, command: string, marker: string, timeout: number, asRoot = false): Promise<boolean> => {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
+      await writeProgress("running", key, { stage: key, stage_status: "started" });
       try {
         // Do not inject multiline shell source into the interactive terminal. v86's
         // keyboard path can lose/reorder characters in long lines and here-docs.
@@ -121,6 +141,7 @@ export default {
       } catch (error) {
         stage.error = (error instanceof Error ? error.message : String(error)).slice(0, 300);
       }
+      await writeProgress("running", key, { stage: key, stage_status: stage.passed ? "passed" : "failed", stage_error: stage.error ?? null, stage_results: Object.fromEntries(Object.entries(stages).map(([name, item]) => [name, { attempted: item.attempted, passed: item.passed, error: item.error ?? null }])) });
       return stage.passed;
     };
 
@@ -230,15 +251,17 @@ exit 1`;
             https_passed: stages.https_preflight?.passed === true,
           };
           const generation = "gen-" + Date.now().toString(36);
-          const manifest = await commitGuestSnapshot(env.VM_SNAPSHOTS, "test-v86-roundtrip", generation, state, checks);
+          const manifest = await commitGuestSnapshot(env.VM_SNAPSHOTS, snapshotIdentity, generation, state, checks);
           state = undefined; // Release the original ~100 MiB state before read-back/restore.
           snapshotRoundtrip.saved = true;
+          await writeProgress("running", "snapshot_saved", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           snapshotRoundtrip.generation = manifest.generation;
           snapshotRoundtrip.sha256 = manifest.sha256;
           try { emulator?.stop(); } catch {}
           emulator = undefined;
-          const readback = await readCommittedGuestSnapshot(env.VM_SNAPSHOTS, "test-v86-roundtrip");
+          const readback = await readCommittedGuestSnapshot(env.VM_SNAPSHOTS, snapshotIdentity);
           snapshotRoundtrip.readback = true;
+          await writeProgress("running", "snapshot_readback_verified", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           snapshotRoundtrip.readback_digest_verified = readback.manifest.sha256 === manifest.sha256 && readback.state.byteLength === stateBytes;
           const restored = new V86({
             wasm_fn: createCompiledV86WasmFn(),
@@ -257,6 +280,7 @@ exit 1`;
           restored.add_listener("emulator-loaded", () => { restoredLoaded = true; });
           const restoredPrompt = await restored.wait_until_vga_screen_contains(/tc@box:~\$|tc@box/i, { timeout_msec: 60000 });
           snapshotRoundtrip.restored = restoredLoaded && Boolean(restoredPrompt);
+          await writeProgress("running", "restoring_fresh_vm", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           if (snapshotRoundtrip.restored) {
             await restored.keyboard_send_text("printf '\\n'; cat /tmp/v86-snapshot-roundtrip-marker; echo RESTORE_COMMAND_EXECUTED\n");
             const markerSeen = await restored.wait_until_vga_screen_contains(new RegExp(marker + "[\\s\\S]*RESTORE_COMMAND_EXECUTED"), { timeout_msec: 20000 });
@@ -277,8 +301,10 @@ exit 1`;
     try { screenExcerpt = emulator?.screen_adapter?.get_text_screen?.().join("\\n").slice(-5000) ?? ""; } catch {}
     try { emulator?.stop(); } catch {}
     const passed = guestChecksPassed && roundtripPassed;
+    await writeProgress(passed ? "complete" : "error", passed ? "complete" : "failed", { guest_checks_passed: guestChecksPassed, passed, guest_booted: boot.booted, boot_error: boot.reason ?? null, stages: Object.fromEntries(Object.entries(stages).map(([name, item]) => [name, { attempted: item.attempted, passed: item.passed, error: item.error ?? null }])), snapshot_roundtrip: snapshotRoundtrip });
     return Response.json({
       probe: "tinycore-snapshot-save-readback-restore",
+      identity: snapshotIdentity,
       runtime: "workerd",
       wasm_module_loaded: wasm.module_loaded,
       emulator_initialized: loaded,
