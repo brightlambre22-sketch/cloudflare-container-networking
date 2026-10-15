@@ -195,8 +195,8 @@ exit 1`;
 
       if (stages.dhcp.passed) {
         await runStage("tls_download",
-          "echo '--- TLS package downloads (bounded retries) ---'; timeout 35 tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; ca_dl=1; attempt=1; while [ \"$attempt\" -le 3 ]; do echo CA_DOWNLOAD_ATTEMPT=$attempt; timeout 35 tce-load -w ca-certificates.tcz; ca_dl=$?; if [ \"$ca_dl\" -eq 0 ]; then break; fi; echo CA_DOWNLOAD_RETRY_AFTER_RC=$ca_dl; attempt=$((attempt+1)); sleep 2; done; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
-          "TLS_DOWNLOAD_DONE", 150000);
+          "echo '--- TLS package downloads (bounded CA retries) ---'; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; ca_dl=1; attempt=1; while [ \"$attempt\" -le 3 ]; do echo CA_DOWNLOAD_ATTEMPT=$attempt; timeout 35 tce-load -w ca-certificates.tcz; ca_dl=$?; if [ \"$ca_dl\" -eq 0 ]; then break; fi; echo CA_DOWNLOAD_RETRY_AFTER_RC=$ca_dl; attempt=$((attempt+1)); sleep 2; done; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
+          "TLS_DOWNLOAD_DONE", 240000);
         const dlOut = stages.tls_download.output ?? "";
         stages.tls_download.passed = stages.tls_download.passed && /OPENSSL_DOWNLOAD_RC=0/.test(dlOut) && /CA_DOWNLOAD_RC=0/.test(dlOut);
         if (!stages.tls_download.passed) stages.tls_download.error = "openssl_or_ca_package_download_failed";
