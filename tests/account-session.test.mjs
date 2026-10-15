@@ -48,6 +48,7 @@ test("public auth routes are rate-limited and browser credentials are not persis
   assert.match(worker, /auth\/rate-limit/);
   assert.match(dashboard, /sessionStorage\.setItem\('vm-session-token'/);
   assert.doesNotMatch(dashboard, /localStorage\.setItem\(ACCOUNTS_KEY/);
+  assert.match(dashboard, /mysterium-network-test-results:\x27\+\(window\.snapshotIdentity\|\|\x27admin\x27\)/);
 });
 
 test("restored VMs automatically test the network and save after the test returns to a prompt", () => {
