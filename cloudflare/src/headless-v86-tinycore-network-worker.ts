@@ -102,69 +102,18 @@ export default {
     };
 
     if (boot.booted) {
-      // Match the user's reference behavior: keep retrying DHCP until a lease and default route
-      // are both visible, but cap the experiment at one hour and print an explicit outcome.
-      // Build the guest script from short shell input lines. Sending the whole loop as one
-      // keyboard line can overflow the Tiny Core console's input buffer and produce syntax errors.
-      const dhcpLimitSeconds = relayUrl ? 3600 : 120;
-      // Check guest-local prerequisites before networking, so a missing guest file/tool
-      // is not hidden by an earlier DHCP failure.
+      // Reuse the known-good NETWORK INIT command from the user's real VM run.
+      // Bound DHCP retries to six minutes so a broken relay cannot stall CI indefinitely.
+      const dhcpCommand = "echo \"--- NETWORK INIT ---\"; id; sudo -n sh -c 'set +e; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E \"^(eth|en|wlan)\" | head -n 1 | cut -d \" \" -f 1); if [ -z \"$iface\" ]; then /sbin/modprobe ne2k-pci 2>&1; /sbin/modprobe 8390 2>&1; sleep 1; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E \"^(eth|en|wlan)\" | head -n 1 | cut -d \" \" -f 1); fi; echo DHCP_INTERFACE=$iface; if [ -z \"$iface\" ]; then echo NIC_MISSING; cat /proc/net/dev; dmesg 2>/dev/null | tail -n 20; exit 1; fi; /sbin/ifconfig \"$iface\" up; tries=0; while [ \"$tries\" -lt 120 ]; do /sbin/udhcpc -f -n -q -i \"$iface\"; /sbin/ifconfig \"$iface\" | grep -Eq \"inet (addr:)?[0-9]\" && /sbin/route -n | grep -q \"0.0.0.0\" && { echo DHCP_OK; exit 0; }; echo DHCP_RETRYING_NO_LEASE; tries=$((tries+1)); sleep 3; done; echo DHCP_TIMEOUT; /sbin/ifconfig -a; /sbin/route -n; exit 1'; echo DHCP_DONE";
       await runStage("resource_preflight",
-        "echo '--- guest resources ---'; id; uname -a; cat /proc/cmdline; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8",
+        "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      await runStage("guest_files_preflight",
-        "echo '--- guest paths and save list ---'; ls -ld /etc/sysconfig/tcedir /usr/local/tce /tmp/tce /usr/local/tce.installed 2>&1; cat /opt/.filetool.lst 2>&1; ls -l /usr/local/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt 2>&1",
-        "GUEST_FILES_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      await runStage("guest_tools_preflight",
-        "for x in modprobe ifconfig route udhcpc tce-load openssl wget; do command -v $x || echo MISSING=$x; done",
-        "GUEST_TOOLS_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpScriptLines = [
-        "#!/bin/sh",
-        "set +e",
-        "echo '--- kernel network diagnostics ---'",
-        "uname -a",
-        "cat /proc/net/dev",
-        "lsmod 2>&1",
-        "/sbin/modprobe 8390 2>&1",
-        "/sbin/modprobe ne2k-pci 2>&1",
-        "sleep 1",
-        "/sbin/ifconfig -a 2>&1",
-        "iface=$(/sbin/ifconfig -a 2>/dev/null | sed -n 's/^\\(eth[0-9]\\).*/\\1/p' | head -n 1)",
-        "echo DHCP_INTERFACE=$iface",
-        'if [ -z "$iface" ]; then echo NIC_MISSING; dmesg | grep -Ei "eth|ne2k|ne2000|8390|pci|network|nic" 2>&1; cat /proc/net/dev; exit 10; fi',
-        '/sbin/ifconfig "$iface" up',
-        "elapsed=0",
-        'while [ "$elapsed" -lt ' + dhcpLimitSeconds + " ]; do",
-        '  /sbin/udhcpc -n -q -i "$iface"',
-        '  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_OK; /sbin/ifconfig -a; /sbin/route -n; cat /etc/resolv.conf; exit 0; fi',
-        "  echo DHCP_RETRYING_NO_LEASE",
-        "  sleep 3",
-        "  elapsed=$((elapsed+3))",
-        "done",
-        "/sbin/ifconfig -a",
-        "/sbin/route -n",
-        "cat /etc/resolv.conf",
-        "echo DHCP_TIMEOUT",
-        "exit 1",
-      ];
-      await runStage("dhcp_script_init", "echo '#!/bin/sh' > /tmp/dhcp-probe.sh", "DHCP_SCRIPT_INIT", SHELL_COMMAND_TIMEOUT_MS);
-      for (let i = 1; i < dhcpScriptLines.length; i++) {
-        const quotedLine = dhcpScriptLines[i].replace(/'/g, "'\\''");
-        const writeOk = await runStage("dhcp_script_line_" + i,
-          "echo '" + quotedLine + "' >> /tmp/dhcp-probe.sh",
-          "DHCP_SCRIPT_LINE_" + i, SHELL_COMMAND_TIMEOUT_MS);
-        if (!writeOk) break;
-      }
-      await runStage("dhcp_script_syntax", "sudo -n sh -n /tmp/dhcp-probe.sh; echo DHCP_SCRIPT_SYNTAX_CHECKED",
-        "DHCP_SCRIPT_SYNTAX_CHECKED", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpWaitMs = relayUrl ? DHCP_TIMEOUT_MS : DHCP_TIMEOUT_WITHOUT_RELAY_MS;
-      const dhcpPassed = await runStage("dhcp", "sudo -n sh /tmp/dhcp-probe.sh; echo DHCP_DONE", "DHCP_DONE", dhcpWaitMs + 30000);
+      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 420000);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
         ? "guest_nic_missing"
-        : !relayUrl ? "network_relay_url_not_configured; DHCP probe stopped after two minutes"
-        : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_dhcp_lease_and_default_route_within_one_hour" : (stages.dhcp.error ?? "dhcp_stage_failed");
+        : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_dhcp_lease_and_default_route_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
       if (stages.dhcp.passed) {
         await runStage("tls_download",
