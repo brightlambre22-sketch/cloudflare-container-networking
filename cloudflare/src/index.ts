@@ -5,7 +5,8 @@ import { NodeRuntime } from "./node-runtime";
 import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
 import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry };
+import { AccountProvisioner } from "./account-provisioner";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
@@ -13,6 +14,7 @@ export interface Env {
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
+  ACCOUNT_PROVISIONER: DurableObjectNamespace<AccountProvisioner>;
   VM_BASELINE_ID?: string;
   ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
@@ -243,21 +245,19 @@ export default {
         });
         return json({ error: "account_record_creation_failed" }, 502);
       }
-      const ready = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
-        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }),
-      });
-      const authReady = await authRegistry.fetch("https://account-registry.internal/auth/status", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, status: "ready" }),
-      });
-      if (!ready.ok || !authReady.ok) return json({ error: "account_ready_transition_failed" }, 502);
-
-      const login = await authRegistry.fetch("https://account-registry.internal/auth/login", {
+      const signupSession = await authRegistry.fetch("https://account-registry.internal/auth/provisioning-session", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }),
       });
-      if (!login.ok) return json({ error: "account_created_but_session_creation_failed" }, 502);
-      const session = await login.json() as { account_id: string; session_token: string; expires_at: string };
-      return json({ ...session, username, status: "ready", snapshot_identity: accountId,
+      if (!signupSession.ok) return json({ error: "account_created_but_signup_session_failed" }, 502);
+      const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
+      const queued = await provisioner.fetch("https://account-provisioner.internal/start", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identity: accountId, username }),
+      });
+      if (!queued.ok && queued.status !== 202) return json({ error: "vm_provisioning_queue_failed" }, 502);
+      const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
+      return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+        snapshot_initialization_required: true, progress_endpoint: "/api/auth/registration-status",
+        provisioning: "Linux boot, network tests, snapshot save/read-back and fresh-VM restore verification are queued" }, 202);      return json({ ...session, username, status: "ready", snapshot_identity: accountId,
         snapshot_initialization_required: true,
         provisioning: "account created; first guest boot will run network checks and create the initial snapshot" }, 201);
     }
@@ -282,6 +282,22 @@ export default {
       });
       if (!response.ok) return json({ error: "invalid_credentials" }, 401);
       return json({ ...(await response.json() as Record<string, unknown>), username });
+    }
+
+    if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      if (typeof body.account_id !== "string" || typeof body.session_token !== "string" || !/^acct-[a-f0-9-]{36}$/.test(body.account_id)) return json({ error: "unauthorized" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: body.account_id, token: body.session_token }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const object = await env.VM_SNAPSHOTS.get("runtime-jobs/" + body.account_id + ".json");
+      if (!object) return json({ account_id: body.account_id, status: "complete", step: "existing_account", complete: true, ready_to_login: true });
+      const progress = await object.json() as Record<string, unknown>;
+      return json({ ...progress, complete: progress.status === "complete", ready_to_login: progress.status === "complete" });
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "POST") {
