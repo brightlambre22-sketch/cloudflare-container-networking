@@ -38,6 +38,14 @@ test("VM uses a built ISO asset, a single supported relay configuration, and ret
   assert.ok(firstCommand[1].length < 900, "network init command must stay short enough to avoid terminal input truncation");
 });
 
+test("restored snapshots automatically run the network diagnostic and save after it finishes", () => {
+  assert.ok(html.includes("runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true)"), "restored VM should not skip the automatic network test");
+  assert.ok(html.includes("if(saveAfter&&bootComplete){const saved=await saveVmState(false)"), "save the state after the diagnostic finishes");
+  assert.ok(html.includes("requestedIdentity==='user-usera'?['user-usera','regular-user-a']"), "usera should fall back to the documented legacy snapshot key");
+  assert.ok(html.includes("requestedIdentity==='user-userb'?['user-userb','regular-user-b']"), "userb should fall back to the documented legacy snapshot key");
+  assert.ok(html.includes("window.snapshotIdentity=identity"), "keep saves scoped to whichever account snapshot was restored");
+});
+
 test("startup prompt detection supports changed hostnames and explicitly wakes the shell before the first command", () => {
   assert.ok(html.includes("[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+"), "prompt detection should not depend on one exact hostname");
   assert.ok(html.includes("KEYBOARD INPUT WAKE"));
