@@ -48,7 +48,6 @@ type = "durable-object"
 storage = "sqlite"
 
 [vars]
-VM_BASELINE_ID = "v2"
 VM_BASELINE_ID = "admin"
 
 [exports.AccountRegistry]
