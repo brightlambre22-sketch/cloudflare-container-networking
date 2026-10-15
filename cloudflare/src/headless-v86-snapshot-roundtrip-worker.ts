@@ -2,7 +2,7 @@ import V86 from "../dist/headless-v86-bundle.js";
 import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-wasm";
 import { commitGuestSnapshot, readCommittedGuestSnapshot } from "./headless-snapshot-store";
 
-const BOOT_TIMEOUT_MS = 300000;
+const BOOT_TIMEOUT_MS = 150000;
 const SHELL_COMMAND_TIMEOUT_MS = 20000;
 
 type Stage = { attempted: boolean; passed: boolean; marker: string; error?: string; output?: string };
@@ -149,7 +149,7 @@ export default {
 
     if (boot.booted) {
       // Reuse the known-good NETWORK INIT command from the user's real VM run.
-      // Bound DHCP retries to six minutes so a broken relay cannot stall CI indefinitely.
+      // Bound DHCP retries to two minutes so this durable VM job stays within its execution budget.
       const dhcpCommand = `set +e
 echo "--- NETWORK INIT ---"
 id
@@ -186,7 +186,7 @@ exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 420000, true);
+      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 150000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
@@ -196,7 +196,7 @@ exit 1`;
       if (stages.dhcp.passed) {
         await runStage("tls_download",
           "echo '--- TLS package downloads ---'; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; tce-load -w ca-certificates.tcz; ca_dl=$?; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
-          "TLS_DOWNLOAD_DONE", 180000);
+          "TLS_DOWNLOAD_DONE", 90000);
         const dlOut = stages.tls_download.output ?? "";
         stages.tls_download.passed = stages.tls_download.passed && /OPENSSL_DOWNLOAD_RC=0/.test(dlOut) && /CA_DOWNLOAD_RC=0/.test(dlOut);
         if (!stages.tls_download.passed) stages.tls_download.error = "openssl_or_ca_package_download_failed";
@@ -204,14 +204,14 @@ exit 1`;
         if (stages.tls_download.passed) {
           await runStage("openssl_install",
             "echo '--- OpenSSL install ---'; tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1; install_rc=$?; if [ \"$install_rc\" -eq 0 ] && openssl version >/dev/null 2>&1; then rc=0; else rc=1; fi; echo OPENSSL_PATH=$(command -v openssl 2>/dev/null); echo OPENSSL_INSTALL_RC=$rc; openssl version 2>&1",
-            "OPENSSL_INSTALL_DONE", 120000);
+            "OPENSSL_INSTALL_DONE", 60000);
           const sslOut = stages.openssl_install.output ?? "";
           stages.openssl_install.passed = stages.openssl_install.passed && /OPENSSL_INSTALL_RC=0/.test(sslOut) && /OpenSSL 1\./.test(sslOut);
           if (!stages.openssl_install.passed) stages.openssl_install.error = "openssl_install_or_version_check_failed";
 
           await runStage("ca_install",
-            "echo '--- CA certificate install ---'; echo '--- package / TCE paths ---'; pwd; readlink /etc/sysconfig/tcedir 2>&1; ls -l /tmp/tce /tmp/tce/optional /usr/local/tce /usr/local/tce/optional ca-certificates.tcz ca-certificates.tcz.dep 2>&1; echo '--- bounded CA install (max 20 minutes) ---'; tce-load -i ca-certificates >/tmp/ca.log 2>&1 & install_pid=$!; elapsed=0; while kill -0 \"$install_pid\" 2>/dev/null; do if [ $((elapsed % 30)) -eq 0 ]; then echo CA_INSTALL_WAIT_SECONDS=$elapsed; tail -n 8 /tmp/ca.log 2>/dev/null; fi; if [ \"$elapsed\" -ge 1200 ]; then echo CA_INSTALL_TIMEOUT; kill \"$install_pid\" 2>/dev/null; break; fi; sleep 5; elapsed=$((elapsed+5)); done; wait \"$install_pid\"; rc=$?; echo CA_INSTALL_RC=$rc; echo '--- CA installer log ---'; tail -n 30 /tmp/ca.log 2>&1; echo '--- certificate bundle search ---'; CA_BUNDLE=$(find /usr/local/etc/ssl/certs /etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl -type f -name ca-certificates.crt 2>/dev/null | head -n 1); echo CA_BUNDLE_PATH=$CA_BUNDLE; if [ \"$rc\" -eq 0 ] && [ -n \"$CA_BUNDLE\" ] && [ -s \"$CA_BUNDLE\" ]; then echo CA_BUNDLE_CHECK_RC=0; else echo CA_BUNDLE_CHECK_RC=1; fi",
-            "CA_CERTIFICATES_INSTALL_DONE", 1250000);
+            "echo '--- CA certificate install ---'; echo '--- package / TCE paths ---'; pwd; readlink /etc/sysconfig/tcedir 2>&1; ls -l /tmp/tce /tmp/tce/optional /usr/local/tce /usr/local/tce/optional ca-certificates.tcz ca-certificates.tcz.dep 2>&1; echo '--- bounded CA install (max 20 minutes) ---'; tce-load -i ca-certificates >/tmp/ca.log 2>&1 & install_pid=$!; elapsed=0; while kill -0 \"$install_pid\" 2>/dev/null; do if [ $((elapsed % 30)) -eq 0 ]; then echo CA_INSTALL_WAIT_SECONDS=$elapsed; tail -n 8 /tmp/ca.log 2>/dev/null; fi; if [ \"$elapsed\" -ge 240 ]; then echo CA_INSTALL_TIMEOUT; kill \"$install_pid\" 2>/dev/null; break; fi; sleep 5; elapsed=$((elapsed+5)); done; wait \"$install_pid\"; rc=$?; echo CA_INSTALL_RC=$rc; echo '--- CA installer log ---'; tail -n 30 /tmp/ca.log 2>&1; echo '--- certificate bundle search ---'; CA_BUNDLE=$(find /usr/local/etc/ssl/certs /etc/ssl/certs /usr/local/share/ca-certificates /etc/ssl -type f -name ca-certificates.crt 2>/dev/null | head -n 1); echo CA_BUNDLE_PATH=$CA_BUNDLE; if [ \"$rc\" -eq 0 ] && [ -n \"$CA_BUNDLE\" ] && [ -s \"$CA_BUNDLE\" ]; then echo CA_BUNDLE_CHECK_RC=0; else echo CA_BUNDLE_CHECK_RC=1; fi",
+            "CA_CERTIFICATES_INSTALL_DONE", 270000);
           const caOut = stages.ca_install.output ?? "";
           stages.ca_install.passed = stages.ca_install.passed && /CA_INSTALL_RC=0/.test(caOut) && /CA_BUNDLE_CHECK_RC=0/.test(caOut);
           if (!stages.ca_install.passed) stages.ca_install.error = "ca_install_or_bundle_check_failed";
@@ -219,7 +219,7 @@ exit 1`;
           if (stages.openssl_install.passed && stages.ca_install.passed) {
             await runStage("https_preflight",
               "echo '--- DNS / HTTPS PREFLIGHT ---'; cat /etc/resolv.conf 2>&1; wget -T 10 -t 1 -S -O /dev/null https://cloudflare-container-networking.brightlambre22-6dd.workers.dev/health >/tmp/https-preflight.log 2>&1; rc=$?; cat /tmp/https-preflight.log; echo HTTPS_PREFLIGHT_RC=$rc; [ \"$rc\" -eq 0 ] && echo INTERNET_HTTPS_OK || echo HTTPS_PREFLIGHT_FAILED",
-              "EGRESS_PREFLIGHT_DONE", 120000);
+              "EGRESS_PREFLIGHT_DONE", 60000);
             const httpsOut = stages.https_preflight.output ?? "";
             stages.https_preflight.passed = stages.https_preflight.passed && /HTTPS_PREFLIGHT_RC=0/.test(httpsOut) && /INTERNET_HTTPS_OK/.test(httpsOut);
             if (!stages.https_preflight.passed) stages.https_preflight.error = "guest_dns_or_https_preflight_failed";
