@@ -220,6 +220,27 @@ export default {
       const isAdmin = identity === "admin";
       if (isAdmin && !env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
       if (isAdmin && request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+
+      // API-created account snapshots are private to the account API key.
+      if (identity.startsWith("acct-")) {
+        const authorization = request.headers.get("authorization") ?? "";
+        const suppliedKey = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+        if (!/^acct_[a-f0-9]{64}$/.test(suppliedKey)) return json({ error: "unauthorized" }, 401);
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(suppliedKey));
+        const keyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+        const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(identity));
+        const accountAuth = await registry.fetch("https://account-registry.internal/account/" + identity, {
+          method: "GET", headers: { "x-account-key-sha256": keyHash },
+        });
+        if (!accountAuth.ok) return json({ error: "unauthorized" }, 401);
+      }
+
+      // The clean V2 baseline is managed with the provisioning token, not public snapshot routes.
+      if (identity === (env.VM_BASELINE_ID ?? "v2")) {
+        if (!env.VM_API_TOKEN) return json({ error: "vm_api_not_configured" }, 503);
+        if (!authorized(request.headers.get("authorization"), env.VM_API_TOKEN)) return json({ error: "unauthorized" }, 401);
+      }
+
       if (snapshotChunkMatch) {
         if (request.method !== "GET" && request.method !== "PUT") return json({ error: "method_not_allowed" }, 405);
         const generation = snapshotChunkMatch[2];
