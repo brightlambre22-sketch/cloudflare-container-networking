@@ -1,7 +1,9 @@
 /**
- * Build-only probe: bundle the upstream v86 constructor as a candidate Worker
- * module. This is not wired into the request handler and does not claim that
- * the upstream loader or DOM-dependent paths are Worker-compatible.
+ * Candidate entry for a Worker-compatible v86 build.
+ *
+ * Importing the published bundle is a known failing approach because it
+ * contains Node-specific loader branches. This entry is kept as a build probe
+ * until the upstream source loader can be replaced safely.
  */
 import V86 from "v86";
 
