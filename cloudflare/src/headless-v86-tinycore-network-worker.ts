@@ -43,8 +43,10 @@ export default {
     (globalThis as unknown as { XMLHttpRequest: typeof AssetXMLHttpRequest }).XMLHttpRequest = AssetXMLHttpRequest;
 
     try {
-      const netDevice: { type: "ne2k"; relay_url?: string } = { type: "ne2k" };
-      if (env.NETWORK_RELAY_URL) netDevice.relay_url = env.NETWORK_RELAY_URL;
+      // Match the relay already used by the real browser VM in public/vm.html.
+      // Allow CI to override it, but do not silently boot an unconnected NE2000 device.
+      const relayUrl = env.NETWORK_RELAY_URL || "wss://relay.widgetry.org/";
+      const netDevice: { type: "ne2k"; relay_url?: string } = { type: "ne2k", relay_url: relayUrl };
       emulator = new V86({
         wasm_fn: createCompiledV86WasmFn(),
         memory_size: 128 * 1024 * 1024,
@@ -102,7 +104,7 @@ export default {
       // are both visible, but cap the experiment at one hour and print an explicit outcome.
       // Build the guest script from short shell input lines. Sending the whole loop as one
       // keyboard line can overflow the Tiny Core console's input buffer and produce syntax errors.
-      const dhcpLimitSeconds = env.NETWORK_RELAY_URL ? 3600 : 120;
+      const dhcpLimitSeconds = relayUrl ? 3600 : 120;
       // Check guest-local prerequisites before networking, so a missing guest file/tool
       // is not hidden by an earlier DHCP failure.
       await runStage("resource_preflight",
@@ -153,13 +155,13 @@ export default {
       }
       await runStage("dhcp_script_syntax", "sudo -n sh -n /tmp/dhcp-probe.sh; echo DHCP_SCRIPT_SYNTAX_CHECKED",
         "DHCP_SCRIPT_SYNTAX_CHECKED", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpWaitMs = env.NETWORK_RELAY_URL ? DHCP_TIMEOUT_MS : DHCP_TIMEOUT_WITHOUT_RELAY_MS;
+      const dhcpWaitMs = relayUrl ? DHCP_TIMEOUT_MS : DHCP_TIMEOUT_WITHOUT_RELAY_MS;
       const dhcpPassed = await runStage("dhcp", "sudo -n sh /tmp/dhcp-probe.sh; echo DHCP_DONE", "DHCP_DONE", dhcpWaitMs + 30000);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
         ? "guest_nic_missing"
-        : !env.NETWORK_RELAY_URL ? "network_relay_url_not_configured; DHCP probe stopped after two minutes"
+        : !relayUrl ? "network_relay_url_not_configured; DHCP probe stopped after two minutes"
         : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_dhcp_lease_and_default_route_within_one_hour" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
       if (stages.dhcp.passed) {
@@ -213,7 +215,8 @@ export default {
       emulator_started: started,
       guest_booted: boot.booted,
       guest_boot_evidence: boot.booted ? "vga_text_marker" : null,
-      network_relay_configured: Boolean(env.NETWORK_RELAY_URL),
+      network_relay_configured: Boolean(relayUrl),
+      network_relay_source: env.NETWORK_RELAY_URL ? "environment_override" : "same_default_as_public_vm_html",
       boot_error: boot.reason,
       stages,
       passed,
