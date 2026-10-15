@@ -51,5 +51,5 @@ test("detects corrupted stored bytes", async () => {
   const { bucket, values } = memoryBucket();
   await commitGuestSnapshot(bucket, "test-corrupt", "gen-3", new Uint8Array([1, 2, 3]), checks);
   values.set("vm-snapshots/test-corrupt/gen-3/0.bin", new Uint8Array([9, 9, 9]));
-  await assert.rejects(readCommittedGuestSnapshot(bucket, "test-corrupt"), /snapshot_digest_invalid/);
+  await assert.rejects(readCommittedGuestSnapshot(bucket, "test-corrupt"), /snapshot_(chunk_digest_invalid|digest_invalid)/);
 });
