@@ -72,6 +72,6 @@ jobs:
             exit 1
           fi
           cat /tmp/headless-v86-workerd.json
-          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-static-instantiation" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.wasm_import_count < 1 || r.wasm_export_count < 1 || r.static_module_instantiated !== true) { console.error("Unexpected or failed Workerd v86 instantiation probe", r); process.exit(1); }'
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/headless-v86-workerd.json", "utf8")); if (r.probe !== "headless-v86-emulator-initialization" || r.runtime !== "workerd" || r.wasm_module_loaded !== true || r.wasm_import_count < 1 || r.wasm_export_count < 1 || r.static_module_instantiated !== true || r.emulator_initialized !== true) { console.error("Unexpected or failed Workerd v86 emulator initialization probe", r); process.exit(1); }'
           cleanup
           trap - EXIT
