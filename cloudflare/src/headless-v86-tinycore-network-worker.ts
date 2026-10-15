@@ -86,19 +86,33 @@ export default {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
       try {
-        // Write each stage as a script first; long interactive command lines were being truncated by the guest shell.
-        // Encode the complete marker, including delimiters, so it appears only after printf actually executes.
+        // Do not inject multiline shell source into the interactive terminal. v86's
+        // keyboard path can lose/reorder characters in long lines and here-docs.
+        // Base64 keeps the payload inert, and short append commands stay below the
+        // guest terminal's input-buffer limits.
         const markerText = "__" + marker + "__";
-        const markerFormat = "\\n" + Array.from(markerText, (char) => "\\" + char.charCodeAt(0).toString(8).padStart(3, "0")).join("") + "\\n";
-        const runner = asRoot ? "sudo -n sh /tmp/headless-v86-stage.sh" : "sh /tmp/headless-v86-stage.sh";
-        const script = "cat > /tmp/headless-v86-stage.sh <<'V86_STAGE_EOF'\n" + command + "\nV86_STAGE_EOF\n" +
-          runner + "\nstage_rc=$?\necho STAGE_SCRIPT_RC=$stage_rc\nprintf '" + markerFormat + "'\n";
-        await emulator.keyboard_send_text(script);
-        const observed = await emulator.wait_until_vga_screen_contains(new RegExp("__" + marker + "__"), { timeout_msec: timeout });
+        const payload = "(\n" + command + "\n)\nstage_rc=$?\necho STAGE_SCRIPT_RC=$stage_rc\nprintf '\\\\n" + markerText + "\\\\n'\n";
+        const encoded = btoa(payload);
+        const chunks = encoded.match(/.{1,64}/g) ?? [];
+        const sendLine = async (line: string) => {
+          await emulator.keyboard_send_text(line + "\n");
+          // Let the emulated keyboard/TTY consume this short line before sending
+          // the next one; sending a whole script in one call was corrupting input.
+          await new Promise<void>((resolve) => setTimeout(resolve, 80));
+        };
+        await sendLine(": > /tmp/headless-v86-stage.b64");
+        for (const chunk of chunks) {
+          await sendLine("printf '%s' '" + chunk + "' >> /tmp/headless-v86-stage.b64");
+        }
+        const runner = asRoot
+          ? "sudo -n sh -c 'base64 -d /tmp/headless-v86-stage.b64 > /tmp/headless-v86-stage.sh && sh /tmp/headless-v86-stage.sh'"
+          : "base64 -d /tmp/headless-v86-stage.b64 > /tmp/headless-v86-stage.sh && sh /tmp/headless-v86-stage.sh";
+        await emulator.keyboard_send_text(runner + "\n");
+        const observed = await emulator.wait_until_vga_screen_contains(new RegExp(markerText), { timeout_msec: timeout });
         let screen = "";
         try { screen = emulator.screen_adapter?.get_text_screen?.().join("\n") ?? ""; } catch {}
         stage.output = screen.slice(-5000);
-        stage.passed = Boolean(observed) && screen.includes("__" + marker + "__");
+        stage.passed = Boolean(observed) && screen.includes(markerText);
         if (!stage.passed) stage.error = "stage_marker_not_seen_within_timeout";
       } catch (error) {
         stage.error = (error instanceof Error ? error.message : String(error)).slice(0, 300);
