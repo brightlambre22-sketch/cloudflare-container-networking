@@ -40,7 +40,6 @@ class FetchXMLHttpRequest {
       ? setTimeout(() => controller.abort(), this.timeout)
       : undefined;
     try {
-      // XHR accepts relative URLs; fetch in Workers requires an absolute URL.
       const base = (globalThis as { location?: Location }).location?.href;
       const url = base ? new URL(this.url, base).toString() : this.url;
       const response = await fetch(url, {

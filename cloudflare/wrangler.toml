@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
+[[rules]]
+type = "CompiledWasm"
+globs = ["src/generated/v86.wasm"]
+
 [assets]
 directory = "../public"
 binding = "ASSETS"
