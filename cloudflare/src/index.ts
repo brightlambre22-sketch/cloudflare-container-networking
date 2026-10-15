@@ -176,8 +176,8 @@ export default {
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
       const password = typeof body.password === "string" ? body.password : "";
-      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 8 || password.length > 128) {
-        return json({ error: "username_must_be_2_to_32_chars_and_password_8_to_128_chars" }, 400);
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 4 || password.length > 128) {
+        return json({ error: "username_must_be_2_to_32_chars_and_password_4_to_128_chars" }, 400);
       }
 
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -187,31 +187,10 @@ export default {
       });
       if (!rateLimit.ok) return json(await rateLimit.json(), rateLimit.status);
 
-      const baselineId = env.VM_BASELINE_ID ?? "v2";
-      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(baselineId) || baselineId.startsWith("acct-")) {
-        return json({ error: "invalid_vm_baseline_id" }, 500);
-      }
-      // Never clone the live admin VM into a new user's account. Provision from a
-      // deliberately sanitized, immutable baseline such as "v2" instead.
-      if (baselineId === "admin") {
-        return json({ error: "unsafe_vm_baseline_id_use_clean_v2_baseline" }, 409);
-      }
-      const baselinePrefix = "vm-snapshots/" + baselineId + "/";
-      const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
-      if (!baselineObject) return json({ error: "baseline_snapshot_not_found" }, 409);
-      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown };
-      try { baseline = await baselineObject.json() as typeof baseline; } catch { return json({ error: "baseline_manifest_invalid" }, 500); }
-      if (baseline.version !== 1 || typeof baseline.generation !== "string" ||
-          !/^[a-z0-9-]{1,40}$/.test(baseline.generation) ||
-          !Number.isInteger(baseline.chunks) || (baseline.chunks as number) < 1 || (baseline.chunks as number) > 128 ||
-          !Number.isInteger(baseline.byteLength) || (baseline.byteLength as number) < 1 ||
-          (baseline.byteLength as number) > 536870912 ||
-          baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
-        return json({ error: "baseline_manifest_invalid" }, 500);
-      }
-
+      // Registration creates an account identity first. No saved VM snapshot is needed yet:
+      // the first clean guest boot runs network/package checks and saves its own initial state.
+      const baselineId = "none";
       const accountId = "acct-" + crypto.randomUUID();
-      const generation = crypto.randomUUID();
       const keyBytes = crypto.getRandomValues(new Uint8Array(32));
       const accountApiKey = "acct_" + Array.from(keyBytes, (b) => b.toString(16).padStart(2, "0")).join("");
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
@@ -235,48 +214,14 @@ export default {
         });
         return json({ error: "account_record_creation_failed" }, 502);
       }
-
-      const accountPrefix = "vm-snapshots/" + accountId + "/";
-      try {
-        const count = baseline.chunks as number;
-        const sourceKeys = Array.from({ length: count }, (_, part) => baselinePrefix + baseline.generation + "/" + part + ".bin");
-        const chunks = await Promise.all(sourceKeys.map((key) => env.VM_SNAPSHOTS.get(key)));
-        if (chunks.some((chunk) => !chunk)) throw new Error("baseline_snapshot_chunk_missing");
-        await Promise.all(chunks.map(async (chunk, part) => {
-          await env.VM_SNAPSHOTS.put(accountPrefix + generation + "/" + part + ".bin", chunk!.body, {
-            httpMetadata: { contentType: "application/octet-stream" },
-          });
-        }));
-        const savedAt = new Date().toISOString();
-        await env.VM_SNAPSHOTS.put(accountPrefix + "manifest.json", JSON.stringify({
-          version: 1, generation, chunks: count, byteLength: baseline.byteLength, savedAt, baselineId, bootstrapRequired: true,
-        }), { httpMetadata: { contentType: "application/json" }, customMetadata: { savedAt, baselineId } });
-        const ready = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
-          method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }),
-        });
-        if (!ready.ok) throw new Error("account_ready_transition_failed");
-        const authReady = await authRegistry.fetch("https://account-registry.internal/auth/status", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username, status: "ready" }),
-        });
-        if (!authReady.ok) throw new Error("auth_ready_transition_failed");
-      } catch (error) {
-        let cursor: string | undefined;
-        do {
-          const page = await env.VM_SNAPSHOTS.list({ prefix: accountPrefix, limit: 1000, ...(cursor ? { cursor } : {}) });
-          if (page.objects.length) await env.VM_SNAPSHOTS.delete(page.objects.map((object) => object.key));
-          cursor = page.truncated ? page.cursor : undefined;
-        } while (cursor);
-        await authRegistry.fetch("https://account-registry.internal/auth/status", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username, status: "error" }),
-        });
-        await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
-          method: "PATCH", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) }),
-        });
-        return json({ error: "account_snapshot_provisioning_failed" }, 502);
-      }
+      const ready = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }),
+      });
+      const authReady = await authRegistry.fetch("https://account-registry.internal/auth/status", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, status: "ready" }),
+      });
+      if (!ready.ok || !authReady.ok) return json({ error: "account_ready_transition_failed" }, 502);
 
       const login = await authRegistry.fetch("https://account-registry.internal/auth/login", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }),
@@ -284,7 +229,8 @@ export default {
       if (!login.ok) return json({ error: "account_created_but_session_creation_failed" }, 502);
       const session = await login.json() as { account_id: string; session_token: string; expires_at: string };
       return json({ ...session, username, status: "ready", snapshot_identity: accountId,
-        provisioning: "baseline cloned; browser guest still performs first-boot package setup" }, 201);
+        snapshot_initialization_required: true,
+        provisioning: "account created; first guest boot will run network checks and create the initial snapshot" }, 201);
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
