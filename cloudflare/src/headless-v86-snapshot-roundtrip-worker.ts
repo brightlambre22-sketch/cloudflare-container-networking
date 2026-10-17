@@ -2,7 +2,9 @@ import V86 from "../dist/headless-v86-bundle.js";
 import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-wasm";
 import { commitGuestSnapshot, readCommittedGuestSnapshot } from "./headless-snapshot-store";
 
-const BOOT_TIMEOUT_MS = 150000;
+const BOOTLOADER_PROMPT_TIMEOUT_MS = 20000;
+// Tiny Core can take several minutes to reach a usable console in this image.
+const BOOT_TIMEOUT_MS = 300000;
 const SHELL_COMMAND_TIMEOUT_MS = 20000;
 
 type Stage = { attempted: boolean; passed: boolean; marker: string; error?: string; output?: string };
@@ -83,11 +85,27 @@ export default {
       emulator.add_listener("emulator-loaded", async () => {
         loaded = true;
         try {
-          const bootPrompt = await emulator.wait_until_vga_screen_contains(/boot:/i, { timeout_msec: 5000 });
-          if (!bootPrompt) { finishBoot({ booted: false, reason: "bootloader_prompt_not_seen_within_timeout" }); return; }
-          await emulator.keyboard_send_scancodes([0x1C, 0x9C]);
-          const shellReached = await emulator.wait_until_vga_screen_contains(/tc@box:~\\$|tc@box:~\$|tc@box:~\\$|tc@box|localhost login:|login:/i, { timeout_msec: BOOT_TIMEOUT_MS });
-          finishBoot(shellReached ? { booted: true } : { booted: false, reason: "linux_shell_or_login_marker_not_seen_after_enter" });
+          // Some experimental ISOs stop at the Syslinux "boot:" prompt; newer
+          // boot configurations may start the kernel automatically. Treat the
+          // prompt as optional rather than failing before Linux has had time to boot.
+          let bootPrompt = false;
+          try {
+            bootPrompt = Boolean(await emulator.wait_until_vga_screen_contains(/boot:/i, {
+              timeout_msec: BOOTLOADER_PROMPT_TIMEOUT_MS,
+            }));
+          } catch {
+            // A missing boot prompt is expected for an auto-booting ISO.
+          }
+          if (bootPrompt) {
+            await emulator.keyboard_send_scancodes([0x1C, 0x9C]);
+            await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+          }
+          const shellReached = await emulator.wait_until_vga_screen_contains(/tc@box:~\\$|tc@box:~\$|tc@box|localhost login:|login:/i, { timeout_msec: BOOT_TIMEOUT_MS });
+          finishBoot(shellReached
+            ? { booted: true }
+            : { booted: false, reason: bootPrompt
+                ? "linux_shell_or_login_marker_not_seen_after_boot_prompt"
+                : "linux_shell_or_login_marker_not_seen_after_auto_boot" });
         } catch (error) {
           finishBoot({ booted: false, reason: "boot_probe_error: " + (error instanceof Error ? error.message : String(error)).slice(0, 250) });
         }
