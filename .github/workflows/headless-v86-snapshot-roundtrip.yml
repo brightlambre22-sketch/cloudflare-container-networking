@@ -10,6 +10,9 @@ on:
       - "cloudflare/src/headless-v86-wasm.ts"
       - "cloudflare/wrangler.headless-v86-roundtrip.toml"
       - "cloudflare/package.json"
+      - "runner/tinycore/**"
+      - "public/runner/tinycore/**"
+      - "public/boot/**"
       - ".github/workflows/headless-v86-snapshot-roundtrip.yml"
 
 jobs:
