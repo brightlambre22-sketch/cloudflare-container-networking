@@ -383,10 +383,25 @@ startBootMonitor();
 return;
 }
 bootComplete=true;
-statusText('Saved VM resumed; checking network automatically.');
+statusText('Saved VM resumed; writing login proof to the guest terminal.');
 autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);
 connectApiAgent();
-// A restored snapshot skips package installation, but still runs one network check and saves afterward.
+// This visible guest-shell line proves the account dashboard loaded its saved snapshot.
+// It deliberately avoids a second headless restore: the dashboard GUI is the recovery check.
+const proofUsername=(sessionStorage.getItem('vm-username')||'unknown').replace(/[^a-z0-9_-]/gi,'').slice(0,32);
+const proofLoginTime=(sessionStorage.getItem('vm-login-time')||new Date().toISOString()).replace(/[^0-9TZ:.-]/g,'').slice(0,40);
+const proofSavedAt=record&&Number.isFinite(record.savedAt)?new Date(record.savedAt).toISOString():'unknown';
+const proofMarker='__SNAPSHOT_LOGIN_PROOF_DONE__';
+const proofCommand="printf '\\nSNAPSHOT_LOGIN_PROOF username="+proofUsername+" login_time="+proofLoginTime+" snapshot_saved_at="+proofSavedAt+"\\n'; echo "+proofMarker;
+await sendVmCommand(proofCommand+'\\n');
+for(;;){
+  const proofScreen=screenText(), proofAt=proofScreen.lastIndexOf(proofMarker);
+  if(proofAt>=0&&shellPrompt(proofScreen.slice(proofAt+proofMarker.length)))break;
+  await new Promise(resolve=>requestAnimationFrame(resolve));
+}
+report('\\n===== SNAPSHOT RECOVERY LOGIN PROOF =====\\n'+screenText()+'\\n');
+statusText('Saved VM resumed; terminal shows account and login time. Running network check.');
+// A restored snapshot skips package installation; perform a short network check and update the snapshot.
 runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true);
 return;
 }
@@ -442,6 +457,11 @@ function beginAccountSession(data,launchVm=true){
   }
   window.snapshotIdentity=data.account_id;
   window.snapshotAuthToken=data.session_token;
+  try {
+    if (typeof data.username === 'string') sessionStorage.setItem('vm-username', data.username);
+    if (typeof data.login_time === 'string') sessionStorage.setItem('vm-login-time', data.login_time);
+    else if (typeof data.username === 'string') sessionStorage.setItem('vm-login-time', new Date().toISOString());
+  } catch(e) {}
   window.snapshotNeedsInitialSave=data.snapshot_initialization_required===true;
   try{if(window.snapshotNeedsInitialSave)sessionStorage.setItem('vm-initial-snapshot-pending',data.account_id);else window.snapshotNeedsInitialSave=sessionStorage.getItem('vm-initial-snapshot-pending')===data.account_id}catch(e){}
   try{sessionStorage.setItem('vm-account-id',data.account_id);sessionStorage.setItem('vm-session-token',data.session_token)}catch(e){}
@@ -453,8 +473,8 @@ const progressLabels={
   dhcp:'Testing DHCP and default route…',tls_download:'Downloading OpenSSL and CA packages…',
   openssl_install:'Installing and checking OpenSSL…',ca_install:'Installing CA certificates…',
   https_preflight:'Testing DNS and HTTPS from Linux…',snapshot_marker:'Writing guest persistence marker…',
-  snapshot_saved:'Saving the VM snapshot…',snapshot_readback_verified:'Verifying saved snapshot bytes…',
-  restoring_fresh_vm:'Restoring a fresh VM and checking guest data…',complete:'VM initialized and restore verified.'
+  snapshot_saved:'Saving the VM snapshot…',snapshot_readback_verified:'Snapshot saved; verifying stored bytes…',
+  complete:'Snapshot saved and verified; opening dashboard…'
 };
 async function waitForRegistration(data){
   beginAccountSession(data,false);
