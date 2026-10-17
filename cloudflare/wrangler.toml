@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
+# Generate the v86 bundle and compiled WASM before Wrangler resolves Worker imports.
+# Required when deploying directly with `wrangler deploy` from Cloudflare's build environment.
+[build]
+command = "npm run build:headless-v86"
+
 [[rules]]
 type = "CompiledWasm"
 globs = ["src/generated/v86.wasm"]
@@ -62,7 +67,6 @@ storage = "sqlite"
 [[durable_objects.bindings]]
 name = "ACCOUNT_PROVISIONER"
 class_name = "AccountProvisioner"
-
 
 [exports.AccountProvisioner]
 type = "durable-object"
