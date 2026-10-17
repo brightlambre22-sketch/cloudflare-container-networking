@@ -4,7 +4,9 @@ import { NodeRegistry } from "./node-registry";
 import { NodeRuntime } from "./node-runtime";
 import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry };
+import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
+import { AccountProvisioner } from "./account-provisioner";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
@@ -12,6 +14,7 @@ export interface Env {
   NODE_RUNTIME: DurableObjectNamespace<NodeRuntime>;
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
+  ACCOUNT_PROVISIONER: DurableObjectNamespace<AccountProvisioner>;
   VM_BASELINE_ID?: string;
   ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
@@ -61,6 +64,34 @@ function validNodeId(nodeId: string): boolean {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Authenticated API read-back verification for a snapshot written by Workerd.
+    // This validates R2 bytes only; it does not claim that v86 restored the guest.
+    if (url.pathname === "/v1/runtime/snapshot-readback") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const vmApiToken = await getVmApiToken(env);
+      if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+      let body: { identity?: unknown };
+      try { body = await request.json() as typeof body; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      const identity = typeof body.identity === "string" ? body.identity.toLowerCase() : "";
+      if (!/^(acct-[a-f0-9-]{36}|test-[a-z0-9-]{1,32})$/.test(identity)) return json({ error: "invalid_snapshot_identity" }, 400);
+      try {
+        const result = await readCommittedGuestSnapshot(env.VM_SNAPSHOTS, identity);
+        return json({
+          probe: "headless-snapshot-api-readback", runtime: "workerd", passed: true,
+          identity: result.manifest.identity, generation: result.manifest.generation,
+          chunks: result.manifest.chunks, byte_length: result.manifest.byteLength,
+          sha256: result.manifest.sha256, readback_byte_length: result.state.byteLength,
+          readback_digest_verified: true, guest_checks: result.manifest.checks,
+          note: "R2 read-back and digest verification passed; a fresh-emulator restore and guest marker check are still required.",
+        });
+      } catch (error) {
+        const message = (error instanceof Error ? error.message : String(error)).slice(0, 200);
+        return json({ probe: "headless-snapshot-api-readback", passed: false, error: message }, message === "snapshot_manifest_missing" ? 404 : 409);
+      }
+    }
 
     // Diagnostic only: this checks the persisted snapshot and optionally compiles the v86 WASM
     // module in the Worker runtime. It intentionally does not instantiate a VM or claim shell execution.
@@ -214,24 +245,19 @@ export default {
         });
         return json({ error: "account_record_creation_failed" }, 502);
       }
-      const ready = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
-        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "ready" }),
-      });
-      const authReady = await authRegistry.fetch("https://account-registry.internal/auth/status", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, status: "ready" }),
-      });
-      if (!ready.ok || !authReady.ok) return json({ error: "account_ready_transition_failed" }, 502);
-
-      const login = await authRegistry.fetch("https://account-registry.internal/auth/login", {
+      const signupSession = await authRegistry.fetch("https://account-registry.internal/auth/provisioning-session", {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }),
       });
-      if (!login.ok) return json({ error: "account_created_but_session_creation_failed" }, 502);
-      const session = await login.json() as { account_id: string; session_token: string; expires_at: string };
-      return json({ ...session, username, status: "ready", snapshot_identity: accountId,
-        snapshot_initialization_required: true,
-        provisioning: "account created; first guest boot will run network checks and create the initial snapshot" }, 201);
-    }
+      if (!signupSession.ok) return json({ error: "account_created_but_signup_session_failed" }, 502);
+      const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
+      const queued = await provisioner.fetch("https://account-provisioner.internal/start", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identity: accountId, username }),
+      });
+      if (!queued.ok && queued.status !== 202) return json({ error: "vm_provisioning_queue_failed" }, 502);
+      const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
+      return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+        snapshot_initialization_required: true, progress_endpoint: "/api/auth/registration-status",
+        provisioning: "Linux boot, network tests, snapshot save/read-back and fresh-VM restore verification are queued" }, 202);    }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
       let body: { username?: unknown; password?: unknown };
@@ -253,6 +279,22 @@ export default {
       });
       if (!response.ok) return json({ error: "invalid_credentials" }, 401);
       return json({ ...(await response.json() as Record<string, unknown>), username });
+    }
+
+    if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      if (typeof body.account_id !== "string" || typeof body.session_token !== "string" || !/^acct-[a-f0-9-]{36}$/.test(body.account_id)) return json({ error: "unauthorized" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: body.account_id, token: body.session_token }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const object = await env.VM_SNAPSHOTS.get("runtime-jobs/" + body.account_id + ".json");
+      if (!object) return json({ account_id: body.account_id, status: "complete", step: "existing_account", complete: true, ready_to_login: true });
+      const progress = await object.json() as Record<string, unknown>;
+      return json({ ...progress, complete: progress.status === "complete", ready_to_login: progress.status === "complete" });
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "POST") {
