@@ -254,7 +254,7 @@ exit 1`;
           };
           const generation = "gen-" + Date.now().toString(36);
           const manifest = await commitGuestSnapshot(env.VM_SNAPSHOTS, snapshotIdentity, generation, state, checks);
-          state = undefined; // Release the original ~100 MiB state before read-back/restore.
+          state = undefined; // Release the original ~100 MiB state before verifying stored bytes.
           snapshotRoundtrip.saved = true;
           await writeProgress("running", "snapshot_saved", { snapshot_roundtrip: { ...snapshotRoundtrip } });
           snapshotRoundtrip.generation = manifest.generation;
@@ -264,7 +264,6 @@ exit 1`;
           const readback = await readCommittedGuestSnapshot(env.VM_SNAPSHOTS, snapshotIdentity);
           snapshotRoundtrip.readback = true;
           await writeProgress("running", "snapshot_readback_verified", { snapshot_roundtrip: { ...snapshotRoundtrip } });
-          snapshotRoundtrip.readback_digest_verified = readback.manifest.sha256 === manifest.sha256 && readback.state.byteLength === stateBytes;
           snapshotRoundtrip.readback_digest_verified = readback.manifest.sha256 === manifest.sha256 &&
             readback.state.byteLength === stateBytes;
           if (!snapshotRoundtrip.readback_digest_verified) throw new Error("snapshot_readback_digest_mismatch");
