@@ -393,13 +393,13 @@ const proofLoginTime=(sessionStorage.getItem('vm-login-time')||new Date().toISOS
 const proofSavedAt=record&&Number.isFinite(record.savedAt)?new Date(record.savedAt).toISOString():'unknown';
 const proofMarker='__SNAPSHOT_LOGIN_PROOF_DONE__';
 const proofCommand="printf '\\nSNAPSHOT_LOGIN_PROOF username="+proofUsername+" login_time="+proofLoginTime+" snapshot_saved_at="+proofSavedAt+"\\n'; echo "+proofMarker;
-await sendVmCommand(proofCommand+'\\n');
+await sendVmCommand(proofCommand+'\n');
 for(;;){
   const proofScreen=screenText(), proofAt=proofScreen.lastIndexOf(proofMarker);
   if(proofAt>=0&&shellPrompt(proofScreen.slice(proofAt+proofMarker.length)))break;
   await new Promise(resolve=>requestAnimationFrame(resolve));
 }
-report('\\n===== SNAPSHOT RECOVERY LOGIN PROOF =====\\n'+screenText()+'\\n');
+report('\n===== SNAPSHOT RECOVERY LOGIN PROOF =====\n'+screenText()+'\n');
 statusText('Saved VM resumed; terminal shows account and login time. Running network check.');
 // A restored snapshot skips package installation; perform a short network check and update the snapshot.
 runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true);
