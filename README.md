@@ -1,80 +1,81 @@
 # Cloudflare Container Networking
 
-A Cloudflare-first control and tunnel foundation for the larger networking design. The current milestone proves two separately authenticated WebSocket roles, binary framing, multi-stream TCP relay through the Oracle gateway, and automatic reconnect for the gateway.
+An experimental Cloudflare Worker project for authenticated WebSocket tunneling and related headless-v86 feasibility work. The repository contains a limited TCP relay proof and separate experimental work toward running a Tiny Core Linux guest inside Workerd.
 
-## Implemented
+**Important:** this repository does not provision or include Oracle Cloud, an Oracle VM, a VPS, or a Linux gateway host. It does not require Oracle as a provider. The TCP relay proof does require a separately operated Linux gateway process; you must provide and manage that host yourself if you want to run that proof.
 
-- Worker health route, authenticated gateway/client tunnel route, and authenticated live-session listing.
-- Hibernatable Durable Object that brokers bounded binary frames between a gateway and client for the same node.
-- Versioned frame codec shared by TypeScript and Python.
-- Python gateway client that opens allowlisted TCP connections and multiplexes stream IDs over one WebSocket.
-- Local TCP echo service and a two-stream end-to-end smoke-test client.
-- Wrangler SQLite-backed Durable Object configuration and local secret template.
+## Current status
 
-Still not implemented: UDP datagram transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
+### TCP tunnel proof
 
-## Architecture boundary
+Implemented in the repository's Worker and gateway code:
 
-Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
+- Worker health endpoint and authenticated WebSocket tunnel roles for gateway and client.
+- Hibernatable Durable Object routing bounded binary frames between matching roles for a node.
+- Versioned TypeScript/Python frame codec.
+- Python gateway client with reconnect/heartbeat, multiple TCP streams, and an explicit destination allowlist.
+- Local TCP echo server, two-stream smoke test, and Python codec unit tests.
+- Wrangler configuration for SQLite-backed Durable Objects.
 
-## Deploy the Worker
+This is a limited TCP proof, not a general-purpose network service or a VPS replacement. The sample gateway allowlist defaults to 127.0.0.1:9000. Do not broaden it without understanding that it controls which destinations a client can ask the gateway to connect to.
 
-On a development machine with Node.js, clone this repository, then run:
+### Headless Linux / v86 experiment
 
-   ~~~sh
-   cd cloudflare
-   npm install
-   npx wrangler login
-   npx wrangler secret put TUNNEL_TOKEN
-   npx wrangler secret put CLIENT_TOKEN
-   npm run deploy
-   ~~~
+The branch [test/headless-v86-network-snapshot-roundtrip](https://github.com/brightlambre22-sketch/cloudflare-container-networking/tree/test/headless-v86-network-snapshot-roundtrip) contains experimental work on loading v86 in a Worker-compatible environment and verifying snapshot storage. It is **not a production-ready headless Linux runtime**.
 
-Use two independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN and the smoke-test client uses CLIENT_TOKEN. The node registry is temporarily unauthenticated while we finish the node lifecycle implementation.
+At the time of writing:
 
-## Run the TCP proof on the Oracle gateway
+- POST /v1/runtime/preflight checks the saved snapshot's manifest/chunks and can optionally attempt to compile the v86 WASM asset.
+- Preflight explicitly reports headless_linux_execution: not_implemented; it does not boot Linux, restore a snapshot into a running guest, or execute guest shell commands.
+- A successful snapshot storage/read-back check is not proof that Linux boots or that the guest can run inside Workerd.
+- Full headless acceptance still requires a real guest boot, guest command execution, snapshot save/read-back verification, and restore/marker verification in the target runtime.
+- Do not treat the draft snapshot round-trip integration as validated, and do not merge or deploy it as working functionality without successful acceptance tests.
 
-On the Oracle host, install the Python dependency:
+Useful starting points:
 
-   ~~~sh
-   cd gateway
-   python -m venv .venv
-   . .venv/bin/activate
-   pip install -r requirements.txt
-   ~~~
+- [Headless v86 experiment branch](https://github.com/brightlambre22-sketch/cloudflare-container-networking/tree/test/headless-v86-network-snapshot-roundtrip)
+- [Worker API implementation](https://github.com/brightlambre22-sketch/cloudflare-container-networking/blob/main/cloudflare/src/index.ts)
+- [Workerd/v86 compatibility entry](https://github.com/brightlambre22-sketch/cloudflare-container-networking/blob/test/headless-v86-network-snapshot-roundtrip/cloudflare/src/headless-v86-entry.ts)
+- [Draft snapshot read-back verification PR](https://github.com/brightlambre22-sketch/cloudflare-container-networking/pull/52)
 
-Set these environment values in the gateway shell (use the actual Workers URL; keep tokens out of files and chat):
+## Architecture and limitations
 
-   ~~~sh
-   export TUNNEL_URL=wss://YOUR-WORKER.workers.dev/tunnel
-   export TUNNEL_TOKEN='gateway-token-set-in-Cloudflare'
-   export CLIENT_TOKEN='test-client-token-set-in-Cloudflare'
-   export NODE_ID=oracle-gateway
-   ~~~
+- Cloudflare Workers provides the HTTP/WebSocket control layer and Durable Object coordination.
+- The current TCP tunnel proof uses a separately operated Linux gateway to open allowlisted outbound TCP connections. This repository does not create or manage that host.
+- The headless v86 work is an experiment; do not assume that a Worker API can currently boot and execute Linux headlessly.
+- UDP transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, public service ingress, and production key provisioning/rotation are not implemented as a complete production system.
+- Workers HTTP/WebSocket ingress should not be treated as arbitrary public TCP/UDP ingress. No IP spoofing is used.
 
-Start three terminals on the Oracle host:
+## Develop locally
 
-   ~~~sh
-   cd gateway && python echo_server.py
-   cd gateway && python client.py
-   cd gateway && python tcp_smoke.py
-   ~~~
+Requirements: Node.js/npm for the Worker and Python for the gateway proof.
 
-The echo target binds only to 127.0.0.1:9000. The gateway client defaults to allowing only that exact TCP destination. The smoke test opens two TCP streams across the same WebSocket and verifies echoed payloads. No inbound port on Oracle is needed for this proof; the gateway opens outbound TLS/WebSocket traffic to Cloudflare. Set TCP_ALLOWLIST only to explicit host:port destinations you intend to permit.
+~~~sh
+cd cloudflare
+npm install
+cp .dev.vars.example .dev.vars
+# Set disposable local-only values in cloudflare/.dev.vars.
+npm run dev
+~~~
 
-Check GET /health on the deployed URL. Node registry endpoints are temporarily unauthenticated during this PoC phase.
+For a Worker bundle/configuration check:
 
-For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, set disposable local-only secrets, and run npm run dev. The Python clients must be able to reach Wrangler's local WebSocket endpoint.
+~~~sh
+cd cloudflare
+npm run check
+~~~
 
-## Replit and Cloudflare cost
+For the gateway codec tests:
 
-This source repository and deployment flow do not require a Replit plan upgrade. Cloudflare has its own plan limits: as checked against the official docs on 2026-10-07, the Workers Free plan supports SQLite-backed Durable Objects with 100,000 DO requests/day and 13,000 GB-s/day; exceeding a free limit causes further operations of that type to fail. WebSocket message accounting and storage quotas also apply. Hibernation reduces idle duration charges, but heartbeats and traffic still consume quota. Check Cloudflare's current limits before production use. This starter does not use Cloudflare Containers, which are not included in the Workers Free plan.
+~~~sh
+cd gateway
+python -m unittest -v
+~~~
 
-## Commands
+To run the TCP echo proof, on a Linux host that you manage yourself, install the dependencies from gateway/requirements.txt, then run gateway/echo_server.py and gateway/client.py; run gateway/tcp_smoke.py with matching test configuration. Use the actual Worker URL and separate, randomly generated TUNNEL_TOKEN and CLIENT_TOKEN values. Keep tokens out of source control, logs, and chat.
 
-- cd cloudflare && npm run dev - local Worker development.
-- cd cloudflare && npm run check - Wrangler dry-run bundle/config check.
-- cd cloudflare && npm run deploy - deploy to the Cloudflare account logged into Wrangler.
-- cd gateway && python -m unittest -v - run Python frame codec tests.
+## Cloudflare limits and deployment
 
-See docs/STATUS.md and protocol/frame-v1.md for scope and wire format.
+Cloudflare plan quotas and runtime restrictions apply; check the current Cloudflare documentation before sustained use. This repository's Worker uses Durable Objects and does not depend on Cloudflare Containers. The headless v86 experiment must pass its target-runtime boot and execution tests before it can be considered feasible for production.
+
+Do not deploy experimental headless changes to production solely because a build or snapshot integrity check passes. A build, WASM compile, or valid R2 snapshot is not a substitute for a successful guest boot and execution test.
