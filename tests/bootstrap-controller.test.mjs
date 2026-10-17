@@ -116,7 +116,10 @@ test("VM downloads active diagnostic scripts from same-origin Worker assets", ()
 });
 
 test("startup keeps DHCP retrying and bounds individual HTTPS probes", () => {
-  assert.ok(!html.includes("setTimeout("), "startup must not use JavaScript timeouts");
+  const startupStart = html.indexOf("async function startBootstrap()");
+  const accountUiStart = html.indexOf("function beginAccountSession");
+  assert.ok(startupStart >= 0 && accountUiStart > startupStart, "startup and account UI sections should be identifiable");
+  assert.ok(!html.slice(startupStart, accountUiStart).includes("setTimeout("), "VM startup must not use JavaScript timeouts");
   assert.ok(!html.includes("BOOT_TIMEOUT_MS"));
   assert.ok(html.includes('wget -T 10 -t 1 -S -O /dev/null ${apiUrl}/health'));
   assert.ok(!/udhcpc[^\n]*\s-t\s*[0-9]/.test(html), "DHCP should not have a retry-count timeout");

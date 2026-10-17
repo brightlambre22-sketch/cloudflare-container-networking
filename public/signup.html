@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create account · Workerd VM</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--line:#26334a;--muted:#a6b3c9;--text:#f3f6fc;--accent:#7dd3fc;--good:#86efac;--warn:#fcd34d;--bad:#fca5a5}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#172744 0%,var(--bg) 55%);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;display:grid;place-items:center;padding:24px}
+main{width:min(100%,560px);background:rgba(18,26,43,.96);border:1px solid var(--line);border-radius:20px;padding:clamp(22px,5vw,40px);box-shadow:0 24px 80px #0005}
+.eyebrow{color:var(--accent);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}h1{font-size:clamp(1.8rem,5vw,2.5rem);line-height:1.1;margin:.7rem 0}p{color:var(--muted)}label{display:block;font-size:.9rem;font-weight:650;margin:18px 0 7px}input{width:100%;background:#0a1020;color:var(--text);border:1px solid #3a4a65;border-radius:10px;padding:13px 14px;font:inherit}input:focus{outline:2px solid var(--accent);outline-offset:2px}button{width:100%;border:0;border-radius:10px;background:var(--accent);color:#06111e;font:inherit;font-weight:700;padding:14px;margin-top:22px;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.subtle{font-size:.86rem}.status{margin-top:24px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#0a1020}.status[hidden]{display:none}.status strong{display:block;margin-bottom:4px}.status-text{color:var(--muted);overflow-wrap:anywhere}.meter{height:5px;background:#25334b;border-radius:9px;margin:14px 0 8px;overflow:hidden}.meter span{display:block;height:100%;width:12%;background:var(--accent);transition:width .3s}.status.good strong{color:var(--good)}.status.bad strong{color:var(--bad)}.status.warn strong{color:var(--warn)}a{color:var(--accent)}.steps{font-size:.84rem;color:var(--muted);margin:14px 0 0;padding-left:20px}.steps li{margin:5px 0}.steps .active{color:var(--text)}.steps .done{color:var(--good)}
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Workerd · Guest snapshot</div>
+  <h1>Create your account</h1>
+  <p>We’ll provision your account’s Linux guest, run its network and certificate checks, save the guest snapshot, and verify the saved bytes. Then you’ll go to your dashboard, where the browser GUI loads the saved snapshot.</p>
+  <form id="signup-form">
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" minlength="2" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" required placeholder="e.g. sample_user">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="At least 8 characters">
+    <button id="submit" type="submit">Create account and start snapshot</button>
+  </form>
+  <section id="status" class="status" role="status" aria-live="polite" hidden>
+    <strong id="status-title">Preparing your guest…</strong>
+    <div id="status-text" class="status-text">Waiting for the Workerd provisioning job.</div>
+    <div class="meter"><span id="meter-fill"></span></div>
+    <ol class="steps" id="steps">
+      <li data-step="booting_linux">Boot Linux guest</li>
+      <li data-step="dhcp">Check network connectivity</li>
+      <li data-step="ca_install">Install/check CA certificates</li>
+      <li data-step="https_preflight">Verify HTTPS from guest</li>
+      <li data-step="snapshot_saved">Save snapshot</li>
+      <li data-step="snapshot_readback_verified">Verify stored snapshot bytes</li>
+      <li data-step="complete">Open dashboard</li>
+    </ol>
+  </section>
+  <p class="subtle">Your password is sent to the signup API over HTTPS and is not saved in this page’s browser storage. Already registered? <a href="/vm.html">Log in to your dashboard</a>.</p>
+</main>
+<script>
+(function(){
+const form=document.getElementById('signup-form'),submit=document.getElementById('submit');
+const status=document.getElementById('status'),title=document.getElementById('status-title'),detail=document.getElementById('status-text'),fill=document.getElementById('meter-fill'),steps=document.getElementById('steps');
+const labels={
+ queued:'Queued. Waiting for a Workerd worker…',starting_vm:'Starting the Linux guest…',booting_linux:'Booting Tiny Core Linux…',
+ linux_booted:'Linux booted. Preparing network checks…',resource_preflight:'Checking guest resources…',dhcp:'Checking DHCP and the default route…',
+ tls_download:'Preparing OpenSSL and CA packages…',openssl_install:'Installing and verifying OpenSSL…',ca_install:'Installing CA certificates…',
+ https_preflight:'Checking DNS and HTTPS from the guest…',snapshot_marker:'Writing the guest persistence marker…',
+ snapshot_saved:'Guest checks passed. Saving the snapshot…',snapshot_readback_verified:'Snapshot saved; checking stored bytes and digest…',
+ complete:'Snapshot is saved and verified. Opening your dashboard…'
+};
+const order=['queued','starting_vm','booting_linux','linux_booted','resource_preflight','dhcp','tls_download','openssl_install','ca_install','https_preflight','snapshot_marker','snapshot_saved','snapshot_readback_verified','complete'];
+function paint(progress){
+status.hidden=false;status.className='status';
+const step=String(progress.step||progress.status||'queued');
+title.textContent=labels[step]||'Preparing your Linux guest…';
+detail.textContent='Stage: '+step.replaceAll('_',' ')+(progress.updated_at?' · Updated '+new Date(progress.updated_at).toLocaleTimeString():'');
+const index=Math.max(0,order.indexOf(step));fill.style.width=Math.max(12,Math.round((index+1)/order.length*100))+'%';
+for(const item of steps.querySelectorAll('li')){const key=item.dataset.step;item.className=key===step?'active':order.indexOf(key)>=0&&order.indexOf(key)<index?'done':'';}
+}
+async function waitForSnapshot(session){
+let failures=0;
+for(;;){
+const response=await fetch('/api/auth/registration-status',{method:'POST',headers:{'content-type':'application/json'},cache:'no-store',body:JSON.stringify({account_id:session.account_id,session_token:session.session_token})});
+const progress=await response.json().catch(()=>({}));
+if(!response.ok)throw new Error(progress.error||'Could not read snapshot progress (HTTP '+response.status+').');
+failures=0;paint(progress);
+if(progress.status==='complete'&&progress.complete===true){
+title.textContent=labels.complete;detail.textContent='Saved snapshot and read-back digest verified. Loading the dashboard GUI now.';
+status.classList.add('good');fill.style.width='100%';
+sessionStorage.setItem('vm-account-id',session.account_id);
+sessionStorage.setItem('vm-session-token',session.session_token);
+sessionStorage.setItem('vm-username',session.username);
+sessionStorage.setItem('vm-login-time',session.login_time);
+sessionStorage.removeItem('vm-initial-snapshot-pending');
+await new Promise(resolve=>setTimeout(resolve,900));
+location.assign('/vm.html?dashboard=1');return;
+}
+if(progress.status==='error')throw new Error('Guest setup failed at '+stepName(progress.step)+': '+(progress.error||progress.boot_error||'check the job diagnostics'));
+await new Promise(resolve=>setTimeout(resolve,2200));
+}
+}
+function stepName(step){return String(step||'an unknown stage').replaceAll('_',' ');}
+form.addEventListener('submit',async function(event){
+event.preventDefault();if(submit.disabled)return;
+const username=document.getElementById('username').value.trim().toLowerCase();
+const password=document.getElementById('password').value;
+submit.disabled=true;document.getElementById('password').value='';
+status.hidden=false;status.className='status';title.textContent='Creating your account…';detail.textContent='Sending the signup request to Workerd.';fill.style.width='8%';
+try{
+const response=await fetch('/api/auth/signup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password})});
+const data=await response.json().catch(()=>({}));
+if(!response.ok)throw new Error(data.error||'Signup failed (HTTP '+response.status+').');
+const session={...data,username,login_time:new Date().toISOString()};
+if(typeof session.account_id!=='string'||typeof session.session_token!=='string')throw new Error('Signup response did not contain a valid account session.');
+sessionStorage.setItem('vm-account-id',session.account_id);
+sessionStorage.setItem('vm-session-token',session.session_token);
+sessionStorage.setItem('vm-username',username);
+sessionStorage.setItem('vm-login-time',session.login_time);
+sessionStorage.setItem('vm-initial-snapshot-pending',session.account_id);
+await waitForSnapshot(session);
+}catch(error){status.className='status bad';title.textContent='Signup could not finish';detail.textContent=error instanceof Error?error.message:String(error);submit.disabled=false;}
+});
+})();
+</script>
+</body>
+</html>
