@@ -13,14 +13,6 @@ A Cloudflare-first control and tunnel foundation for the larger networking desig
 
 Still not implemented: UDP datagram transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
 
-## Signup and saved-snapshot confirmation
-
-- Open `/signup.html` to create a regular account. The page calls `POST /api/auth/signup`, shows provisioning progress, and polls `POST /api/auth/registration-status`.
-- The Workerd guest job boots Tiny Core, runs the configured network/TLS checks, writes its marker, saves the v86 state into R2 chunks, and reads the saved bytes back to verify the manifest digest.
-- Once the snapshot save and read-back pass, the signup page redirects to `/vm.html`. The dashboard authenticates the session and loads that account's saved snapshot through the browser v86 GUI.
-- After the GUI resumes the snapshot, the guest terminal prints `SNAPSHOT_LOGIN_PROOF username=... login_time=... snapshot_saved_at=...`. This makes GUI recovery visible without starting a second emulator in the signup job.
-- This is still experimental: successful code paths and storage checks do not guarantee the deployed Workerd runtime can boot the guest. The signup flow must be validated against the actual deployed Worker and R2 bindings before production use.
-
 ## Architecture boundary
 
 Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
