@@ -1,0 +1,110 @@
+name: Alpine Linux v86 boot and network probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/src/alpine-v86-boot-probe-worker.ts"
+      - "cloudflare/wrangler.alpine-v86-probe.toml"
+      - ".github/workflows/alpine-v86-probe.yml"
+
+jobs:
+  alpine-guest-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download official Alpine x86 ISO and verify checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../public/boot
+          cd ../public/boot
+          base="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86"
+          curl --fail --location --retry 3 --output alpine-standard-3.24.2-x86.iso "$base/alpine-standard-3.24.2-x86.iso"
+          curl --fail --location --retry 3 --output alpine-standard-3.24.2-x86.iso.sha256 "$base/alpine-standard-3.24.2-x86.iso.sha256"
+          sha256sum --check alpine-standard-3.24.2-x86.iso.sha256
+          ls -lh alpine-standard-3.24.2-x86.iso
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install dependencies and build v86 Worker bundle
+        run: |
+          npm install --no-audit --no-fund
+          npm run build:headless-v86
+
+      - name: Start local Workerd with Alpine probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '{"probe":"alpine-v86-boot-network","runner_error":"probe_not_started"}' > /tmp/alpine-v86-result.json
+          timeout --signal=TERM --kill-after=10s 480s npx wrangler dev --local --config wrangler.alpine-v86-probe.toml --ip 127.0.0.1 --port 8789 > /tmp/alpine-v86-workerd.log 2>&1 &
+          worker_pid=$!
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --silent --max-time 2 -o /dev/null http://127.0.0.1:8789/not-found; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat /tmp/alpine-v86-workerd.log
+            exit 1
+          fi
+
+          set +e
+          http_code=$(curl --silent --show-error --max-time 360 -o /tmp/alpine-v86-result.json -w '%{http_code}' http://127.0.0.1:8789/probe)
+          curl_rc=$?
+          set -e
+          echo "PROBE_HTTP_STATUS=$http_code"
+          echo "PROBE_CURL_RC=$curl_rc"
+          cat /tmp/alpine-v86-result.json
+          if [ "$curl_rc" -ne 0 ]; then
+            echo "Alpine probe request did not finish; Workerd log follows."
+            cat /tmp/alpine-v86-workerd.log
+            exit 1
+          fi
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const r = JSON.parse(fs.readFileSync("/tmp/alpine-v86-result.json", "utf8"));
+            if (r.guest_booted !== true) {
+              console.error("Alpine guest did not reach its login prompt.", r.boot_error ?? "");
+              process.exit(1);
+            }
+            if (r.network_test_ran !== true || r.network_test_passed !== true) {
+              console.error("Alpine booted, but its network test did not pass.");
+              process.exit(1);
+            }
+          '
+
+      - name: Show Workerd log on failure
+        if: failure()
+        run: cat /tmp/alpine-v86-workerd.log || true
+
+      - name: Upload Alpine probe result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-v86-boot-network-result
+          path: /tmp/alpine-v86-result.json
+          if-no-files-found: warn
+          retention-days: 7
