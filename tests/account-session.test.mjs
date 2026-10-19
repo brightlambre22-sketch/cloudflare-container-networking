@@ -17,7 +17,8 @@ test("signup stores server-side PBKDF2 credentials and enforces unique usernames
   assert.match(worker, /password\.length < 4/);
   assert.match(registry, /password\.length < 4/);
   assert.match(dashboard, /if\(creating&&pass\.length<4\)/);
-  assert.match(worker, /snapshot_initialization_required: true/);
+  assert.match(worker, /snapshot_cloned: true/);
+  assert.doesNotMatch(worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"')), /snapshot_initialization_required: true/);
   assert.match(dashboard, /snapshot_initialization_required===true/);
 });
 
@@ -30,10 +31,13 @@ test("sessions expire and are bound to the account ID for every snapshot operati
   assert.match(dashboard, /headers\.authorization='Bearer '\+window\.snapshotAuthToken/);
 });
 
-test("signup creates the account first and lets its first network-tested boot create the snapshot", () => {
-  assert.match(worker, /const baselineId = "none"/);
-  assert.match(worker, /snapshot_initialization_required: true/);
-  assert.doesNotMatch(worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"')), /baseline_snapshot_not_found|baseline cloned/);
+test("signup clones a ready Admin baseline without booting Linux", () => {
+  assert.match(worker, /const baselineId = env\.VM_BASELINE_ID \?\? "admin"/);
+  assert.match(worker, /admin_baseline_not_ready/);
+  assert.match(worker, /snapshot_cloned: true/);
+  const signup = worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"'));
+  assert.match(signup, /baselineGeneration/);
+  assert.doesNotMatch(signup, /ACCOUNT_PROVISIONER|headlessV86Roundtrip|snapshot_initialization_required: true/);
   assert.match(dashboard, /vm-initial-snapshot-pending/);
   assert.match(dashboard, /if\(saveAfter&&bootComplete\)/);
   assert.match(dashboard, /window\.snapshotNeedsInitialSave=false/);
@@ -49,7 +53,7 @@ test("missing or unreadable account snapshots fail closed instead of booting a f
 
 test("public auth routes are rate-limited and browser credentials are not persisted in localStorage", () => {
   assert.match(registry, /auth-rate:/);
-  assert.match(registry, /body\.action === "signup" \? 5 : 20/);
+  assert.match(registry, /body\.action === "signup" \? 500 : 2000/);
   assert.match(worker, /auth\/rate-limit/);
   assert.match(dashboard, /sessionStorage\.setItem\('vm-session-token'/);
   assert.doesNotMatch(dashboard, /localStorage\.setItem\(ACCOUNTS_KEY/);
