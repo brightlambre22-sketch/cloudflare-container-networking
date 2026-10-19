@@ -71,6 +71,49 @@ class FetchXMLHttpRequest {
 
 (globalThis as unknown as { XMLHttpRequest: typeof FetchXMLHttpRequest }).XMLHttpRequest = FetchXMLHttpRequest;
 
+/**
+ * Deployed Workers freeze performance.now() during synchronous CPU execution.
+ * v86 uses that clock to decide when its CPU loop should yield. Probe for a
+ * frozen clock before importing v86 (which captures its clock at module init).
+ *
+ * This shim is deliberately conditional: local workerd and ordinary runtimes
+ * keep their native clock. In a deployed Worker, a synthetic monotonic clock
+ * advances per read so v86's frame loop can make progress. This does NOT raise
+ * the Worker's CPU budget; each native v86 CPU slice can still exceed Free
+ * plan limits, and a real guest boot remains the acceptance test.
+ */
+function enableMonotonicV86ClockIfFrozen() {
+  const perf = globalThis.performance;
+  if (!perf || typeof perf.now !== "function") return;
+  const nativeNow = perf.now.bind(perf);
+  const first = nativeNow();
+  let changed = false;
+  for (let i = 0; i < 20_000; i++) {
+    if (nativeNow() !== first) {
+      changed = true;
+      break;
+    }
+  }
+  if (changed) return;
+
+  let tick = first;
+  try {
+    Object.defineProperty(perf, "now", {
+      configurable: true,
+      value: () => ++tick,
+    });
+    if (perf.now() <= first) {
+      throw new Error("synthetic performance clock did not advance");
+    }
+  } catch (error) {
+    throw new Error(
+      "v86 requires a monotonic performance.now() clock in deployed Workers; " +
+      (error instanceof Error ? error.message : String(error)),
+    );
+  }
+}
+
+enableMonotonicV86ClockIfFrozen();
 const { V86 } = await import("v86");
 export { V86 };
 export default V86;
