@@ -436,7 +436,7 @@ const t=screenText();
 const elapsed=Date.now()-bootStartedAt;
 // Some Tiny Core ISOs stop at the Syslinux prompt; auto-booting images will
 // never show it. Send Enter only when a standalone boot: prompt is visible.
-if(!bootPromptHandled&&t.split('\\n').some(line=>/^boot:\\s*$/i.test(line.trim()))){
+if(!bootPromptHandled&&t.split('\n').some(line=>/^boot:\s*$/i.test(line.trim()))){
 bootPromptHandled=true;
 try{
 if(window.emulator&&typeof window.emulator.keyboard_send_scancodes==='function'){
@@ -444,12 +444,12 @@ window.emulator.keyboard_send_scancodes([0x1C,0x9C]);
 statusText('Tiny Core bootloader prompt detected; sent Enter and waiting for Linux.');
 }else{
 statusText('Tiny Core is at the bootloader prompt, but keyboard input is unavailable.');
-report('\\n*** BOOT ERROR: bootloader prompt detected but keyboard_send_scancodes is unavailable. ***\\n'+t+'\\n');
+report('\n*** BOOT ERROR: bootloader prompt detected but keyboard_send_scancodes is unavailable. ***\n'+t+'\n');
 return;
 }
 }catch(e){
 statusText('Could not advance Tiny Core bootloader: '+(e&&e.message?e.message:String(e)));
-report('\\n*** BOOT ERROR: '+(e&&e.message?e.message:String(e))+' ***\\n'+t+'\\n');
+report('\n*** BOOT ERROR: '+(e&&e.message?e.message:String(e))+' ***\n'+t+'\n');
 return;
 }
 }
@@ -465,7 +465,7 @@ return;
 }else{promptCandidate='';promptCandidateSince=0;}
 if(elapsed>=BOOT_TIMEOUT_MS){
 statusText('Tiny Core did not reach a shell within five minutes; bootstrap was not started.');
-report('\\n*** BOOT TIMEOUT after '+Math.round(elapsed/1000)+' seconds. No bootstrap was started. Current guest screen follows. ***\\n'+t+'\\n');
+report('\n*** BOOT TIMEOUT after '+Math.round(elapsed/1000)+' seconds. No bootstrap was started. Current guest screen follows. ***\n'+t+'\n');
 stateText('Boot timed out; saved snapshot was not changed.');
 return;
 }
