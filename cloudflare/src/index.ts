@@ -108,7 +108,7 @@ export default {
         return json({ error: "compile_wasm_must_be_boolean" }, 400);
       }
 
-      const baselineId = env.VM_BASELINE_ID ?? "v2";
+      const baselineId = env.VM_BASELINE_ID ?? "admin";
       const prefix = "vm-snapshots/" + baselineId + "/";
       const manifestObject = await env.VM_SNAPSHOTS.get(prefix + "manifest.json");
       if (!manifestObject) {
@@ -409,7 +409,7 @@ export default {
         return json({ error: "name_must_be_1_to_80_printable_characters" }, 400);
       }
 
-      const baselineId = env.VM_BASELINE_ID ?? "v2";
+      const baselineId = env.VM_BASELINE_ID ?? "admin";
       if (!/^[a-zA-Z0-9._-]{1,64}$/.test(baselineId) || baselineId.startsWith("acct-")) {
         return json({ error: "invalid_vm_baseline_id" }, 500);
       }
@@ -466,6 +466,8 @@ export default {
         const savedAt = new Date().toISOString();
         await env.VM_SNAPSHOTS.put(accountPrefix + "manifest.json", JSON.stringify({
           version: 1, generation, chunks: count, byteLength: baseline.byteLength, savedAt, baselineId,
+          ...(baselineId === "admin" ? { adminReady: true, checks: baseline.checks } : {}),
+          baselineGeneration: baseline.generation,
         }), { httpMetadata: { contentType: "application/json" }, customMetadata: { savedAt, baselineId } });
         const ready = await registry.fetch("https://account-registry.internal/account/" + accountId, {
           method: "PATCH", headers: { "content-type": "application/json" },
@@ -624,7 +626,7 @@ export default {
         if (!accountAuthorized) return json({ error: "unauthorized" }, 401);
       }
 
-      // The clean V2 baseline is managed with the provisioning token, not public snapshot routes.
+      // Non-Admin baselines are managed with the provisioning token; the Admin baseline uses ADMIN_ACCESS_CODE.
       if (identity === (env.VM_BASELINE_ID ?? "admin") && identity !== "admin") {
         const vmApiToken = await getVmApiToken(env);
         if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
