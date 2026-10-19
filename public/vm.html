@@ -173,7 +173,7 @@ const diagnosticCommand=[
   'wget -T 15 -t 2 -q -O /dev/null ${apiUrl}/health; echo DNS_HTTPS_RETRY_RC=$?',
   'wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; echo NETWORK_TEST_DOWNLOAD_RC=$?',
   'if [ -s /tmp/network-test.sh ]; then sh /tmp/network-test.sh; echo NETWORK_TEST_SCRIPT_RC=$?; else echo NETWORK_TEST_SCRIPT_RC=1; fi'
-].join('\\n');
+].join('\n');
 
 let manualCommandRunning=false;
 function runDiagnostic(label,saveAfter=false){
