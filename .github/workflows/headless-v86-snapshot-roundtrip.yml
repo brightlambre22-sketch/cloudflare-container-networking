@@ -13,6 +13,8 @@ on:
       - "runner/tinycore/**"
       - "public/runner/tinycore/**"
       - "public/boot/**"
+      - "public/vm.html"
+      - "tests/bootstrap-controller.test.mjs"
       - ".github/workflows/headless-v86-snapshot-roundtrip.yml"
 
 jobs:
@@ -29,8 +31,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
-      - name: Run storage and loader unit tests
-        run: npm run test:headless
+      - name: Run storage, loader, and browser GUI regression tests
+        run: npm run test:headless && node --test ../tests/bootstrap-controller.test.mjs
       - name: Build the Worker-compatible v86 bundle
         run: npm run build:headless-v86
       - name: Compile the snapshot round-trip Worker without deploying
