@@ -121,7 +121,9 @@ export default {
     ]);
 
     const stages: Record<string, Stage> = {};
-    await writeProgress(boot.booted ? "running" : "error", boot.booted ? "linux_booted" : "linux_boot_failed", { guest_booted: boot.booted, boot_error: boot.reason ?? null });
+    let bootScreenExcerpt = "";
+    try { bootScreenExcerpt = emulator?.screen_adapter?.get_text_screen?.().join("\n").slice(-900) ?? ""; } catch {}
+    await writeProgress(boot.booted ? "running" : "error", boot.booted ? "linux_booted" : "linux_boot_failed", { guest_booted: boot.booted, boot_error: boot.reason ?? null, boot_screen_excerpt: bootScreenExcerpt });
     const runStage = async (key: string, command: string, marker: string, timeout: number, asRoot = false): Promise<boolean> => {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
@@ -304,7 +306,7 @@ exit 1`;
     try { screenExcerpt = emulator?.screen_adapter?.get_text_screen?.().join("\\n").slice(-5000) ?? ""; } catch {}
     try { emulator?.stop(); } catch {}
     const passed = guestChecksPassed && roundtripPassed;
-    await writeProgress(passed ? "complete" : "error", passed ? "complete" : "failed", { guest_checks_passed: guestChecksPassed, passed, guest_booted: boot.booted, boot_error: boot.reason ?? null, stages: Object.fromEntries(Object.entries(stages).map(([name, item]) => [name, { attempted: item.attempted, passed: item.passed, error: item.error ?? null }])), snapshot_roundtrip: snapshotRoundtrip });
+    await writeProgress(passed ? "running" : "error", passed ? "snapshot_readback_verified" : "failed", { guest_checks_passed: guestChecksPassed, passed, snapshot_ready_for_dashboard: passed, guest_booted: boot.booted, boot_error: boot.reason ?? null, stages: Object.fromEntries(Object.entries(stages).map(([name, item]) => [name, { attempted: item.attempted, passed: item.passed, error: item.error ?? null }])), snapshot_roundtrip: snapshotRoundtrip });
     return Response.json({
       probe: "tinycore-snapshot-save-readback",
       identity: snapshotIdentity,
