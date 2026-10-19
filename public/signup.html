@@ -7,8 +7,8 @@
 <style>
 :root{color-scheme:dark;--bg:#0b1020;--panel:#121a2b;--line:#26334a;--muted:#a6b3c9;--text:#f3f6fc;--accent:#7dd3fc;--good:#86efac;--warn:#fcd34d;--bad:#fca5a5}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#172744 0%,var(--bg) 55%);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;display:grid;place-items:center;padding:24px}
-main{width:min(100%,560px);background:rgba(18,26,43,.96);border:1px solid var(--line);border-radius:20px;padding:clamp(22px,5vw,40px);box-shadow:0 24px 80px #0005}
-.eyebrow{color:var(--accent);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}h1{font-size:clamp(1.8rem,5vw,2.5rem);line-height:1.1;margin:.7rem 0}p{color:var(--muted)}label{display:block;font-size:.9rem;font-weight:650;margin:18px 0 7px}input{width:100%;background:#0a1020;color:var(--text);border:1px solid #3a4a65;border-radius:10px;padding:13px 14px;font:inherit}input:focus{outline:2px solid var(--accent);outline-offset:2px}button{width:100%;border:0;border-radius:10px;background:var(--accent);color:#06111e;font:inherit;font-weight:700;padding:14px;margin-top:22px;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.subtle{font-size:.86rem}.status{margin-top:24px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#0a1020}.status[hidden]{display:none}.status strong{display:block;margin-bottom:4px}.status-text{color:var(--muted);overflow-wrap:anywhere}.meter{height:5px;background:#25334b;border-radius:9px;margin:14px 0 8px;overflow:hidden}.meter span{display:block;height:100%;width:12%;background:var(--accent);transition:width .3s}.status.good strong{color:var(--good)}.status.bad strong{color:var(--bad)}.status.warn strong{color:var(--warn)}a{color:var(--accent)}.steps{font-size:.84rem;color:var(--muted);margin:14px 0 0;padding-left:20px}.steps li{margin:5px 0}.steps .active{color:var(--text)}.steps .done{color:var(--good)}
+main{width:min(100%,800px);background:rgba(18,26,43,.96);border:1px solid var(--line);border-radius:20px;padding:clamp(22px,5vw,40px);box-shadow:0 24px 80px #0005}
+.eyebrow{color:var(--accent);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}h1{font-size:clamp(1.8rem,5vw,2.5rem);line-height:1.1;margin:.7rem 0}p{color:var(--muted)}label{display:block;font-size:.9rem;font-weight:650;margin:18px 0 7px}input{width:100%;background:#0a1020;color:var(--text);border:1px solid #3a4a65;border-radius:10px;padding:13px 14px;font:inherit}input:focus{outline:2px solid var(--accent);outline-offset:2px}button{width:100%;border:0;border-radius:10px;background:var(--accent);color:#06111e;font:inherit;font-weight:700;padding:14px;margin-top:22px;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.subtle{font-size:.86rem}.status{margin-top:24px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#0a1020}.status[hidden]{display:none}.status strong{display:block;margin-bottom:4px}.status-text{color:var(--muted);overflow-wrap:anywhere}.meter{height:5px;background:#25334b;border-radius:9px;margin:14px 0 8px;overflow:hidden}.meter span{display:block;height:100%;width:12%;background:var(--accent);transition:width .3s}.status.good strong{color:var(--good)}.status.bad strong{color:var(--bad)}.status.warn strong{color:var(--warn)}a{color:var(--accent)}.progress-grid{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:14px;align-items:start;margin-top:14px}.steps{font-size:.84rem;color:var(--muted);margin:0;padding-left:20px;min-width:0}.steps li{margin:5px 0}.steps .active{color:var(--text)}.steps .done{color:var(--good)}.vm-preview{min-width:0;border:1px solid #263b56;border-radius:10px;background:#050a12;overflow:hidden}.vm-preview-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 9px;background:#101b2c;color:#a6b3c9;font-size:.65rem;letter-spacing:.05em}.vm-dot{width:7px;height:7px;border-radius:50%;background:#fcd34d;flex:none}.vm-dot.good{background:#86efac}.vm-dot.bad{background:#fca5a5}.vm-screen{margin:0;padding:9px;height:146px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#86efac;font:10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace}.vm-meta{border-top:1px solid #1c2a3e;padding:6px 9px;color:#a6b3c9;font-size:.68rem;overflow-wrap:anywhere}@media(max-width:620px){body{padding:12px}.progress-grid{grid-template-columns:minmax(0,1fr)}.vm-preview{width:100%}.vm-screen{height:105px}}
 </style>
 </head>
 <body>
@@ -27,7 +27,8 @@ main{width:min(100%,560px);background:rgba(18,26,43,.96);border:1px solid var(--
     <strong id="status-title">Preparing your guest…</strong>
     <div id="status-text" class="status-text">Waiting for the Workerd provisioning job.</div>
     <div class="meter"><span id="meter-fill"></span></div>
-    <ol class="steps" id="steps">
+    <div class="progress-grid">
+      <ol class="steps" id="steps">
       <li data-step="booting_linux">Boot Linux guest</li>
       <li data-step="dhcp">Check network connectivity</li>
       <li data-step="ca_install">Install/check CA certificates</li>
@@ -35,14 +36,20 @@ main{width:min(100%,560px);background:rgba(18,26,43,.96);border:1px solid var(--
       <li data-step="snapshot_saved">Save snapshot</li>
       <li data-step="snapshot_readback_verified">Verify stored snapshot bytes</li>
       <li data-step="complete">Open dashboard</li>
-    </ol>
+      </ol>
+      <aside class="vm-preview" aria-label="Live Workerd VM boot status">
+        <div class="vm-preview-head"><span>WORKERD VM · LIVE</span><span id="vm-dot" class="vm-dot" aria-hidden="true"></span></div>
+        <pre id="vm-screen" class="vm-screen">Waiting for signup API…</pre>
+        <div id="vm-meta" class="vm-meta">VM not started yet</div>
+      </aside>
+    </div>
   </section>
   <p class="subtle">Your password is sent to the signup API over HTTPS and is not saved in this page’s browser storage. Already registered? <a href="/vm.html">Log in to your dashboard</a>.</p>
 </main>
 <script>
 (function(){
 const form=document.getElementById('signup-form'),submit=document.getElementById('submit');
-const status=document.getElementById('status'),title=document.getElementById('status-title'),detail=document.getElementById('status-text'),fill=document.getElementById('meter-fill'),steps=document.getElementById('steps');
+const status=document.getElementById('status'),title=document.getElementById('status-title'),detail=document.getElementById('status-text'),fill=document.getElementById('meter-fill'),steps=document.getElementById('steps'),vmScreen=document.getElementById('vm-screen'),vmMeta=document.getElementById('vm-meta'),vmDot=document.getElementById('vm-dot');
 const labels={
  queued:'Queued. Waiting for a Workerd worker…',starting_vm:'Starting the Linux guest…',booting_linux:'Booting Tiny Core Linux…',
  linux_booted:'Linux booted. Preparing network checks…',resource_preflight:'Checking guest resources…',dhcp:'Checking DHCP and the default route…',
@@ -59,6 +66,11 @@ title.textContent=labels[step]||'Preparing your Linux guest…';
 detail.textContent='Stage: '+step.replaceAll('_',' ')+(progress.updated_at?' · Updated '+new Date(progress.updated_at).toLocaleTimeString():'');
 const index=Math.max(0,order.indexOf(step));fill.style.width=Math.max(12,Math.round((index+1)/order.length*100))+'%';
 for(const item of steps.querySelectorAll('li')){const key=item.dataset.step;item.className=key===step?'active':order.indexOf(key)>=0&&order.indexOf(key)<index?'done':'';}
+const booted=progress.guest_booted===true||index>=order.indexOf('linux_booted');
+vmMeta.textContent=(booted?'Guest shell detected':'VM status: '+step.replaceAll('_',' '))+(progress.updated_at?' · '+new Date(progress.updated_at).toLocaleTimeString():'');
+vmDot.className='vm-dot'+(progress.status==='complete'?' good':progress.status==='error'?' bad':'');
+const excerpt=typeof progress.boot_screen_excerpt==='string'&&progress.boot_screen_excerpt.trim()?progress.boot_screen_excerpt:typeof progress.screen_excerpt==='string'&&progress.screen_excerpt.trim()?progress.screen_excerpt:'';
+vmScreen.textContent=excerpt||({queued:'[provisioner] job queued\n[workerd] waiting to initialize v86…',starting_vm:'[workerd] loading v86 WebAssembly…',booting_linux:'[v86] emulator started\n[Tiny Core] waiting for Linux shell marker…',linux_booted:'tc@box:~$\nLinux shell detected.\nStarting automatic network checks…',dhcp:'tc@box:~$\nChecking DHCP lease and default route…',ca_install:'tc@box:~$\nChecking OpenSSL and CA certificate bundle…',https_preflight:'tc@box:~$\nChecking guest HTTPS connectivity…',snapshot_saved:'[snapshot] writing guest state to R2…',snapshot_readback_verified:'[snapshot] verifying stored bytes and SHA-256…',complete:'[signup] guest checks passed\n[snapshot] saved + digest verified\n[dashboard] opening account VM…',failed:'[signup] provisioning failed\nSee the error details above.'})[step]||('[workerd] '+step.replaceAll('_',' ')+'…');
 }
 async function waitForSnapshot(session){
 let failures=0;
