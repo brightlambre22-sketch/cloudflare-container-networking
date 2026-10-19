@@ -292,7 +292,7 @@ export default {
       });
       if (!verified.ok) return json({ error: "unauthorized" }, 401);
       const object = await env.VM_SNAPSHOTS.get("runtime-jobs/" + body.account_id + ".json");
-      if (!object) return json({ account_id: body.account_id, status: "complete", step: "existing_account", complete: true, ready_to_login: true });
+      if (!object) return json({ account_id: body.account_id, status: "queued", step: "queued", complete: false, ready_to_login: false, note: "Provisioning progress has not been written yet; continue polling." }, 202);
       const progress = await object.json() as Record<string, unknown>;
       return json({ ...progress, complete: progress.status === "complete", ready_to_login: progress.status === "complete" });
     }
