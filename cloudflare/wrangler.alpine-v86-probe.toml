@@ -1,0 +1,13 @@
+name = "alpine-v86-workerd-probe"
+main = "src/alpine-v86-boot-probe-worker.ts"
+compatibility_date = "2026-10-07"
+workers_dev = false
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["src/generated/v86.wasm"]
+fallthrough = true
+
+[assets]
+directory = "../public"
+binding = "ASSETS"
