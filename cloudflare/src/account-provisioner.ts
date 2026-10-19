@@ -12,7 +12,16 @@ interface ProvisioningJob {
   username: string;
   status: "queued" | "running" | "complete" | "error";
   created_at: string;
+  started_at?: string;
+  lease_until?: number;
+  error?: string;
 }
+
+// The headless run can include Linux boot, network checks, certificate setup and
+// a ~96 MB snapshot. If an alarm invocation is interrupted, never immediately
+// start a second emulator for the same account. Keep a lease longer than the
+// known end-to-end test duration and fail closed if that lease expires.
+const PROVISIONING_LEASE_MS = 30 * 60 * 1000;
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store" } });
 }
@@ -29,8 +38,12 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
       return json({ error: "invalid_provisioning_job" }, 400);
     }
     const existing = await this.ctx.storage.get<ProvisioningJob>("job");
-    if (existing?.status === "running" || existing?.status === "queued") {
+    if (existing?.identity === identity &&
+        (existing.status === "running" || existing.status === "queued" || existing.status === "complete")) {
       return json({ accepted: true, status: existing.status, identity: existing.identity }, 202);
+    }
+    if (existing?.status === "running" || existing?.status === "queued") {
+      return json({ error: "another_provisioning_job_is_active" }, 409);
     }
     const job: ProvisioningJob = { identity, username, status: "queued", created_at: new Date().toISOString() };
     await this.ctx.storage.put("job", job);
@@ -43,9 +56,50 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
 
   async alarm(): Promise<void> {
     const job = await this.ctx.storage.get<ProvisioningJob>("job");
-    if (!job || job.status === "complete" || job.status === "error") return;
+    if (!job || job.status === "complete" || job.status === "error") {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+
+    const now = Date.now();
+    if (job.status === "running") {
+      // An alarm retry after a hard termination must not boot another guest.
+      // If the lease is still valid, wait; if it expired, surface a terminal
+      // error rather than creating a duplicate VM/snapshot writer.
+      if ((job.lease_until ?? 0) > now) {
+        await this.ctx.storage.setAlarm(job.lease_until!);
+        return;
+      }
+      const message = "provisioning_lease_expired_without_completion; refusing_duplicate_vm_start";
+      await this.ctx.storage.put("job", { ...job, status: "error", error: message });
+      const progressKey = "runtime-jobs/" + job.identity + ".json";
+      const priorObject = await this.env.VM_SNAPSHOTS.get(progressKey);
+      const priorProgress = priorObject ? await priorObject.json() as Record<string, unknown> : {};
+      await this.env.VM_SNAPSHOTS.put(progressKey, JSON.stringify({
+        ...priorProgress, identity: job.identity, status: "error",
+        error: message, updated_at: new Date().toISOString(),
+      }), { httpMetadata: { contentType: "application/json" } });
+      const authRegistry = this.env.ACCOUNT_REGISTRY.get(this.env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const accountRegistry = this.env.ACCOUNT_REGISTRY.get(this.env.ACCOUNT_REGISTRY.idFromName(job.identity));
+      await accountRegistry.fetch("https://account-registry.internal/account/" + job.identity, {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "error", error: message }),
+      });
+      await authRegistry.fetch("https://account-registry.internal/auth/status", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: job.username, status: "error" }),
+      });
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+
     job.status = "running";
+    job.started_at = new Date().toISOString();
+    job.lease_until = now + PROVISIONING_LEASE_MS;
     await this.ctx.storage.put("job", job);
+    // If the alarm is interrupted by a runtime limit, Cloudflare can retry it.
+    // The persisted lease makes that retry wait instead of booting another VM.
+    await this.ctx.storage.setAlarm(job.lease_until);
     const auth = this.env.ACCOUNT_REGISTRY.get(this.env.ACCOUNT_REGISTRY.idFromName("auth-users"));
     const account = this.env.ACCOUNT_REGISTRY.get(this.env.ACCOUNT_REGISTRY.idFromName(job.identity));
     try {
@@ -76,11 +130,14 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
         complete: true, ready_to_login: true, updated_at: new Date().toISOString(),
       }), { httpMetadata: { contentType: "application/json" } });
       job.status = "complete";
+      delete job.lease_until;
       await this.ctx.storage.put("job", job);
+      await this.ctx.storage.deleteAlarm();
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).slice(0, 240);
       job.status = "error";
-      await this.ctx.storage.put("job", { ...job, error: message });
+      await this.ctx.storage.put("job", { ...job, status: "error", error: message, lease_until: undefined });
+      await this.ctx.storage.deleteAlarm();
       await account.fetch("https://account-registry.internal/account/" + job.identity, {
         method: "PATCH", headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: "error", error: message }),
