@@ -13,6 +13,9 @@ type ProbeResult = {
   network_excerpt: string;
 };
 
+const ALPINE_ISO_URL = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86/alpine-virt-3.24.2-x86.iso";
+const ALPINE_ISO_PATH = "/boot/alpine-virt-3.24.2-x86.iso";
+
 export default {
   async fetch(request: Request, env: { ASSETS: Fetcher; NETWORK_RELAY_URL?: string }) {
     if (new URL(request.url).pathname !== "/probe") {
@@ -52,7 +55,11 @@ export default {
       async send() {
         try {
           const target = new URL(this.url, request.url);
-          const response = await env.ASSETS.fetch(new Request(target.toString(), { method: this.method }));
+          // Keep the 49 MiB ISO out of the Workers static-assets bundle (25 MiB/file limit).
+          // BIOS files remain served from the local ASSETS binding.
+          const response = target.pathname === ALPINE_ISO_PATH
+            ? await fetch(ALPINE_ISO_URL)
+            : await env.ASSETS.fetch(new Request(target.toString(), { method: this.method }));
           this.status = response.status;
           if (this.responseType === "arraybuffer") {
             this.response = await response.arrayBuffer();
@@ -74,15 +81,15 @@ export default {
     try {
       emulator = new V86({
         wasm_fn: createCompiledV86WasmFn(),
-        memory_size: 256 * 1024 * 1024,
+        memory_size: 128 * 1024 * 1024,
         vga_memory_size: 1024 * 1024,
         bios: { url: new URL("/bios/seabios.bin", base).toString() },
         vga_bios: { url: new URL("/bios/vgabios.bin", base).toString() },
-        cdrom: { url: new URL("/boot/alpine-standard-3.24.2-x86.iso", base).toString() },
+        cdrom: { url: new URL(ALPINE_ISO_PATH, base).toString() },
         autostart: true,
         disable_keyboard: false,
         disable_mouse: true,
-        net_device: { type: "ne2k", relay_url: relayUrl },
+        net_device: { type: "virtio", relay_url: relayUrl },
       } as ConstructorParameters<typeof V86>[0]);
 
       await new Promise<void>((resolve, reject) => {
