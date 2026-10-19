@@ -120,19 +120,29 @@ export default {
     let stopBootHeartbeat = false;
     const bootHeartbeat = (async () => {
       const startedAt = Date.now();
+      const bootStartedAt = new Date(startedAt).toISOString();
+      let previousExcerpt: string | undefined;
+      let screenLastChangedAt = startedAt;
       while (!stopBootHeartbeat) {
         await new Promise<void>((resolve) => setTimeout(resolve, 5000));
         if (stopBootHeartbeat) break;
         let excerpt = "";
         try { excerpt = emulator?.screen_adapter?.get_text_screen?.().join("\n").slice(-900) ?? ""; } catch {}
+        const now = Date.now();
+        if (excerpt !== previousExcerpt) {
+          previousExcerpt = excerpt;
+          screenLastChangedAt = now;
+        }
         try {
           await writeProgress("running", "booting_linux", {
             wasm_module_loaded: wasm.module_loaded,
             emulator_loaded: loaded,
             emulator_started: started,
-            boot_wait_seconds: Math.floor((Date.now() - startedAt) / 1000),
+            boot_started_at: bootStartedAt,
+            boot_wait_seconds: Math.floor((now - startedAt) / 1000),
+            boot_screen_unchanged_seconds: Math.floor((now - screenLastChangedAt) / 1000),
             boot_screen_excerpt: excerpt,
-            boot_heartbeat_at: new Date().toISOString(),
+            boot_heartbeat_at: new Date(now).toISOString(),
           });
         } catch {
           // A transient progress-store failure must not stop the boot probe itself.
