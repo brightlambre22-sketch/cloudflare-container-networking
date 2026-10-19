@@ -1,0 +1,80 @@
+name = "cloudflare-container-networking"
+main = "src/index.ts"
+compatibility_date = "2026-10-07"
+workers_dev = true
+
+# PAID-PLAN TEST CONFIG ONLY.
+# Requires a Cloudflare Workers Paid account. Do not use this config on Free:
+# Free accounts reject explicit CPU limits (API error 100328).
+# 300,000 ms is the maximum per-invocation CPU budget, not a one-hour wall-time
+# allowance. The AccountProvisioner Durable Object alarm is still limited to
+# 15 minutes wall time; long certificate/network stages need Workflow orchestration.
+[limits]
+cpu_ms = 300000
+
+[build]
+command = "npm install --no-audit --no-fund && npm run build:headless-v86"
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["src/generated/v86.wasm"]
+fallthrough = true
+
+[assets]
+directory = "../public"
+binding = "ASSETS"
+
+[[r2_buckets]]
+binding = "VM_SNAPSHOTS"
+bucket_name = "cloudflare-container-vm-snapshots"
+
+[[durable_objects.bindings]]
+name = "TUNNEL_HUB"
+class_name = "TunnelHub"
+
+[[durable_objects.bindings]]
+name = "NODE_REGISTRY"
+class_name = "NodeRegistry"
+
+[[durable_objects.bindings]]
+name = "NODE_RUNTIME"
+class_name = "NodeRuntime"
+
+[[durable_objects.bindings]]
+name = "VM_EXECUTION"
+class_name = "VmExecution"
+
+[[durable_objects.bindings]]
+name = "ACCOUNT_REGISTRY"
+class_name = "AccountRegistry"
+
+[exports.TunnelHub]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.NodeRegistry]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.NodeRuntime]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.VmExecution]
+type = "durable-object"
+storage = "sqlite"
+
+[vars]
+VM_BASELINE_ID = "v2"
+
+[exports.AccountRegistry]
+type = "durable-object"
+storage = "sqlite"
+
+[[durable_objects.bindings]]
+name = "ACCOUNT_PROVISIONER"
+class_name = "AccountProvisioner"
+
+[exports.AccountProvisioner]
+type = "durable-object"
+storage = "sqlite"
