@@ -88,7 +88,7 @@ function enableMonotonicV86ClockIfFrozen() {
   const nativeNow = perf.now.bind(perf);
   const first = nativeNow();
   let changed = false;
-  for (let i = 0; i < 20_000; i++) {
+  for (let i = 0; i < 64; i++) {
     if (nativeNow() !== first) {
       changed = true;
       break;
