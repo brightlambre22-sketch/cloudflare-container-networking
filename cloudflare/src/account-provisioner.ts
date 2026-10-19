@@ -53,9 +53,11 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ identity: job.identity }),
       }), this.env);
-      const result = await response.json() as { passed?: boolean; boot_error?: string };
+      const result = await response.json() as { passed?: boolean; boot_error?: string; stages?: Record<string, { passed?: boolean; error?: string }> };
       if (!response.ok || result.passed !== true) {
-        throw new Error(typeof result.boot_error === "string" ? result.boot_error : "headless_vm_roundtrip_failed");
+        const failedStage = Object.entries(result.stages ?? {}).find(([, stage]) => stage.passed === false);
+        const stageError = failedStage ? failedStage[0] + ":" + (failedStage[1].error ?? "stage_failed") : undefined;
+        throw new Error(typeof result.boot_error === "string" ? result.boot_error : stageError ?? "headless_vm_roundtrip_failed");
       }
       const accountReady = await account.fetch("https://account-registry.internal/account/" + job.identity, {
         method: "PATCH", headers: { "content-type": "application/json" },
@@ -66,6 +68,13 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
         body: JSON.stringify({ username: job.username, status: "ready" }),
       });
       if (!accountReady.ok || !authReady.ok) throw new Error("account_ready_transition_failed");
+      const progressKey = "runtime-jobs/" + job.identity + ".json";
+      const progressObject = await this.env.VM_SNAPSHOTS.get(progressKey);
+      const priorProgress = progressObject ? await progressObject.json() as Record<string, unknown> : {};
+      await this.env.VM_SNAPSHOTS.put(progressKey, JSON.stringify({
+        ...priorProgress, identity: job.identity, status: "complete", step: "complete",
+        complete: true, ready_to_login: true, updated_at: new Date().toISOString(),
+      }), { httpMetadata: { contentType: "application/json" } });
       job.status = "complete";
       await this.ctx.storage.put("job", job);
     } catch (error) {
