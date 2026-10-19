@@ -69,7 +69,8 @@ const lastUpdate=Number.isFinite(heartbeat)?heartbeat:updated;
 const staleMs=Number.isFinite(lastUpdate)?Math.max(0,Date.now()-lastUpdate):0;
 const staleNote=progress.status==='running'&&staleMs>180000?' · WARNING: no server progress update for '+Math.floor(staleMs/60000)+' min; waiting for the provisioning watchdog':'';
 const bootWait=Number.isFinite(Number(progress.boot_wait_seconds))?' · guest boot '+Number(progress.boot_wait_seconds)+'s':'';
-detail.textContent='Stage: '+step.replaceAll('_',' ')+(progress.updated_at?' · Updated '+new Date(progress.updated_at).toLocaleTimeString():'')+bootWait+staleNote;
+const screenStall=Number.isFinite(Number(progress.boot_screen_unchanged_seconds))&&Number(progress.boot_screen_unchanged_seconds)>=30?' · VGA screen unchanged '+Number(progress.boot_screen_unchanged_seconds)+'s':'';
+detail.textContent='Stage: '+step.replaceAll('_',' ')+(progress.updated_at?' · Updated '+new Date(progress.updated_at).toLocaleTimeString():'')+bootWait+screenStall+staleNote;
 const index=Math.max(0,order.indexOf(step));fill.style.width=Math.max(12,Math.round((index+1)/order.length*100))+'%';
 for(const item of steps.querySelectorAll('li')){const key=item.dataset.step;item.className=key===step?'active':order.indexOf(key)>=0&&order.indexOf(key)<index?'done':'';}
 const booted=progress.guest_booted===true||index>=order.indexOf('linux_booted');
