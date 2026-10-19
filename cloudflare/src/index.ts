@@ -277,74 +277,28 @@ export default {
       });
       if (!signupSession.ok) return json({ error: "account_created_but_signup_session_failed" }, 502);
 
-      const accountPrefix = "vm-snapshots/" + accountId + "/";
-      const sourceGenerationPrefix = baselinePrefix + baseline.generation + "/";
-      try {
-        const count = baseline.chunks as number;
-        for (let part = 0; part < count; part++) {
-          const expectedBytes = Math.min(8388608, (baseline.byteLength as number) - part * 8388608);
-          const sourceKey = sourceGenerationPrefix + part + ".bin";
-          const source = await env.VM_SNAPSHOTS.get(sourceKey);
-          if (!source || source.size !== expectedBytes) throw new Error("admin_baseline_chunk_missing_or_invalid_" + part);
-          const targetKey = accountPrefix + generation + "/" + part + ".bin";
-          await env.VM_SNAPSHOTS.put(targetKey, source.body, {
-            httpMetadata: { contentType: "application/octet-stream" },
-          });
-          const copied = await env.VM_SNAPSHOTS.head(targetKey);
-          if (!copied || copied.size !== expectedBytes) throw new Error("account_snapshot_chunk_copy_verification_failed_" + part);
-        }
-        const savedAt = new Date().toISOString();
-        const clonedManifest = {
-          version: 1, generation, chunks: count, byteLength: baseline.byteLength,
-          savedAt, baselineId, baselineGeneration: baseline.generation,
-          clonedFrom: baselinePrefix + "manifest.json",
-          baselineSavedAt: typeof baseline.savedAt === "string" ? baseline.savedAt : null,
-          checks: baseline.checks ?? null,
-        };
-        // Publish the manifest only after every copied chunk has passed size verification.
-        await env.VM_SNAPSHOTS.put(accountPrefix + "manifest.json", JSON.stringify(clonedManifest), {
-          httpMetadata: { contentType: "application/json" },
-          customMetadata: { savedAt, baselineId, baselineGeneration: String(baseline.generation) },
-        });
-        const ready = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
-          method: "PATCH", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status: "ready" }),
-        });
-        const authReady = await authRegistry.fetch("https://account-registry.internal/auth/status", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username, status: "ready" }),
-        });
-        if (!ready.ok || !authReady.ok) throw new Error("account_ready_transition_failed");
-        await env.VM_SNAPSHOTS.put("runtime-jobs/" + accountId + ".json", JSON.stringify({
-          identity: accountId, username, status: "complete", step: "complete",
-          complete: true, ready_to_login: true, snapshot_cloned: true,
-          baseline_id: baselineId, baseline_generation: baseline.generation,
-          generation, chunks: count, byte_length: baseline.byteLength,
-          created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        }), { httpMetadata: { contentType: "application/json" } });
-      } catch (error) {
-        let cursor: string | undefined;
-        do {
-          const page = await env.VM_SNAPSHOTS.list({ prefix: accountPrefix, limit: 1000, ...(cursor ? { cursor } : {}) });
-          if (page.objects.length) await env.VM_SNAPSHOTS.delete(page.objects.map((object) => object.key));
-          cursor = page.truncated ? page.cursor : undefined;
-        } while (cursor);
+      const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
+      const queued = await provisioner.fetch("https://account-provisioner.internal/start", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identity: accountId, username, baseline_id: baselineId }),
+      });
+      if (!queued.ok || queued.status !== 202) {
+        const message = await queued.text().catch(() => "snapshot_clone_queue_failed");
         await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
           method: "PATCH", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) }),
+          body: JSON.stringify({ status: "error", error: "snapshot_clone_queue_failed" }),
         });
         await authRegistry.fetch("https://account-registry.internal/auth/status", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ username, status: "error" }),
         });
-        const message = (error instanceof Error ? error.message : String(error)).slice(0, 240);
-        return json({ error: "account_snapshot_clone_failed", detail: message }, 502);
+        return json({ error: "snapshot_clone_queue_failed", detail: message.slice(0, 200) }, 502);
       }
 
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
-      return json({ ...session, username, status: "complete", snapshot_identity: accountId,
-        snapshot_cloned: true, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
-        provisioning: "The verified Admin snapshot was copied to this account; Linux was not booted during signup." }, 201);
+      return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+        snapshot_cloned: false, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
+        provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." }, 202);
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
