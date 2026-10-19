@@ -166,7 +166,7 @@ requestAnimationFrame(mirrorLoop);
 const diagnosticCommand=[
   'echo "--- NETWORK RECOVERY ---"',
   'sudo -n /sbin/modprobe ne2k-pci 2>&1; sudo -n /sbin/modprobe 8390 2>&1',
-  'sudo -n sh -c \'set +e; iface=eth0; /sbin/ifconfig "$iface" up; tries=0; while [ "$tries" -lt 3 ]; do echo DHCP_ATTEMPT=$((tries+1)); /sbin/udhcpc -f -n -q  -i "$iface"; rc=$?; echo DHCP_CLIENT_RC=$rc; /sbin/ifconfig "$iface"; /sbin/route -n; if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_RECOVERY_OK; exit 0; fi; echo DHCP_RETRYING_NO_LEASE; sleep 3; done'; echo DHCP_RECOVERY_RC=$?',
+  'sudo -n sh -c \'set +e; iface=eth0; /sbin/ifconfig "$iface" up; tries=0; while :; do echo DHCP_ATTEMPT; /sbin/udhcpc -f -n -q  -i "$iface"; rc=$?; echo DHCP_CLIENT_RC=$rc; /sbin/ifconfig "$iface"; /sbin/route -n; if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_RECOVERY_OK; exit 0; fi; echo DHCP_RETRYING_NO_LEASE; sleep 3; done'; echo DHCP_RECOVERY_RC=$?',
   'echo "--- network interface counters ---"; /sbin/ifconfig -a 2>&1; echo "--- route table ---"; /sbin/route -n 2>&1; echo "--- DNS configuration ---"; cat /etc/resolv.conf 2>&1',
   'if ! /sbin/route -n | grep -q "0.0.0.0"; then echo NO_DEFAULT_GATEWAY; else echo DEFAULT_GATEWAY_PRESENT; fi',
   'if /sbin/route -n | grep -q "0.0.0.0"; then sudo -n sh -c "printf \'nameserver 10.5.0.1\\nnameserver 8.8.8.8\\n\' > /etc/resolv.conf"; fi; echo "--- DNS lookup ---"; if command -v nslookup >/dev/null 2>&1; then nslookup raw.githubusercontent.com; echo DNS_TEST_RC=$?; else wget -T 10 -t 1 -q -O /dev/null https://raw.githubusercontent.com/; echo DNS_TEST_RC=$?; fi',
