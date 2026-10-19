@@ -52,6 +52,14 @@ test("startup prompt detection supports changed hostnames and explicitly wakes t
   assert.ok(html.includes("await sendVmCommand('\\n')"));
 });
 
+test("GUI startup handles optional Syslinux boot prompt and reports a bounded boot timeout", () => {
+  assert.ok(html.includes("const BOOT_TIMEOUT_MS=300000"), "GUI should allow Tiny Core up to five minutes to reach a shell");
+  assert.ok(html.includes("/^boot:\\s*$/i.test(line.trim())"), "GUI should recognize a standalone Syslinux boot prompt");
+  assert.ok(html.includes("keyboard_send_scancodes([0x1C,0x9C])"), "GUI should press Enter only when a boot prompt is visible");
+  assert.ok(html.includes("BOOT TIMEOUT after "), "GUI should capture the guest screen if boot does not complete");
+  assert.ok(html.includes("proofDeadline=Date.now()+30000"), "snapshot login proof should fail visibly instead of looping forever");
+});
+
 test("startup completion markers match the sequential command controller", () => {
   const normalized = html.replace(/"\s*"/g, "");
   for (const marker of [
