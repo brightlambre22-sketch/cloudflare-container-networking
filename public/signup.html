@@ -65,7 +65,7 @@ const step=String(progress.step||progress.status||'queued');
 title.textContent=labels[step]||'Preparing your Linux guest…';
 const heartbeat=typeof progress.boot_heartbeat_at==='string'?Date.parse(progress.boot_heartbeat_at):NaN;
 const updated=typeof progress.updated_at==='string'?Date.parse(progress.updated_at):NaN;
-const lastUpdate=Number.isFinite(heartbeat)?heartbeat:updated;
+const lastUpdate=Number.isFinite(heartbeat)&&Number.isFinite(updated)?Math.max(heartbeat,updated):Number.isFinite(heartbeat)?heartbeat:updated;
 const staleMs=Number.isFinite(lastUpdate)?Math.max(0,Date.now()-lastUpdate):0;
 const staleNote=progress.status==='running'&&staleMs>180000?' · WARNING: no server progress update for '+Math.floor(staleMs/60000)+' min; waiting for the provisioning watchdog':'';
 const bootWait=Number.isFinite(Number(progress.boot_wait_seconds))?' · guest boot '+Number(progress.boot_wait_seconds)+'s':'';
