@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-10-07"
 workers_dev = true
 
+# The v86 emulator executes a full Linux guest in JavaScript/WASM. The default
+# 30-second CPU budget is too small for kernel boot; allow the documented paid-plan
+# maximum so the boot monitor can continue publishing progress instead of going stale.
+[limits]
+cpu_ms = 300000
+
 # Generate the v86 bundle and compiled WASM before Wrangler resolves Worker imports.
 # Required when deploying directly with `wrangler deploy` from Cloudflare's build environment.
 [build]
