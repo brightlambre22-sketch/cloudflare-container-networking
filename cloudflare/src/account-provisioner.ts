@@ -137,7 +137,6 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
       const message = (error instanceof Error ? error.message : String(error)).slice(0, 240);
       job.status = "error";
       await this.ctx.storage.put("job", { ...job, status: "error", error: message, lease_until: undefined });
-      await this.ctx.storage.deleteAlarm();
       await account.fetch("https://account-registry.internal/account/" + job.identity, {
         method: "PATCH", headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: "error", error: message }),
@@ -154,6 +153,7 @@ export class AccountProvisioner extends DurableObject<ProvisionerEnv> {
         step: typeof priorProgress.step === "string" ? priorProgress.step : "failed",
         error: message, updated_at: new Date().toISOString(),
       }), { httpMetadata: { contentType: "application/json" } });
+      await this.ctx.storage.deleteAlarm();
     }
   }
 }
