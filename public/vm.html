@@ -164,13 +164,15 @@ function mirrorLoop(){mirror();requestAnimationFrame(mirrorLoop)}
 requestAnimationFrame(mirrorLoop);
 
 const diagnosticCommand=[
-  'echo RESTORE_NETWORK_RECOVERY',
-  'sudo -n /sbin/modprobe ne2k-pci; sudo -n /sbin/modprobe 8390',
-  'sudo -n /sbin/ifconfig eth0 up; sudo -n /sbin/udhcpc -n -q -t 5 -T 3 -i eth0; echo DHCP_RC=$?',
-  'sudo -n /sbin/ifconfig eth0; sudo -n /sbin/route -n',
-  'wget -T 10 -t 1 -q -O /dev/null ${apiUrl}/health; echo DNS_HTTPS_RC=$?',
-  'sudo -n sh -c "echo nameserver 10.5.0.1 > /etc/resolv.conf"; sudo -n sh -c "echo nameserver 8.8.8.8 >> /etc/resolv.conf"',
-  'wget -T 15 -t 2 -q -O /dev/null ${apiUrl}/health; echo DNS_HTTPS_RETRY_RC=$?',
+  'echo "--- NETWORK RECOVERY ---"',
+  'sudo -n /sbin/modprobe ne2k-pci 2>&1; sudo -n /sbin/modprobe 8390 2>&1',
+  'sudo -n sh -c \'set +e; iface=eth0; /sbin/ifconfig "$iface" up; tries=0; while [ "$tries" -lt 3 ]; do echo DHCP_ATTEMPT=$((tries+1)); /sbin/udhcpc -f -n -q -t 5 -T 3 -i "$iface"; rc=$?; echo DHCP_CLIENT_RC=$rc; /sbin/ifconfig "$iface"; /sbin/route -n; if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then echo DHCP_RECOVERY_OK; exit 0; fi; tries=$((tries+1)); sleep 2; done; echo NO_DEFAULT_GATEWAY; exit 1'; echo DHCP_RECOVERY_RC=$?',
+  'echo "--- network interface counters ---"; /sbin/ifconfig -a 2>&1; echo "--- route table ---"; /sbin/route -n 2>&1; echo "--- DNS configuration ---"; cat /etc/resolv.conf 2>&1',
+  'if ! /sbin/route -n | grep -q "0.0.0.0"; then echo NO_DEFAULT_GATEWAY; else echo DEFAULT_GATEWAY_PRESENT; fi',
+  'if /sbin/route -n | grep -q "0.0.0.0"; then sudo -n sh -c "printf \'nameserver 10.5.0.1\\nnameserver 8.8.8.8\\n\' > /etc/resolv.conf"; fi; echo "--- DNS lookup ---"; if command -v nslookup >/dev/null 2>&1; then nslookup raw.githubusercontent.com; echo DNS_TEST_RC=$?; else wget -T 10 -t 1 -q -O /dev/null https://raw.githubusercontent.com/; echo DNS_TEST_RC=$?; fi',
+  'echo "--- outbound HTTPS: Worker health ---"; wget -T 15 -t 1 -S -O /dev/null ${apiUrl}/health 2>&1; echo WORKER_HTTPS_RC=$?',
+  'echo "--- outbound HTTPS: bootstrap host ---"; wget -T 15 -t 1 -S -O /dev/null https://raw.githubusercontent.com/ 2>&1; echo GITHUB_HTTPS_RC=$?',
+  'if /sbin/route -n | grep -q "0.0.0.0" && wget -T 15 -t 1 -q -O /dev/null ${apiUrl}/health; then echo NETWORK_RECOVERY_PASS; else echo NETWORK_RECOVERY_FAIL; fi',
   'wget -T 15 -t 2 -q -O /tmp/network-test.sh ${apiUrl}/runner/tinycore/network-test.sh; echo NETWORK_TEST_DOWNLOAD_RC=$?',
   'if [ -s /tmp/network-test.sh ]; then sh /tmp/network-test.sh; echo NETWORK_TEST_SCRIPT_RC=$?; else echo NETWORK_TEST_SCRIPT_RC=1; fi'
 ].join('\n');
@@ -195,7 +197,7 @@ break;
 await new Promise(resolve=>requestAnimationFrame(resolve));
 }
 }catch(e){report('\n*** DIAGNOSTIC FAILED: '+e.message+' ***\n')}
-finally{manualCommandRunning=false;if(saveAfter&&bootComplete){const tail=screenText().slice(-12000);const healthy=/DNS_HTTPS_RETRY_RC=0/.test(tail)&&/NETWORK_TEST_DOWNLOAD_RC=0/.test(tail)&&/NETWORK_TEST_SCRIPT_RC=0/.test(tail);if(!healthy){stateText('Network recovery/test failed; existing server snapshot preserved and autosave remains paused.');statusText('Restored VM is online only if DNS/HTTPS checks pass. The failed network test was not saved over the last known snapshot.');report('\\n*** SNAPSHOT PROTECTION: network recovery did not pass; refusing to overwrite the saved snapshot. See DNS, DHCP and network-test markers above. ***\\n');return}const saved=await saveVmState(false);if(saved){if(!autosaveTimer)autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);statusText('Network recovery and test passed; restored VM state saved. Autosave enabled.')}else{statusText('Network test passed, but saving the refreshed VM state failed. Existing server snapshot remains available.')}}}
+finally{manualCommandRunning=false;if(saveAfter&&bootComplete){const tail=screenText().slice(-12000);const healthy=/DHCP_RECOVERY_RC=0/.test(tail)&&/DHCP_RECOVERY_OK/.test(tail)&&/DEFAULT_GATEWAY_PRESENT/.test(tail)&&/NETWORK_RECOVERY_PASS/.test(tail)&&/WORKER_HTTPS_RC=0/.test(tail)&&/NETWORK_TEST_DOWNLOAD_RC=0/.test(tail)&&/NETWORK_TEST_SCRIPT_RC=0/.test(tail);if(!healthy){stateText('Network recovery/test failed; existing server snapshot preserved and autosave remains paused.');statusText('Restored VM is online only if DNS/HTTPS checks pass. The failed network test was not saved over the last known snapshot.');report('\\n*** SNAPSHOT PROTECTION: network recovery did not pass; refusing to overwrite the saved snapshot. See DNS, DHCP and network-test markers above. ***\\n');return}const saved=await saveVmState(false);if(saved){if(!autosaveTimer)autosaveTimer=setInterval(()=>saveVmState(false),5*60*1000);statusText('Network recovery and test passed; restored VM state saved. Autosave enabled.')}else{statusText('Network test passed, but saving the refreshed VM state failed. Existing server snapshot remains available.')}}}
 })();
 }
 document.getElementById('run-network-test').onclick=function(){if(bootstrapStarted||manualCommandRunning){statusText('Startup already owns the shell; refusing to overlap commands.');return}runDiagnostic('MANUAL NETWORK TEST');statusText('Network test running; waiting for the shell to finish.')};
