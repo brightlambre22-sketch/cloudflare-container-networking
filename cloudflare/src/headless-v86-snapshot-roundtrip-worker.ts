@@ -115,15 +115,50 @@ export default {
       finishBoot({ booted: false, reason: "constructor_error: " + (error instanceof Error ? error.message : String(error)).slice(0, 250) });
     }
 
+    // Publish real VGA text while the guest boots. Previously the page stayed on
+    // the static "emulator started" fallback until the entire shell wait ended.
+    let stopBootHeartbeat = false;
+    const bootHeartbeat = (async () => {
+      const startedAt = Date.now();
+      while (!stopBootHeartbeat) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+        if (stopBootHeartbeat) break;
+        let excerpt = "";
+        try { excerpt = emulator?.screen_adapter?.get_text_screen?.().join("\n").slice(-900) ?? ""; } catch {}
+        try {
+          await writeProgress("running", "booting_linux", {
+            wasm_module_loaded: wasm.module_loaded,
+            emulator_loaded: loaded,
+            emulator_started: started,
+            boot_wait_seconds: Math.floor((Date.now() - startedAt) / 1000),
+            boot_screen_excerpt: excerpt,
+            boot_heartbeat_at: new Date().toISOString(),
+          });
+        } catch {
+          // A transient progress-store failure must not stop the boot probe itself.
+        }
+      }
+    })();
+
     const boot = await Promise.race([
       bootObserved,
-      new Promise<{ booted: boolean; reason?: string }>((resolve) => setTimeout(() => resolve({ booted: false, reason: "guest_boot_timeout" }), BOOT_TIMEOUT_MS)),
+      new Promise<{ booted: boolean; reason?: string }>((resolve) => setTimeout(
+        () => resolve({ booted: false, reason: "guest_boot_timeout" }),
+        BOOT_TIMEOUT_MS + BOOTLOADER_PROMPT_TIMEOUT_MS + 15000,
+      )),
     ]);
+    stopBootHeartbeat = true;
+    await bootHeartbeat;
 
     const stages: Record<string, Stage> = {};
     let bootScreenExcerpt = "";
     try { bootScreenExcerpt = emulator?.screen_adapter?.get_text_screen?.().join("\n").slice(-900) ?? ""; } catch {}
-    await writeProgress(boot.booted ? "running" : "error", boot.booted ? "linux_booted" : "linux_boot_failed", { guest_booted: boot.booted, boot_error: boot.reason ?? null, boot_screen_excerpt: bootScreenExcerpt });
+    await writeProgress(boot.booted ? "running" : "error", boot.booted ? "linux_booted" : "linux_boot_failed", {
+      guest_booted: boot.booted,
+      boot_error: boot.reason ?? null,
+      boot_screen_excerpt: bootScreenExcerpt,
+      boot_finished_at: new Date().toISOString(),
+    });
     const runStage = async (key: string, command: string, marker: string, timeout: number, asRoot = false): Promise<boolean> => {
       const stage: Stage = { attempted: true, passed: false, marker };
       stages[key] = stage;
