@@ -52,6 +52,14 @@ test("startup prompt detection supports changed hostnames and explicitly wakes t
   assert.ok(html.includes("await sendVmCommand('\\n')"));
 });
 
+test("GUI startup handles optional Syslinux boot prompt and reports a bounded boot timeout", () => {
+  assert.ok(html.includes("const BOOT_TIMEOUT_MS=300000"), "GUI should allow Tiny Core up to five minutes to reach a shell");
+  assert.ok(html.includes("/^boot:\\s*$/i.test(line.trim())"), "GUI should recognize a standalone Syslinux boot prompt");
+  assert.ok(html.includes("keyboard_send_scancodes([0x1C,0x9C])"), "GUI should press Enter only when a boot prompt is visible");
+  assert.ok(html.includes("BOOT TIMEOUT after "), "GUI should capture the guest screen if boot does not complete");
+  assert.ok(html.includes("proofDeadline=Date.now()+30000"), "snapshot login proof should fail visibly instead of looping forever");
+});
+
 test("startup completion markers match the sequential command controller", () => {
   const normalized = html.replace(/"\s*"/g, "");
   for (const marker of [
@@ -120,7 +128,9 @@ test("startup keeps DHCP retrying and bounds individual HTTPS probes", () => {
   const accountUiStart = html.indexOf("function beginAccountSession");
   assert.ok(startupStart >= 0 && accountUiStart > startupStart, "startup and account UI sections should be identifiable");
   assert.ok(!html.slice(startupStart, accountUiStart).includes("setTimeout("), "VM startup must not use JavaScript timeouts");
-  assert.ok(!html.includes("BOOT_TIMEOUT_MS"));
+  const bootMonitorStart = html.indexOf("function startBootMonitor");
+  assert.ok(bootMonitorStart > startupStart && bootMonitorStart < accountUiStart, "boot monitor should remain separate from the network command controller");
+  assert.ok(!html.slice(startupStart, bootMonitorStart).includes("BOOT_TIMEOUT_MS"), "boot timeout should not be inside the sequential network command controller");
   assert.ok(html.includes('wget -T 10 -t 1 -S -O /dev/null ${apiUrl}/health'));
   assert.ok(!/udhcpc[^\n]*\s-t\s*[0-9]/.test(html), "DHCP should not have a retry-count timeout");
   assert.ok(html.includes('while [ "$tries" -lt 6 ]; do if wget -T 10 -t 1 -S -O /dev/null ${apiUrl}/health'), "HTTPS preflight should retry a bounded number of timed probes");

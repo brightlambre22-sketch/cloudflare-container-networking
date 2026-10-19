@@ -10,6 +10,11 @@ on:
       - "cloudflare/src/headless-v86-wasm.ts"
       - "cloudflare/wrangler.headless-v86-roundtrip.toml"
       - "cloudflare/package.json"
+      - "runner/tinycore/**"
+      - "public/runner/tinycore/**"
+      - "public/boot/**"
+      - "public/vm.html"
+      - "tests/bootstrap-controller.test.mjs"
       - ".github/workflows/headless-v86-snapshot-roundtrip.yml"
 
 jobs:
@@ -26,8 +31,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
-      - name: Run storage and loader unit tests
-        run: npm run test:headless
+      - name: Run storage, loader, and browser GUI regression tests
+        run: npm run test:headless && node --test ../tests/bootstrap-controller.test.mjs
       - name: Build the Worker-compatible v86 bundle
         run: npm run build:headless-v86
       - name: Compile the snapshot round-trip Worker without deploying
@@ -68,6 +73,6 @@ jobs:
             cat /tmp/v86-roundtrip-workerd.log
             exit "$curl_rc"
           fi
-          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/v86-roundtrip-result.json", "utf8")); if (r.probe !== "tinycore-snapshot-save-readback-restore" || r.runtime !== "workerd" || r.passed !== true || r.snapshot_roundtrip?.saved !== true || r.snapshot_roundtrip?.readback !== true || r.snapshot_roundtrip?.restored !== true || r.snapshot_roundtrip?.marker_verified !== true) { console.error("Guest snapshot round-trip acceptance failed", r); process.exit(1); }'
+          node --input-type=module -e 'import fs from "node:fs"; const r = JSON.parse(fs.readFileSync("/tmp/v86-roundtrip-result.json", "utf8")); const s = r.snapshot_roundtrip ?? {}; const ok = r.probe === "tinycore-snapshot-save-readback" && r.runtime === "workerd" && r.passed === true && r.guest_booted === true && r.guest_checks_passed === true && s.saved === true && s.readback === true && s.readback_digest_verified === true && s.restore_deferred_to_dashboard === true; if (!ok) { console.error("Guest snapshot save/read-back acceptance failed", r); process.exit(1); } console.log("Guest boot, network checks, snapshot save, and R2 digest-verified read-back passed; browser GUI restore remains a separate acceptance gate.");'
           cleanup
           trap - EXIT
