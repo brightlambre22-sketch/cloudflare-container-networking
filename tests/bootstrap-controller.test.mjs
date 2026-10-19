@@ -11,7 +11,12 @@ test("inline browser scripts parse", () => {
   assert.ok(scripts.some((match) => match[1].trim()), "expected an inline script");
   for (const [index, match] of scripts.entries()) {
     const source = match[1].trim();
-    if (source) assert.doesNotThrow(() => new vm.Script(source, { filename: "public-vm-inline-" + (index + 1) + ".js" }));
+    if (!source) continue;
+    try {
+      new vm.Script(source, { filename: "public-vm-inline-" + (index + 1) + ".js" });
+    } catch (error) {
+      assert.fail("inline script " + (index + 1) + " failed to parse: " + (error && error.stack ? error.stack : String(error)));
+    }
   }
 });
 
@@ -95,10 +100,12 @@ test("TLS installs run in the foreground before HTTPS and certificate checks", (
   assert.ok(!html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
   assert.ok(!html.includes("tce-load -i ca-certificates >/tmp/ca.log 2>&1 &"));
   assert.ok(html.indexOf("tce-load -i openssl-1.1.1") < html.indexOf("tce-load -i ca-certificates"));
-  const commands = html.match(/const commands=\[([\s\S]*?)\];/);
-  assert.ok(commands, "startup command list should be present");
-  assert.ok(commands[1].indexOf("tce-load -i openssl-1.1.1") < commands[1].indexOf("tce-load -i ca-certificates"));
-  assert.ok(commands[1].indexOf("tce-load -i ca-certificates") < commands[1].indexOf("${apiUrl}/health"));
+  const commandListStart = html.indexOf("const commands=[");
+  const commandListEnd = html.indexOf("async function startBootstrap()", commandListStart);
+  assert.ok(commandListStart >= 0 && commandListEnd > commandListStart, "startup command list should be present");
+  const commandList = html.slice(commandListStart, commandListEnd);
+  assert.ok(commandList.indexOf("tce-load -i openssl-1.1.1") < commandList.indexOf("tce-load -i ca-certificates"));
+  assert.ok(commandList.indexOf("tce-load -i ca-certificates") < commandList.indexOf("${apiUrl}/health"));
 });
 
 test("bootstrap waits for a fresh completion marker and a shell prompt before advancing", () => {
