@@ -8,7 +8,7 @@ on:
       - "cloudflare/**"
       - ".github/workflows/headless-v86-spike.yml"
   push:
-    branches: [experiment/worker-headless-v86, experiment/worker-compiled-v86-wasm]
+    branches: [main, experiment/worker-headless-v86, experiment/worker-compiled-v86-wasm]
     paths:
       - "cloudflare/**"
       - ".github/workflows/headless-v86-spike.yml"
