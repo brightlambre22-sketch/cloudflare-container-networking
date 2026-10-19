@@ -41,8 +41,10 @@ jobs:
           path: cloudflare/dist/headless-v86-bundle.js
           if-no-files-found: error
           retention-days: 7
-      - name: Bundle Worker without deploying
+      - name: Bundle Worker without deploying (Free-compatible config)
         run: npm run check
+      - name: Validate paid-plan CPU configuration without deploying
+        run: npm run check:paid
       - name: Smoke-test v86 and static WASM module inside local Workerd
         shell: bash
         run: |
