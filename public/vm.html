@@ -393,11 +393,19 @@ const proofLoginTime=(sessionStorage.getItem('vm-login-time')||new Date().toISOS
 const proofSavedAt=record&&Number.isFinite(record.savedAt)?new Date(record.savedAt).toISOString():'unknown';
 const proofMarker='__SNAPSHOT_LOGIN_PROOF_DONE__';
 const proofCommand="printf '\\nSNAPSHOT_LOGIN_PROOF username="+proofUsername+" login_time="+proofLoginTime+" snapshot_saved_at="+proofSavedAt+"\\n'; echo "+proofMarker;
-await sendVmCommand(proofCommand+'\n');
-for(;;){
+await sendVmCommand(proofCommand+'\\n');
+const proofDeadline=Date.now()+30000;
+let proofVerified=false;
+while(Date.now()<proofDeadline){
   const proofScreen=screenText(), proofAt=proofScreen.lastIndexOf(proofMarker);
-  if(proofAt>=0&&shellPrompt(proofScreen.slice(proofAt+proofMarker.length)))break;
+  if(proofAt>=0&&shellPrompt(proofScreen.slice(proofAt+proofMarker.length))){proofVerified=true;break;}
   await new Promise(resolve=>requestAnimationFrame(resolve));
+}
+if(!proofVerified){
+  statusText('Saved snapshot restored, but the guest did not confirm the login proof within 30 seconds. The saved snapshot was preserved.');
+  stateText('Restore needs attention; automatic network test skipped.');
+  report('\\n*** SNAPSHOT LOGIN PROOF TIMEOUT: saved state was restored, but the guest did not return the expected shell marker. Snapshot was not overwritten. ***\\n'+screenText()+'\\n');
+  return;
 }
 report('\n===== SNAPSHOT RECOVERY LOGIN PROOF =====\n'+screenText()+'\n');
 statusText('Saved VM resumed; terminal shows account and login time. Running network check.');
@@ -419,9 +427,32 @@ if(promptPattern.test(lines[i]))return lines[i];
 return '';
 }
 function startBootMonitor(){
-statusText('Tiny Core is booting; waiting for a stable shell prompt before sending commands.');
+statusText('Tiny Core is booting; waiting up to five minutes for a stable shell prompt.');
+const bootStartedAt=Date.now();
+const BOOT_TIMEOUT_MS=300000;
+let bootPromptHandled=false;
 (function waitForBootComplete(){
 const t=screenText();
+const elapsed=Date.now()-bootStartedAt;
+// Some Tiny Core ISOs stop at the Syslinux prompt; auto-booting images will
+// never show it. Send Enter only when a standalone boot: prompt is visible.
+if(!bootPromptHandled&&t.split('\\n').some(line=>/^boot:\\s*$/i.test(line.trim()))){
+bootPromptHandled=true;
+try{
+if(window.emulator&&typeof window.emulator.keyboard_send_scancodes==='function'){
+window.emulator.keyboard_send_scancodes([0x1C,0x9C]);
+statusText('Tiny Core bootloader prompt detected; sent Enter and waiting for Linux.');
+}else{
+statusText('Tiny Core is at the bootloader prompt, but keyboard input is unavailable.');
+report('\\n*** BOOT ERROR: bootloader prompt detected but keyboard_send_scancodes is unavailable. ***\\n'+t+'\\n');
+return;
+}
+}catch(e){
+statusText('Could not advance Tiny Core bootloader: '+(e&&e.message?e.message:String(e)));
+report('\\n*** BOOT ERROR: '+(e&&e.message?e.message:String(e))+' ***\\n'+t+'\\n');
+return;
+}
+}
 const prompt=shellPrompt(t);
 if(prompt){
 if(prompt===promptCandidate){
@@ -432,6 +463,12 @@ return;
 }
 }else{promptCandidate=prompt;promptCandidateSince=Date.now();}
 }else{promptCandidate='';promptCandidateSince=0;}
+if(elapsed>=BOOT_TIMEOUT_MS){
+statusText('Tiny Core did not reach a shell within five minutes; bootstrap was not started.');
+report('\\n*** BOOT TIMEOUT after '+Math.round(elapsed/1000)+' seconds. No bootstrap was started. Current guest screen follows. ***\\n'+t+'\\n');
+stateText('Boot timed out; saved snapshot was not changed.');
+return;
+}
 requestAnimationFrame(waitForBootComplete);
 })();
 }
