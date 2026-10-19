@@ -613,7 +613,7 @@ export default {
       }
 
       // The clean V2 baseline is managed with the provisioning token, not public snapshot routes.
-      if (identity === (env.VM_BASELINE_ID ?? "v2")) {
+      if (identity === (env.VM_BASELINE_ID ?? "admin") && identity !== "admin") {
         const vmApiToken = await getVmApiToken(env);
         if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
         if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
