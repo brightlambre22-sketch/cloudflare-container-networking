@@ -26,9 +26,13 @@ jobs:
           set -euo pipefail
           mkdir -p ../public/boot
           cd ../public/boot
-          base="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86"
-          curl --fail --location --retry 3 --output alpine-standard-3.24.2-x86.iso "$base/alpine-standard-3.24.2-x86.iso"
-          curl --fail --location --retry 3 --output alpine-standard-3.24.2-x86.iso.sha256 "$base/alpine-standard-3.24.2-x86.iso.sha256"
+          base="https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86"
+          mirror="https://mirror.opensource.iu.edu/alpine/v3.24/releases/x86"
+          if ! curl --fail --location --retry 1 --connect-timeout 15 --max-time 90 --output alpine-standard-3.24.2-x86.iso "$base/alpine-standard-3.24.2-x86.iso"; then
+            echo "Primary Alpine mirror failed; trying a listed Alpine mirror."
+            curl --fail --location --retry 1 --connect-timeout 15 --max-time 90 --output alpine-standard-3.24.2-x86.iso "$mirror/alpine-standard-3.24.2-x86.iso"
+          fi
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 30 --output alpine-standard-3.24.2-x86.iso.sha256 "$base/alpine-standard-3.24.2-x86.iso.sha256"
           sha256sum --check alpine-standard-3.24.2-x86.iso.sha256
           ls -lh alpine-standard-3.24.2-x86.iso
 
