@@ -9,9 +9,9 @@ const bootstrap = readFileSync(new URL("../public/runner/tinycore/browser-bootst
 test("inline browser scripts parse", () => {
   const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
   assert.ok(scripts.some((match) => match[1].trim()), "expected an inline script");
-  for (const match of scripts) {
+  for (const [index, match] of scripts.entries()) {
     const source = match[1].trim();
-    if (source) assert.doesNotThrow(() => new Function(source));
+    if (source) assert.doesNotThrow(() => new vm.Script(source, { filename: "public-vm-inline-" + (index + 1) + ".js" }));
   }
 });
 
@@ -40,7 +40,8 @@ test("VM uses a built ISO asset, a single supported relay configuration, and ret
 
 test("restored snapshots automatically run the network diagnostic and save after it finishes", () => {
   assert.ok(html.includes("runDiagnostic('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true)"), "restored VM should not skip the automatic network test");
-  assert.ok(html.includes("if(saveAfter&&bootComplete){const saved=await saveVmState(false)"), "save the state after the diagnostic finishes");
+  assert.ok(html.includes("if(saveAfter&&bootComplete){const tail=screenText().slice(-12000)"), "validate diagnostic results before saving");
+  assert.ok(html.includes("const saved=await saveVmState(false)"), "save the state after the diagnostic finishes");
   assert.ok(html.includes("requestedIdentity==='user-usera'?['user-usera','regular-user-a']"), "usera should fall back to the documented legacy snapshot key");
   assert.ok(html.includes("requestedIdentity==='user-userb'?['user-userb','regular-user-b']"), "userb should fall back to the documented legacy snapshot key");
   assert.ok(html.includes("window.snapshotIdentity=identity"), "keep saves scoped to whichever account snapshot was restored");
@@ -94,7 +95,10 @@ test("TLS installs run in the foreground before HTTPS and certificate checks", (
   assert.ok(!html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
   assert.ok(!html.includes("tce-load -i ca-certificates >/tmp/ca.log 2>&1 &"));
   assert.ok(html.indexOf("tce-load -i openssl-1.1.1") < html.indexOf("tce-load -i ca-certificates"));
-  assert.ok(html.indexOf("tce-load -i ca-certificates") < html.indexOf("${apiUrl}/health"));
+  const commands = html.match(/const commands=\[([\s\S]*?)\];/);
+  assert.ok(commands, "startup command list should be present");
+  assert.ok(commands[1].indexOf("tce-load -i openssl-1.1.1") < commands[1].indexOf("tce-load -i ca-certificates"));
+  assert.ok(commands[1].indexOf("tce-load -i ca-certificates") < commands[1].indexOf("${apiUrl}/health"));
 });
 
 test("bootstrap waits for a fresh completion marker and a shell prompt before advancing", () => {
