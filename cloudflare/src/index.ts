@@ -217,7 +217,7 @@ export default {
       const baselinePrefix = "vm-snapshots/" + baselineId + "/";
       const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
       if (!baselineObject) return json({ error: "admin_baseline_snapshot_not_found", baseline_id: baselineId }, 409);
-      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; savedAt?: unknown; checks?: unknown };
+      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; savedAt?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; dns_passed?: unknown; https_passed?: unknown } };
       try { baseline = await baselineObject.json() as typeof baseline; }
       catch { return json({ error: "admin_baseline_manifest_invalid" }, 500); }
       if (baseline.version !== 1 || typeof baseline.generation !== "string" ||
@@ -228,6 +228,12 @@ export default {
           (baseline.byteLength as number) > 536870912 ||
           baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
         return json({ error: "admin_baseline_manifest_invalid" }, 500);
+      }
+      const checks = baseline.checks;
+      if (baseline.adminReady !== true || !checks || checks.guest_booted !== true ||
+          checks.shell_command_passed !== true || checks.dhcp_passed !== true ||
+          checks.dns_passed !== true || checks.https_passed !== true) {
+        return json({ error: "admin_baseline_not_ready", detail: "Save the Admin snapshot only after startup, DHCP, DNS, SSL and CA checks have completed." }, 409);
       }
 
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -410,7 +416,7 @@ export default {
       const baselinePrefix = "vm-snapshots/" + baselineId + "/";
       const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
       if (!baselineObject) return json({ error: "baseline_snapshot_not_found", baseline_id: baselineId }, 409);
-      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown };
+      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; dns_passed?: unknown; https_passed?: unknown } };
       try { baseline = await baselineObject.json() as typeof baseline; }
       catch { return json({ error: "baseline_manifest_invalid" }, 500); }
       if (baseline.version !== 1 || typeof baseline.generation !== "string" ||
@@ -421,6 +427,12 @@ export default {
           (baseline.byteLength as number) > 536870912 ||
           baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
         return json({ error: "baseline_manifest_invalid" }, 500);
+      }
+      const baselineChecks = baseline.checks;
+      if (baselineId === "admin" && (baseline.adminReady !== true || !baselineChecks ||
+          baselineChecks.guest_booted !== true || baselineChecks.shell_command_passed !== true ||
+          baselineChecks.dhcp_passed !== true || baselineChecks.dns_passed !== true || baselineChecks.https_passed !== true)) {
+        return json({ error: "admin_baseline_not_ready" }, 409);
       }
 
       const accountId = "acct-" + crypto.randomUUID();
@@ -645,7 +657,7 @@ export default {
         return new Response(object.body, { headers });
       }
       if (request.method === "PUT") {
-        let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown };
+        let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; dns_passed?: unknown; https_passed?: unknown } | null };
         try { manifest = (await request.json()) as { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown }; }
         catch { return json({ error: "invalid_manifest" }, 400); }
         if (
@@ -655,6 +667,11 @@ export default {
           !Number.isInteger(manifest.chunks) || (manifest.chunks as number) < 1 || (manifest.chunks as number) > 128 ||
           !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912 || manifest.chunks !== Math.ceil((manifest.byteLength as number) / 8388608)
         ) return json({ error: "invalid_manifest" }, 400);
+        if (identity === "admin" && (manifest.adminReady !== true || !manifest.checks ||
+            manifest.checks.guest_booted !== true || manifest.checks.shell_command_passed !== true ||
+            manifest.checks.dhcp_passed !== true || manifest.checks.dns_passed !== true || manifest.checks.https_passed !== true)) {
+          return json({ error: "admin_baseline_not_ready", detail: "Complete startup and network/certificate checks before saving the Admin baseline." }, 409);
+        }
         const generation = manifest.generation;
         const count = manifest.chunks as number;
         const present = await Promise.all(Array.from({ length: count }, (_, part) =>
@@ -664,6 +681,8 @@ export default {
         const savedAt = new Date().toISOString();
         await env.VM_SNAPSHOTS.put(manifestKey, JSON.stringify({
           version: 1, generation, chunks: count, byteLength: manifest.byteLength, savedAt,
+          ...(typeof manifest.adminReady === "boolean" ? { adminReady: manifest.adminReady } : {}),
+          ...(manifest.checks ? { checks: manifest.checks } : {}),
         }), {
           httpMetadata: { contentType: "application/json" },
           customMetadata: { savedAt },
