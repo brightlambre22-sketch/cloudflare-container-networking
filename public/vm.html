@@ -551,6 +551,7 @@ form.addEventListener('submit',async function(event){
       window.snapshotAdminCode=adminCode;
     }catch(error){message.textContent=error.message||'Admin access check failed.';return}
     window.snapshotIdentity='admin';
+    try{sessionStorage.setItem('vm-username','admin');sessionStorage.setItem('vm-login-time',new Date().toISOString())}catch(e){}
     panel.hidden=true;document.body.classList.add('logged-in');window.startVm();return;
   }
   const name=username.value.trim().toLowerCase(),pass=password.value;
