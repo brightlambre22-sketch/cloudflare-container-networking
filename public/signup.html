@@ -15,13 +15,13 @@ main{width:min(100%,800px);background:rgba(18,26,43,.96);border:1px solid var(--
 <main>
   <div class="eyebrow">Workerd · Guest snapshot</div>
   <h1>Create your account</h1>
-  <p>We’ll provision your account’s Linux guest, run its network and certificate checks, save the guest snapshot, and verify the saved bytes. Then you’ll go to your dashboard, where the browser GUI loads the saved snapshot.</p>
+  <p>We’ll copy the verified Admin snapshot into your account, verify the copied chunks, and open your dashboard with your saved account state. Linux will not boot during signup.</p>
   <form id="signup-form">
     <label for="username">Username</label>
     <input id="username" name="username" autocomplete="username" minlength="2" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" required placeholder="e.g. sample_user">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="At least 8 characters">
-    <button id="submit" type="submit">Create account and start snapshot</button>
+    <button id="submit" type="submit">Create account and clone snapshot</button>
   </form>
   <section id="status" class="status" role="status" aria-live="polite" hidden>
     <strong id="status-title">Preparing your guest…</strong>
@@ -29,12 +29,9 @@ main{width:min(100%,800px);background:rgba(18,26,43,.96);border:1px solid var(--
     <div class="meter"><span id="meter-fill"></span></div>
     <div class="progress-grid">
       <ol class="steps" id="steps">
-      <li data-step="booting_linux">Boot Linux guest</li>
-      <li data-step="dhcp">Check network connectivity</li>
-      <li data-step="ca_install">Install/check CA certificates</li>
-      <li data-step="https_preflight">Verify HTTPS from guest</li>
-      <li data-step="snapshot_saved">Save snapshot</li>
-      <li data-step="snapshot_readback_verified">Verify stored snapshot bytes</li>
+      <li data-step="queued">Check Admin baseline</li>
+      <li data-step="snapshot_cloning">Copy snapshot chunks</li>
+      <li data-step="snapshot_verified">Verify copied chunks</li>
       <li data-step="complete">Open dashboard</li>
       </ol>
       <aside class="vm-preview" aria-label="Live Workerd VM boot status">
@@ -51,14 +48,11 @@ main{width:min(100%,800px);background:rgba(18,26,43,.96);border:1px solid var(--
 const form=document.getElementById('signup-form'),submit=document.getElementById('submit');
 const status=document.getElementById('status'),title=document.getElementById('status-title'),detail=document.getElementById('status-text'),fill=document.getElementById('meter-fill'),steps=document.getElementById('steps'),vmScreen=document.getElementById('vm-screen'),vmMeta=document.getElementById('vm-meta'),vmDot=document.getElementById('vm-dot');
 const labels={
- queued:'Queued. Waiting for a Workerd worker…',starting_vm:'Starting the Linux guest…',booting_linux:'Booting Tiny Core Linux…',
- linux_booted:'Linux booted. Preparing network checks…',resource_preflight:'Checking guest resources…',dhcp:'Checking DHCP and the default route…',
- tls_download:'Preparing OpenSSL and CA packages…',openssl_install:'Installing and verifying OpenSSL…',ca_install:'Installing CA certificates…',
- https_preflight:'Checking DNS and HTTPS from the guest…',snapshot_marker:'Writing the guest persistence marker…',
- snapshot_saved:'Guest checks passed. Saving the snapshot…',snapshot_readback_verified:'Snapshot saved; checking stored bytes and digest…',
- complete:'Snapshot is saved and verified. Opening your dashboard…'
+ queued:'Checking the Admin baseline…',snapshot_cloning:'Copying the Admin snapshot into your account…',
+ snapshot_verified:'Snapshot chunks copied and checked. Opening your dashboard…',
+ complete:'Your account snapshot is ready. Opening the dashboard…'
 };
-const order=['queued','starting_vm','booting_linux','linux_booted','resource_preflight','dhcp','tls_download','openssl_install','ca_install','https_preflight','snapshot_marker','snapshot_saved','snapshot_readback_verified','complete'];
+const order=['queued','snapshot_cloning','snapshot_verified','complete'];
 function paint(progress){
 status.hidden=false;status.className='status';
 const step=String(progress.step||progress.status||'queued');
@@ -73,8 +67,8 @@ const screenStall=Number.isFinite(Number(progress.boot_screen_unchanged_seconds)
 detail.textContent='Stage: '+step.replaceAll('_',' ')+(progress.updated_at?' · Updated '+new Date(progress.updated_at).toLocaleTimeString():'')+bootWait+screenStall+staleNote;
 const index=Math.max(0,order.indexOf(step));fill.style.width=Math.max(12,Math.round((index+1)/order.length*100))+'%';
 for(const item of steps.querySelectorAll('li')){const key=item.dataset.step;item.className=key===step?'active':order.indexOf(key)>=0&&order.indexOf(key)<index?'done':'';}
-const booted=progress.guest_booted===true||index>=order.indexOf('linux_booted');
-vmMeta.textContent=(booted?'Guest shell detected':'VM status: '+step.replaceAll('_',' '))+(progress.updated_at?' · '+new Date(progress.updated_at).toLocaleTimeString():'');
+const booted=false;
+vmMeta.textContent=(progress.snapshot_cloned===true?'Admin snapshot cloned':'Snapshot status: '+step.replaceAll('_',' '))+(progress.updated_at?' · '+new Date(progress.updated_at).toLocaleTimeString():'');
 vmDot.className='vm-dot'+(progress.status==='complete'?' good':progress.status==='error'?' bad':'');
 const excerpt=typeof progress.boot_screen_excerpt==='string'&&progress.boot_screen_excerpt.trim()?progress.boot_screen_excerpt:typeof progress.screen_excerpt==='string'&&progress.screen_excerpt.trim()?progress.screen_excerpt:'';
 vmScreen.textContent=excerpt||({queued:'[provisioner] job queued\n[workerd] waiting to initialize v86…',starting_vm:'[workerd] loading v86 WebAssembly…',booting_linux:'[v86] emulator started\n[Tiny Core] waiting for Linux shell marker…',linux_booted:'tc@box:~$\nLinux shell detected.\nStarting automatic network checks…',dhcp:'tc@box:~$\nChecking DHCP lease and default route…',ca_install:'tc@box:~$\nChecking OpenSSL and CA certificate bundle…',https_preflight:'tc@box:~$\nChecking guest HTTPS connectivity…',snapshot_saved:'[snapshot] writing guest state to R2…',snapshot_readback_verified:'[snapshot] verifying stored bytes and SHA-256…',complete:'[signup] guest checks passed\n[snapshot] saved + digest verified\n[dashboard] opening account VM…',failed:'[signup] provisioning failed\nSee the error details above.'})[step]||('[workerd] '+step.replaceAll('_',' ')+'…');
