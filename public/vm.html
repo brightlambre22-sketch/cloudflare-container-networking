@@ -393,7 +393,7 @@ const proofLoginTime=(sessionStorage.getItem('vm-login-time')||new Date().toISOS
 const proofSavedAt=record&&Number.isFinite(record.savedAt)?new Date(record.savedAt).toISOString():'unknown';
 const proofMarker='__SNAPSHOT_LOGIN_PROOF_DONE__';
 const proofCommand="printf '\\nSNAPSHOT_LOGIN_PROOF username="+proofUsername+" login_time="+proofLoginTime+" snapshot_saved_at="+proofSavedAt+"\\n'; echo "+proofMarker;
-await sendVmCommand(proofCommand+'\\n');
+await sendVmCommand(proofCommand+'\n');
 const proofDeadline=Date.now()+30000;
 let proofVerified=false;
 while(Date.now()<proofDeadline){
