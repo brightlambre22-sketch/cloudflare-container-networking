@@ -20,21 +20,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download official Alpine x86 ISO and verify checksum
+      - name: Download official Alpine virt x86 ISO and verify checksum
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ../public/boot
-          cd ../public/boot
+          cd "$RUNNER_TEMP"
           base="https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86"
           mirror="https://mirror.opensource.iu.edu/alpine/v3.24/releases/x86"
-          if ! curl --fail --location --retry 1 --connect-timeout 15 --max-time 90 --output alpine-standard-3.24.2-x86.iso "$base/alpine-standard-3.24.2-x86.iso"; then
+          if ! curl --fail --location --retry 1 --connect-timeout 15 --max-time 90 --output alpine-virt-3.24.2-x86.iso "$base/alpine-virt-3.24.2-x86.iso"; then
             echo "Primary Alpine mirror failed; trying a listed Alpine mirror."
-            curl --fail --location --retry 1 --connect-timeout 15 --max-time 90 --output alpine-standard-3.24.2-x86.iso "$mirror/alpine-standard-3.24.2-x86.iso"
+            curl --fail --location --retry 1 --connect-timeout 15 --max-time 90 --output alpine-virt-3.24.2-x86.iso "$mirror/alpine-virt-3.24.2-x86.iso"
           fi
-          curl --fail --location --retry 2 --connect-timeout 15 --max-time 30 --output alpine-standard-3.24.2-x86.iso.sha256 "$base/alpine-standard-3.24.2-x86.iso.sha256"
-          sha256sum --check alpine-standard-3.24.2-x86.iso.sha256
-          ls -lh alpine-standard-3.24.2-x86.iso
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 30 --output alpine-virt-3.24.2-x86.iso.sha256 "$base/alpine-virt-3.24.2-x86.iso.sha256"
+          sha256sum --check alpine-virt-3.24.2-x86.iso.sha256
+          ls -lh alpine-virt-3.24.2-x86.iso
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
