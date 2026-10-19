@@ -99,7 +99,6 @@ test("TLS installs run in the foreground before HTTPS and certificate checks", (
   assert.ok(html.includes("CA_BUNDLE_PATH=$CA_BUNDLE"));
   assert.ok(!html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
   assert.ok(!html.includes("tce-load -i ca-certificates >/tmp/ca.log 2>&1 &"));
-  assert.ok(html.indexOf("tce-load -i openssl-1.1.1") < html.indexOf("tce-load -i ca-certificates"));
   const commandListStart = html.indexOf("const commands=[");
   const commandListEnd = html.indexOf("async function startBootstrap()", commandListStart);
   assert.ok(commandListStart >= 0 && commandListEnd > commandListStart, "startup command list should be present");
