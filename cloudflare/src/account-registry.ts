@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { VIRTUAL_NETWORK, virtualIpForOrdinal } from "./virtual-network";
+import { VIRTUAL_NETWORK, isVirtualPrivateIp, virtualIpForOrdinal } from "./virtual-network";
 
 export type AccountStatus = "provisioning" | "ready" | "error";
 
@@ -178,6 +178,29 @@ export class AccountRegistry extends DurableObject {
       const record = await this.ctx.storage.get<StoredAccount>("account:" + accountId);
       if (!record) return json({ error: "account_not_found" }, 404);
       return json({ account_id: record.account_id, virtual_ip: record.virtual_ip, virtual_mac: record.virtual_mac });
+    }
+
+    if (url.pathname === "/network/assign" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as {
+        account_id?: unknown; virtual_ip?: unknown; virtual_mac?: unknown;
+      } | null;
+      if (typeof body?.account_id !== "string" || !validAccountId(body.account_id) ||
+          typeof body.virtual_ip !== "string" || !isVirtualPrivateIp(body.virtual_ip) ||
+          typeof body.virtual_mac !== "string" || !/^02(?::[0-9a-f]{2}){5}$/.test(body.virtual_mac)) {
+        return json({ error: "invalid_network_identity" }, 400);
+      }
+      const key = "account:" + body.account_id;
+      const record = await this.ctx.storage.get<StoredAccount>(key);
+      if (!record) return json({ error: "account_not_found" }, 404);
+      if (record.virtual_ip && record.virtual_mac) {
+        return json({ account_id: record.account_id, virtual_ip: record.virtual_ip, virtual_mac: record.virtual_mac, reused: true });
+      }
+      const updated: StoredAccount = {
+        ...record, virtual_ip: body.virtual_ip, virtual_mac: body.virtual_mac,
+        updated_at: new Date().toISOString(),
+      };
+      await this.ctx.storage.put(key, updated);
+      return json({ account_id: updated.account_id, virtual_ip: updated.virtual_ip, virtual_mac: updated.virtual_mac, reused: false });
     }
 
     if (url.pathname === "/create" && request.method === "POST") {
