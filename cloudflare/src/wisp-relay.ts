@@ -1,0 +1,180 @@
+import { DurableObject } from "cloudflare:workers";
+import { connect } from "cloudflare:sockets";
+
+interface TicketRecord { expires_at: number; }
+interface TcpStream {
+  socket: Awaited<ReturnType<typeof connect>>;
+  writer: WritableStreamDefaultWriter<Uint8Array>;
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+}
+
+const INITIAL_BUFFER = 64;
+const MAX_STREAMS = 32;
+
+function json(data: unknown, status = 200): Response {
+  return Response.json(data, { status, headers: { "cache-control": "no-store" } });
+}
+
+function packet(type: number, streamId: number, payload = new Uint8Array()): ArrayBuffer {
+  const result = new Uint8Array(5 + payload.byteLength);
+  result[0] = type;
+  new DataView(result.buffer).setUint32(1, streamId >>> 0, true);
+  result.set(payload, 5);
+  return result.buffer;
+}
+
+function continuePacket(streamId: number, count: number): ArrayBuffer {
+  const payload = new Uint8Array(4);
+  new DataView(payload.buffer).setUint32(0, count, true);
+  return packet(0x03, streamId, payload);
+}
+
+function closePacket(streamId: number, reason: number): ArrayBuffer {
+  return packet(0x04, streamId, new Uint8Array([reason]));
+}
+
+function isAllowedDestination(host: string, port: number): boolean {
+  const normalized = host.toLowerCase().replace(/\.$/, "");
+  if ((port !== 80 && port !== 443) || normalized.length < 3 || normalized.length > 253) return false;
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(normalized)) return false;
+  if (normalized === "localhost" || normalized.endsWith(".localhost") ||
+      normalized.endsWith(".local") || normalized.endsWith(".internal") ||
+      normalized === "metadata.google.internal") return false;
+  // Literal IP addresses are deliberately denied; destinations must be public DNS names.
+  return true;
+}
+
+/**
+ * Authenticated WISP-v1 TCP relay for v86. The synthetic DHCP/DNS/router are provided
+ * by v86's WISP backend; this Durable Object only forwards authenticated TCP streams.
+ * Egress is restricted to HTTP(S) ports and DNS hostnames, and each ticket is single-use.
+ */
+export class WispRelay extends DurableObject {
+  private streams = new Map<number, TcpStream>();
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/ticket" && request.method === "POST") {
+      const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+      const ticket = Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      await this.ctx.storage.put("ticket:" + ticket, { expires_at: Date.now() + 60_000 } satisfies TicketRecord);
+      return json({ ticket, expires_in_seconds: 60 }, 201);
+    }
+
+    if (url.pathname !== "/wisp" || request.method !== "GET") return json({ error: "not_found" }, 404);
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
+    const ticket = url.searchParams.get("ticket") ?? "";
+    if (!/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
+    const record = await this.ctx.storage.get<TicketRecord>("ticket:" + ticket);
+    await this.ctx.storage.delete("ticket:" + ticket);
+    if (!record || record.expires_at <= Date.now()) return json({ error: "expired_network_ticket" }, 401);
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server);
+    // Sending CONTINUE first selects WISP v1, which is supported by v86.
+    server.send(continuePacket(0, INITIAL_BUFFER));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message === "string" || message.byteLength < 5 || message.byteLength > 1024 * 1024) {
+      socket.close(1003, "binary WISP packets required");
+      return;
+    }
+    const bytes = new Uint8Array(message);
+    const view = new DataView(message);
+    const type = bytes[0];
+    const streamId = view.getUint32(1, true);
+    const payload = bytes.subarray(5);
+
+    if (type === 0x01) {
+      await this.openTcp(socket, streamId, payload);
+      return;
+    }
+    if (type === 0x02) {
+      const stream = this.streams.get(streamId);
+      if (!stream) {
+        socket.send(closePacket(streamId, 0x41));
+        return;
+      }
+      try {
+        await stream.writer.write(payload);
+        socket.send(continuePacket(streamId, INITIAL_BUFFER));
+      } catch {
+        socket.send(closePacket(streamId, 0x03));
+        await this.closeStream(streamId);
+      }
+      return;
+    }
+    if (type === 0x04) {
+      await this.closeStream(streamId);
+      return;
+    }
+    // WISP clients may send INFO before v1 fallback; ignore unsupported control frames.
+    if (type !== 0x05 && streamId !== 0) socket.send(closePacket(streamId, 0x01));
+  }
+
+  private async openTcp(socket: WebSocket, streamId: number, payload: Uint8Array): Promise<void> {
+    if (streamId === 0 || payload.byteLength < 4 || this.streams.size >= MAX_STREAMS) {
+      socket.send(closePacket(streamId, 0x41));
+      return;
+    }
+    const port = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint16(1, true);
+    const host = new TextDecoder().decode(payload.subarray(3)).trim();
+    if (payload[0] !== 0x01 || !isAllowedDestination(host, port)) {
+      socket.send(closePacket(streamId, 0x48));
+      return;
+    }
+    if (this.streams.has(streamId)) await this.closeStream(streamId);
+
+    try {
+      const tcp = connect({ hostname: host, port });
+      await tcp.opened;
+      const stream: TcpStream = {
+        socket: tcp,
+        writer: tcp.writable.getWriter(),
+        reader: tcp.readable.getReader(),
+      };
+      this.streams.set(streamId, stream);
+      socket.send(continuePacket(streamId, INITIAL_BUFFER));
+      void this.pumpTcpToWebSocket(socket, streamId, stream);
+    } catch {
+      socket.send(closePacket(streamId, 0x42));
+    }
+  }
+
+  private async pumpTcpToWebSocket(socket: WebSocket, streamId: number, stream: TcpStream): Promise<void> {
+    try {
+      while (socket.readyState === WebSocket.OPEN) {
+        const { value, done } = await stream.reader.read();
+        if (done) break;
+        if (value?.byteLength) socket.send(packet(0x02, streamId, value));
+      }
+      if (socket.readyState === WebSocket.OPEN) socket.send(closePacket(streamId, 0x02));
+    } catch {
+      if (socket.readyState === WebSocket.OPEN) socket.send(closePacket(streamId, 0x03));
+    } finally {
+      await this.closeStream(streamId);
+    }
+  }
+
+  private async closeStream(streamId: number): Promise<void> {
+    const stream = this.streams.get(streamId);
+    if (!stream) return;
+    this.streams.delete(streamId);
+    try { await stream.writer.close(); } catch { /* already closed */ }
+    try { await stream.reader.cancel(); } catch { /* already closed */ }
+    try { stream.socket.close(); } catch { /* already closed */ }
+  }
+
+  async webSocketClose(socket: WebSocket): Promise<void> {
+    socket.close(1000, "closed");
+    await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
+  }
+
+  async webSocketError(socket: WebSocket): Promise<void> {
+    socket.close(1011, "WISP relay error");
+    await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
+  }
+}
