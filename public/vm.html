@@ -45,7 +45,7 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <div id="screen_container"><div></div><canvas></canvas></div>
 <script src="/v86/libv86.js"></script>
 <script>
-window.startVm=function(){
+window.startVm=async function(){
 const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('myst-log'),copyStatus=document.getElementById('copy-status'),stateStatus=document.getElementById('state-status');
 const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
 let reportTimer=null,bootstrapStarted=false,bootComplete=false;
@@ -353,8 +353,7 @@ wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
 screen_container:document.getElementById('screen_container'),
 bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
 cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'},
-net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
-network_relay_url:'wss://relay.widgetry.org/',autostart:false
+net_device:{type:'ne2k',relay_url:relayUrl,router_ip:routerIp,vm_ip:virtualIp,masquerade:true,dns_method:'doh',doh_server:'cloudflare-dns.com'},autostart:false
 });
 statusText('Loading VM engine and checking for a saved stateâ¦');
 window.emulator.add_listener('emulator-loaded',async function(){
@@ -506,6 +505,8 @@ function beginAccountSession(data,launchVm=true){
   }
   window.snapshotIdentity=data.account_id;
   window.snapshotAuthToken=data.session_token;
+  if(typeof data.virtual_ip==='string'&&/^10\\.240\\.\\d{1,3}\\.(?:[2-9]|[1-9]\\d|1\\d\\d|2[0-4]\\d|25[0-4])$/.test(data.virtual_ip))window.snapshotVirtualIp=data.virtual_ip;
+  if(typeof data.virtual_mac==='string'&&/^02(?::[0-9a-f]{2}){5}$/.test(data.virtual_mac))window.snapshotVirtualMac=data.virtual_mac;
   try {
     if (typeof data.username === 'string') sessionStorage.setItem('vm-username', data.username);
     if (typeof data.login_time === 'string') sessionStorage.setItem('vm-login-time', data.login_time);
@@ -593,13 +594,14 @@ updateFields();
   try{
     const response=await fetch('/api/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
     if(!response.ok)throw new Error('session expired');
+    const sessionData=await response.json().catch(()=>({}));
     const statusResponse=await fetch('/api/auth/registration-status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
     const registration=await statusResponse.json().catch(()=>({}));
-    if(statusResponse.ok&&['provisioning','queued','running'].includes(registration.status))await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true});
+    if(statusResponse.ok&&['provisioning','queued','running'].includes(registration.status))await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true,virtual_ip:sessionData.virtual_ip,virtual_mac:sessionData.virtual_mac});
     else if(statusResponse.ok&&registration.status==='error')throw new Error('VM initialization failed: '+(registration.error||registration.step||'check failed'));
     else {
       if(registration.status==='complete'){try{sessionStorage.removeItem('vm-initial-snapshot-pending')}catch(e){}}
-      beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:false});
+      beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:false,virtual_ip:sessionData.virtual_ip,virtual_mac:sessionData.virtual_mac});
     }
   }catch(e){
     try{sessionStorage.removeItem('vm-account-id');sessionStorage.removeItem('vm-session-token')}catch(ignore){}
