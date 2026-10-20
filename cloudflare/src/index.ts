@@ -6,7 +6,8 @@ import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
 import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
 import { AccountProvisioner } from "./account-provisioner";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner };
+import { WispRelay } from "./wisp-relay";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner, WispRelay };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
@@ -15,6 +16,7 @@ export interface Env {
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
   ACCOUNT_PROVISIONER: DurableObjectNamespace<AccountProvisioner>;
+  WISP_RELAY: DurableObjectNamespace<WispRelay>;
   VM_BASELINE_ID?: string;
   ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
@@ -335,7 +337,14 @@ export default {
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) return json({ error: "invalid_credentials" }, 401);
-      return json({ ...(await response.json() as Record<string, unknown>), username });
+      const login = await response.json() as Record<string, unknown>;
+      const accountId = typeof login.account_id === "string" ? login.account_id : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const identityResponse = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
+      if (!identityResponse.ok) return json({ error: "account_network_identity_unavailable" }, 409);
+      const identity = await identityResponse.json() as { virtual_ip: string; virtual_mac: string };
+      return json({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac });
     }
 
     if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
@@ -363,7 +372,42 @@ export default {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ account_id: body.account_id, token: body.session_token }),
       });
-      return response.ok ? json({ ok: true }) : json({ error: "unauthorized" }, 401);
+      if (!response.ok) return json({ error: "unauthorized" }, 401);
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(body.account_id));
+      const identityResponse = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + body.account_id);
+      if (!identityResponse.ok) return json({ error: "account_network_identity_unavailable" }, 409);
+      return json({ ok: true, ...(await identityResponse.json() as { virtual_ip: string; virtual_mac: string }) });
+    }
+
+    if (url.pathname === "/api/network/ticket" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown; admin_code?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      if (accountId === "admin") {
+        if (!env.ADMIN_ACCESS_CODE || typeof body.admin_code !== "string" || body.admin_code !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      } else {
+        if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account_id: accountId, token: body.session_token }),
+        });
+        if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      }
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+      const ticketResponse = await relay.fetch("https://wisp-relay.internal/ticket", { method: "POST" });
+      if (!ticketResponse.ok) return json({ error: "network_ticket_unavailable" }, 503);
+      return json(await ticketResponse.json());
+    }
+
+    if (url.pathname === "/api/network/wisp" && request.method === "GET") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
+      const accountId = url.searchParams.get("account_id") ?? "";
+      const ticket = url.searchParams.get("ticket") ?? "";
+      if (!(accountId === "admin" || /^acct-[a-f0-9-]{36}$/.test(accountId)) || !/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+      const relayRequest = new Request("https://wisp-relay.internal/wisp?ticket=" + encodeURIComponent(ticket), request);
+      return relay.fetch(relayRequest);
     }
 
     if (url.pathname === "/v1/accounts" && request.method === "POST") {
