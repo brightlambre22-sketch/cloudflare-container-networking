@@ -63,6 +63,39 @@ function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
 
+async function getOrAllocateAccountNetworkIdentity(
+  env: Env, accountId: string,
+): Promise<{ virtual_ip: string; virtual_mac: string } | null> {
+  const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+  const read = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
+  if (read.ok) {
+    const current = await read.json() as { virtual_ip?: unknown; virtual_mac?: unknown };
+    if (typeof current.virtual_ip === "string" && typeof current.virtual_mac === "string") {
+      return { virtual_ip: current.virtual_ip, virtual_mac: current.virtual_mac };
+    }
+  }
+  // Existing accounts created before this feature are assigned an address on first login.
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId }),
+  });
+  if (!allocationResponse.ok) return null;
+  const allocationBody = await allocationResponse.json() as {
+    allocation?: { virtual_ip?: unknown; virtual_mac?: unknown };
+  };
+  const allocation = allocationBody.allocation;
+  if (typeof allocation?.virtual_ip !== "string" || typeof allocation.virtual_mac !== "string") return null;
+  const assigned = await accountRegistry.fetch("https://account-registry.internal/network/assign", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId, virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac }),
+  });
+  if (!assigned.ok) return null;
+  const identity = await assigned.json() as { virtual_ip?: unknown; virtual_mac?: unknown };
+  if (typeof identity.virtual_ip !== "string" || typeof identity.virtual_mac !== "string") return null;
+  return { virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -340,10 +373,8 @@ export default {
       const login = await response.json() as Record<string, unknown>;
       const accountId = typeof login.account_id === "string" ? login.account_id : "";
       if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
-      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
-      const identityResponse = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
-      if (!identityResponse.ok) return json({ error: "account_network_identity_unavailable" }, 409);
-      const identity = await identityResponse.json() as { virtual_ip: string; virtual_mac: string };
+      const identity = await getOrAllocateAccountNetworkIdentity(env, accountId);
+      if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
       return json({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac });
     }
 
@@ -373,10 +404,9 @@ export default {
         body: JSON.stringify({ account_id: body.account_id, token: body.session_token }),
       });
       if (!response.ok) return json({ error: "unauthorized" }, 401);
-      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(body.account_id));
-      const identityResponse = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + body.account_id);
-      if (!identityResponse.ok) return json({ error: "account_network_identity_unavailable" }, 409);
-      return json({ ok: true, ...(await identityResponse.json() as { virtual_ip: string; virtual_mac: string }) });
+      const identity = await getOrAllocateAccountNetworkIdentity(env, body.account_id);
+      if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
+      return json({ ok: true, ...identity });
     }
 
     if (url.pathname === "/api/network/ticket" && request.method === "POST") {
