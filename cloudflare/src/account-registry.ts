@@ -148,26 +148,27 @@ export class AccountRegistry extends DurableObject {
         return json({ error: "invalid_account_id" }, 400);
       }
       const allocationKey = "network-allocation:" + body.account_id;
-      const existing = await this.ctx.storage.get<{ account_id: string; virtual_ip: string; virtual_mac: string }>(allocationKey);
-      if (existing) return json({ allocation: existing, reused: true });
-      const nextHost = await this.ctx.storage.get<number>("network-next-host") ?? VIRTUAL_NETWORK.first_allocatable_ordinal;
-      if (!Number.isInteger(nextHost) || nextHost < VIRTUAL_NETWORK.first_allocatable_ordinal || nextHost > VIRTUAL_NETWORK.last_allocatable_ordinal) {
-        return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
-      }
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.account_id));
       const bytes = new Uint8Array(digest);
       const virtualMac = [0x02, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]]
         .map((part) => part.toString(16).padStart(2, "0")).join(":");
-      const virtualIp = virtualIpForOrdinal(nextHost);
-      if (!virtualIp) return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
-      const allocation = {
-        account_id: body.account_id,
-        virtual_ip: virtualIp,
-        virtual_mac: virtualMac,
-      };
-      await this.ctx.storage.put(allocationKey, allocation);
-      await this.ctx.storage.put("network-next-host", nextHost + 1);
-      return json({ allocation, reused: false }, 201);
+      // The counter and account mapping must be committed atomically. Requests to a
+      // Durable Object can interleave across awaits; a plain get/put sequence can duplicate IPs.
+      const result = await this.ctx.storage.transaction(async (txn) => {
+        const existing = await txn.get<{ account_id: string; virtual_ip: string; virtual_mac: string }>(allocationKey);
+        if (existing) return { allocation: existing, reused: true };
+        const nextHost = await txn.get<number>("network-next-host") ?? VIRTUAL_NETWORK.first_allocatable_ordinal;
+        if (!Number.isInteger(nextHost) || nextHost < VIRTUAL_NETWORK.first_allocatable_ordinal ||
+            nextHost > VIRTUAL_NETWORK.last_allocatable_ordinal) return null;
+        const virtualIp = virtualIpForOrdinal(nextHost);
+        if (!virtualIp) return null;
+        const allocation = { account_id: body.account_id, virtual_ip: virtualIp, virtual_mac: virtualMac };
+        await txn.put(allocationKey, allocation);
+        await txn.put("network-next-host", nextHost + 1);
+        return { allocation, reused: false };
+      });
+      if (!result) return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
+      return json(result, result.reused ? 200 : 201);
     }
 
     const networkIdentityMatch = url.pathname.match(/^\/network\/identity\/([^/]+)$/);
