@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - "cloudflare/src/headless-v86-snapshot-roundtrip-worker.ts"
+      - "cloudflare/src/account-registry.ts"
+      - "cloudflare/src/virtual-network.ts"
+      - "cloudflare/src/wisp-relay.ts"
       - "cloudflare/src/headless-snapshot-store.ts"
       - "cloudflare/src/headless-v86-wasm.ts"
       - "cloudflare/wrangler.headless-v86-roundtrip.toml"
