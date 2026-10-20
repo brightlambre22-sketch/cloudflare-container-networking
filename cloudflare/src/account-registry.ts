@@ -170,7 +170,7 @@ export class AccountRegistry extends DurableObject {
       return json({ allocation, reused: false }, 201);
     }
 
-    const networkIdentityMatch = url.pathname.match(/^\\/network\\/identity\\/([^/]+)$/);
+    const networkIdentityMatch = url.pathname.match(/^\/network\/identity\/([^/]+)$/);
     if (networkIdentityMatch && request.method === "GET") {
       const accountId = decodeURIComponent(networkIdentityMatch[1]);
       if (!validAccountId(accountId)) return json({ error: "invalid_account_id" }, 400);
