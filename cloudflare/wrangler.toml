@@ -73,3 +73,11 @@ class_name = "AccountProvisioner"
 [exports.AccountProvisioner]
 type = "durable-object"
 storage = "sqlite"
+
+[[durable_objects.bindings]]
+name = "WISP_RELAY"
+class_name = "WispRelay"
+
+[exports.WispRelay]
+type = "durable-object"
+storage = "sqlite"
