@@ -436,8 +436,7 @@ export default {
       const ticket = url.searchParams.get("ticket") ?? "";
       if (!(accountId === "admin" || /^acct-[a-f0-9-]{36}$/.test(accountId)) || !/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
       const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
-      const relayRequest = new Request("https://wisp-relay.internal/wisp?ticket=" + encodeURIComponent(ticket), request);
-      return relay.fetch(relayRequest);
+      return relay.fetch(request);
     }
 
     if (url.pathname === "/v1/accounts" && request.method === "POST") {
