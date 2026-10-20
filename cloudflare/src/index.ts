@@ -430,7 +430,7 @@ export default {
       return json(await ticketResponse.json());
     }
 
-    if (url.pathname === "/api/network/wisp" && request.method === "GET") {
+    if (url.pathname === "/api/network/wisp/" && request.method === "GET") {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
       const accountId = url.searchParams.get("account_id") ?? "";
       const ticket = url.searchParams.get("ticket") ?? "";
