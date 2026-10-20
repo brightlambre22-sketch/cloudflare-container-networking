@@ -121,7 +121,7 @@ export class WispRelay extends DurableObject {
         socket.send(continuePacket(streamId, INITIAL_BUFFER));
       } catch {
         socket.send(closePacket(streamId, 0x03));
-        await this.closeStream(streamId);
+        await this.closeStream(streamId, stream);
       }
       return;
     }
@@ -173,13 +173,13 @@ export class WispRelay extends DurableObject {
     } catch {
       if (socket.readyState === WebSocket.OPEN) socket.send(closePacket(streamId, 0x03));
     } finally {
-      await this.closeStream(streamId);
+      await this.closeStream(streamId, stream);
     }
   }
 
-  private async closeStream(streamId: number): Promise<void> {
+  private async closeStream(streamId: number, expected?: TcpStream): Promise<void> {
     const stream = this.streams.get(streamId);
-    if (!stream) return;
+    if (!stream || expected && stream !== expected) return;
     this.streams.delete(streamId);
     try { await stream.writer.close(); } catch { /* already closed */ }
     try { await stream.reader.cancel(); } catch { /* already closed */ }
