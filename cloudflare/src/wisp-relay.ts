@@ -66,7 +66,7 @@ export class WispRelay extends DurableObject {
       return json({ ticket, expires_in_seconds: 8 * 60 * 60 }, 201);
     }
 
-    if (url.pathname !== "/wisp" || request.method !== "GET") return json({ error: "not_found" }, 404);
+    if ((url.pathname !== "/wisp" && url.pathname !== "/api/network/wisp/") || request.method !== "GET") return json({ error: "not_found" }, 404);
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
     const ticket = url.searchParams.get("ticket") ?? "";
     if (!/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
