@@ -44,10 +44,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=TERM --kill-after=15s 4200s npx wrangler dev --local --config wrangler.headless-v86-roundtrip.toml --ip 127.0.0.1 --port 8789 > /tmp/v86-roundtrip-workerd.log 2>&1 &
+          setsid timeout --signal=TERM --kill-after=15s 4200s npx wrangler dev --local --config wrangler.headless-v86-roundtrip.toml --ip 127.0.0.1 --port 8789 > /tmp/v86-roundtrip-workerd.log 2>&1 &
           worker_pid=$!
           cleanup() {
-            kill "$worker_pid" 2>/dev/null || true
+            kill -- "-$worker_pid" 2>/dev/null || kill "$worker_pid" 2>/dev/null || true
             wait "$worker_pid" 2>/dev/null || true
           }
           trap cleanup EXIT
