@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { connect } from "cloudflare:sockets";
 
-interface TicketRecord { expires_at: number; }
+interface TicketRecord { ticket: string; expires_at: number; }
 interface TcpStream {
   socket: Awaited<ReturnType<typeof connect>>;
   writer: WritableStreamDefaultWriter<Uint8Array>;
@@ -34,20 +34,25 @@ function closePacket(streamId: number, reason: number): ArrayBuffer {
 }
 
 function isAllowedDestination(host: string, port: number): boolean {
-  const normalized = host.toLowerCase().replace(/\.$/, "");
-  if ((port !== 80 && port !== 443) || normalized.length < 3 || normalized.length > 253) return false;
-  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(normalized)) return false;
-  if (normalized === "localhost" || normalized.endsWith(".localhost") ||
-      normalized.endsWith(".local") || normalized.endsWith(".internal") ||
-      normalized === "metadata.google.internal") return false;
-  // Literal IP addresses are deliberately denied; destinations must be public DNS names.
+  if (port !== 80 && port !== 443) return false;
+  // v86's WISP adapter sends the resolved IPv4 destination, not the original hostname.
+  const parts = host.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\\d{1,3}$/.test(part))) return false;
+  const octets = parts.map(Number);
+  if (octets.some((part) => part < 0 || part > 255)) return false;
+  const [a, b, c] = octets;
+  if (a === 0 || a === 10 || a === 127 || a >= 224 || a === 169 && b === 254 ||
+      a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 ||
+      a === 100 && b >= 64 && b <= 127 || a === 192 && b === 0 ||
+      a === 192 && b === 2 || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) ||
+      a === 203 && b === 0 && c === 113 || a === 198 && b === 51 && c === 100) return false;
   return true;
 }
 
 /**
  * Authenticated WISP-v1 TCP relay for v86. The synthetic DHCP/DNS/router are provided
  * by v86's WISP backend; this Durable Object only forwards authenticated TCP streams.
- * Egress is restricted to HTTP(S) ports and DNS hostnames, and each ticket is single-use.
+ * Egress is restricted to public IPv4 destinations on HTTP(S) ports; tickets expire after eight hours.
  */
 export class WispRelay extends DurableObject {
   private streams = new Map<number, TcpStream>();
@@ -57,18 +62,19 @@ export class WispRelay extends DurableObject {
     if (url.pathname === "/ticket" && request.method === "POST") {
       const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
       const ticket = Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-      await this.ctx.storage.put("ticket:" + ticket, { expires_at: Date.now() + 60_000 } satisfies TicketRecord);
-      return json({ ticket, expires_in_seconds: 60 }, 201);
+      await this.ctx.storage.put("active-ticket", { ticket, expires_at: Date.now() + 8 * 60 * 60 * 1000 } satisfies TicketRecord);
+      return json({ ticket, expires_in_seconds: 8 * 60 * 60 }, 201);
     }
 
     if (url.pathname !== "/wisp" || request.method !== "GET") return json({ error: "not_found" }, 404);
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
     const ticket = url.searchParams.get("ticket") ?? "";
     if (!/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
-    const record = await this.ctx.storage.get<TicketRecord>("ticket:" + ticket);
-    await this.ctx.storage.delete("ticket:" + ticket);
-    if (!record || record.expires_at <= Date.now()) return json({ error: "expired_network_ticket" }, 401);
+    const record = await this.ctx.storage.get<TicketRecord>("active-ticket");
+    if (!record || record.ticket !== ticket || record.expires_at <= Date.now()) return json({ error: "expired_network_ticket" }, 401);
 
+    for (const existing of this.ctx.getWebSockets()) existing.close(1012, "network session replaced");
+    await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
