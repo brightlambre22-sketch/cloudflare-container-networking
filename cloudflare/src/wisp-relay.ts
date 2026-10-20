@@ -146,15 +146,18 @@ export class WispRelay extends DurableObject {
     const port = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint16(1, true);
     const host = new TextDecoder().decode(payload.subarray(3)).trim();
     if (payload[0] !== 0x01 || !isAllowedDestination(host, port)) {
+      console.warn("WISP_CONNECT_REJECTED", JSON.stringify({ streamId, host, port, protocol: payload[0] }));
       socket.send(closePacket(streamId, 0x48));
       return;
     }
+    console.log("WISP_CONNECT_REQUEST", JSON.stringify({ streamId, host, port }));
     if (this.streams.has(streamId)) await this.closeStream(streamId);
 
     this.pendingStreams.add(streamId);
     try {
       const tcp = connect({ hostname: host, port });
       await tcp.opened;
+      console.log("WISP_CONNECT_OPENED", JSON.stringify({ streamId, host, port }));
       this.pendingStreams.delete(streamId);
       if (this.closedStreams.has(streamId) || socket.readyState !== WebSocket.OPEN) {
         this.closedStreams.delete(streamId);
@@ -169,7 +172,8 @@ export class WispRelay extends DurableObject {
       this.streams.set(streamId, stream);
       socket.send(continuePacket(streamId, INITIAL_BUFFER));
       void this.pumpTcpToWebSocket(socket, streamId, stream);
-    } catch {
+    } catch (error) {
+      console.error("WISP_CONNECT_FAILED", JSON.stringify({ streamId, host, port, error: String(error) }));
       this.pendingStreams.delete(streamId);
       this.closedStreams.delete(streamId);
       socket.send(closePacket(streamId, 0x42));
@@ -177,11 +181,18 @@ export class WispRelay extends DurableObject {
   }
 
   private async pumpTcpToWebSocket(socket: WebSocket, streamId: number, stream: TcpStream): Promise<void> {
+    let loggedFirstRead = false;
     try {
       while (socket.readyState === WebSocket.OPEN) {
         const { value, done } = await stream.reader.read();
         if (done) break;
-        if (value?.byteLength) socket.send(packet(0x02, streamId, value));
+        if (value?.byteLength) {
+          if (!loggedFirstRead) {
+            console.log("WISP_FIRST_TCP_DATA", JSON.stringify({ streamId, bytes: value.byteLength }));
+            loggedFirstRead = true;
+          }
+          socket.send(packet(0x02, streamId, value));
+        }
       }
       if (socket.readyState === WebSocket.OPEN) socket.send(closePacket(streamId, 0x02));
     } catch {
