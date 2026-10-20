@@ -257,10 +257,24 @@ export default {
       if (!claim.ok) return json(await claim.json(), claim.status);
 
       const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (!allocationResponse.ok) {
+        await authRegistry.fetch("https://account-registry.internal/auth/status", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, status: "error" }),
+        });
+        return json({ error: "virtual_network_allocation_failed", detail: (await allocationResponse.text()).slice(0, 160) }, 503);
+      }
+      const allocationBody = await allocationResponse.json() as { allocation: { virtual_ip: string; virtual_mac: string } };
+      const allocation = allocationBody.allocation;
       const created = await accountRegistry.fetch("https://account-registry.internal/create", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ account_id: accountId, name: username, baseline_id: baselineId,
-          snapshot_identity: accountId, api_key_sha256: apiKeyHash }),
+          snapshot_identity: accountId, api_key_sha256: apiKeyHash,
+          virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac }),
       });
       if (!created.ok) {
         await authRegistry.fetch("https://account-registry.internal/auth/status", {
@@ -297,6 +311,7 @@ export default {
 
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
       return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+        virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         snapshot_cloned: false, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
         provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." }, 202);
     }
@@ -396,12 +411,20 @@ export default {
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
       const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
       const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const allocationResponse = await env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users")).fetch("https://account-registry.internal/network/allocate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (!allocationResponse.ok) return json({ error: "virtual_network_allocation_failed" }, 503);
+      const allocationBody = await allocationResponse.json() as { allocation: { virtual_ip: string; virtual_mac: string } };
+      const allocation = allocationBody.allocation;
       const created = await registry.fetch("https://account-registry.internal/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           account_id: accountId, name, baseline_id: baselineId,
           snapshot_identity: accountId, api_key_sha256: apiKeyHash,
+          virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         }),
       });
       if (!created.ok) return json({ error: "account_record_creation_failed" }, 502);
@@ -444,7 +467,8 @@ export default {
 
       return json({
         account_id: accountId, name, status: "ready", baseline_id: baselineId,
-        snapshot_identity: accountId, api_key: accountApiKey,
+        snapshot_identity: accountId, virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
+        api_key: accountApiKey,
         api_key_notice: "Store this key securely; it is returned only once.",
         runtime: "snapshot-provisioned; no container started; headless VM execution not yet wired",
       }, 201);
