@@ -83,6 +83,7 @@ export class WispRelay extends DurableObject {
     await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
+    server.binaryType = "arraybuffer";
     // This relay keeps live TCP Socket objects in memory. Use a non-hibernating
     // WebSocket accept so the Durable Object cannot evict those streams while idle.
     server.accept();
