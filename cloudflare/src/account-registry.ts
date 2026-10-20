@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { VIRTUAL_NETWORK } from "./virtual-network";
 
 export type AccountStatus = "provisioning" | "ready" | "error";
 
@@ -150,7 +151,7 @@ export class AccountRegistry extends DurableObject {
       const existing = await this.ctx.storage.get<{ account_id: string; virtual_ip: string; virtual_mac: string }>(allocationKey);
       if (existing) return json({ allocation: existing, reused: true });
       const nextHost = await this.ctx.storage.get<number>("network-next-host") ?? 2;
-      if (!Number.isInteger(nextHost) || nextHost < 2 || nextHost > 65534) {
+      if (!Number.isInteger(nextHost) || nextHost < VIRTUAL_NETWORK.first_allocatable_host || nextHost > VIRTUAL_NETWORK.last_allocatable_host) {
         return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
       }
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.account_id));
@@ -159,7 +160,7 @@ export class AccountRegistry extends DurableObject {
         .map((part) => part.toString(16).padStart(2, "0")).join(":");
       const allocation = {
         account_id: body.account_id,
-        virtual_ip: "10.240." + Math.floor(nextHost / 256) + "." + (nextHost % 256),
+        virtual_ip: VIRTUAL_NETWORK.cidr.startsWith("10.240.") ? "10.240." + Math.floor(nextHost / 256) + "." + (nextHost % 256) : "",
         virtual_mac: virtualMac,
       };
       await this.ctx.storage.put(allocationKey, allocation);
