@@ -359,7 +359,7 @@ try{
   if(!ticketResponse.ok||typeof ticketData.ticket!=='string'||!/^[a-f0-9]{64}$/.test(ticketData.ticket))throw new Error(ticketData.error||'network_ticket_failed');
   networkTicket=ticketData.ticket;
 }catch(e){statusText('Could not authorize the account network relay: '+(e&&e.message?e.message:String(e)));report('\n*** NETWORK RELAY TICKET FAILED; VM startup stopped. ***\n');return}
-const relayUrl='wisps://'+window.location.host+'/api/network/wisp?account_id='+encodeURIComponent(networkIdentity)+'&ticket='+encodeURIComponent(networkTicket);
+const relayUrl='wisps://'+window.location.host+'/api/network/wisp/?account_id='+encodeURIComponent(networkIdentity)+'&ticket='+encodeURIComponent(networkTicket);
 try{
 window.emulator=new V86({
 wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
