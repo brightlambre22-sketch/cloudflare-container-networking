@@ -148,10 +148,6 @@ export class AccountRegistry extends DurableObject {
         return json({ error: "invalid_account_id" }, 400);
       }
       const allocationKey = "network-allocation:" + body.account_id;
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.account_id));
-      const bytes = new Uint8Array(digest);
-      const virtualMac = [0x02, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]]
-        .map((part) => part.toString(16).padStart(2, "0")).join(":");
       // The counter and account mapping must be committed atomically. Requests to a
       // Durable Object can interleave across awaits; a plain get/put sequence can duplicate IPs.
       const result = await this.ctx.storage.transaction(async (txn) => {
@@ -162,6 +158,10 @@ export class AccountRegistry extends DurableObject {
             nextHost > VIRTUAL_NETWORK.last_allocatable_ordinal) return null;
         const virtualIp = virtualIpForOrdinal(nextHost);
         if (!virtualIp) return null;
+        // Encode the unique allocation ordinal in the locally administered MAC so
+        // it is collision-free within this pool, not merely hash-derived.
+        const virtualMac = [0x02, 0, 0, 0, Math.floor(nextHost / 256), nextHost % 256]
+          .map((part) => part.toString(16).padStart(2, "0")).join(":");
         const allocation = { account_id: body.account_id, virtual_ip: virtualIp, virtual_mac: virtualMac };
         await txn.put(allocationKey, allocation);
         await txn.put("network-next-host", nextHost + 1);
