@@ -57,6 +57,7 @@ function isAllowedDestination(host: string, port: number): boolean {
 export class WispRelay extends DurableObject {
   private streams = new Map<number, TcpStream>();
   private clients = new Set<WebSocket>();
+  private closedStreams = new Set<number>();
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -126,6 +127,7 @@ export class WispRelay extends DurableObject {
       return;
     }
     if (type === 0x04) {
+      this.closedStreams.add(streamId);
       await this.closeStream(streamId);
       return;
     }
@@ -134,6 +136,7 @@ export class WispRelay extends DurableObject {
   }
 
   private async openTcp(socket: WebSocket, streamId: number, payload: Uint8Array): Promise<void> {
+    this.closedStreams.delete(streamId);
     if (streamId === 0 || payload.byteLength < 4 || this.streams.size >= MAX_STREAMS) {
       socket.send(closePacket(streamId, 0x41));
       return;
@@ -149,6 +152,10 @@ export class WispRelay extends DurableObject {
     try {
       const tcp = connect({ hostname: host, port });
       await tcp.opened;
+      if (this.closedStreams.has(streamId) || socket.readyState !== WebSocket.OPEN) {
+        try { tcp.close(); } catch { /* already closed */ }
+        return;
+      }
       const stream: TcpStream = {
         socket: tcp,
         writer: tcp.writable.getWriter(),
