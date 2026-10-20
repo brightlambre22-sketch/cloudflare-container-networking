@@ -18,8 +18,8 @@ test("signup stores server-side PBKDF2 credentials and enforces unique usernames
   assert.match(registry, /password\.length < 4/);
   assert.match(dashboard, /if\(creating&&pass\.length<4\)/);
   assert.match(worker, /virtual_network_allocation_failed/);
-  assert.match(worker, /network\\/allocate/);
-  assert.match(worker, /virtual_ip: allocation\\.virtual_ip/);
+  assert.ok(worker.includes("/network/allocate"));
+  assert.ok(worker.includes("virtual_ip: allocation.virtual_ip"));
   assert.match(worker, /snapshot_cloned: false/);
   assert.doesNotMatch(worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"')), /snapshot_initialization_required: true/);
   assert.match(dashboard, /snapshot_initialization_required===true/);
@@ -37,9 +37,11 @@ test("sessions expire and are bound to the account ID for every snapshot operati
 test("signup allocates a persistent virtual IP and queues cloning from a ready Admin baseline", () => {
   assert.match(worker, /const baselineId = env\.VM_BASELINE_ID \?\? "admin"/);
   assert.match(worker, /admin_baseline_not_ready/);
-  assert.match(worker, /snapshot_cloned: true/);
   const signup = worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"'));
   assert.match(signup, /baselineGeneration/);
+  assert.match(signup, /snapshot_cloned: false/);
+  assert.match(signup, /status: "provisioning"/);
+  assert.match(signup, /ACCOUNT_PROVISIONER/);
   assert.doesNotMatch(signup, /headlessV86Roundtrip|snapshot_initialization_required: true/);
   assert.match(registry, /network-allocation:/);
   assert.match(registry, /network-next-host/);
