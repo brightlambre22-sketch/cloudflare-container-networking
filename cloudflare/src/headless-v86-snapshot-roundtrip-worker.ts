@@ -267,6 +267,8 @@ if [ -z "$iface" ]; then
   iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E "^(eth|en|wlan)" | head -n 1 | cut -d " " -f 1)
 fi
 echo DHCP_INTERFACE=$iface
+echo DHCP_EXPECTED_IP=${virtualIp}
+echo DHCP_EXPECTED_GATEWAY=${routerIp}
 if [ -z "$iface" ]; then
   echo NIC_MISSING
   cat /proc/net/dev
@@ -277,11 +279,15 @@ fi
 tries=0
 while [ "$tries" -lt 30 ]; do
   /sbin/udhcpc -f -n -q -i "$iface"
-  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then
+  actual_ip=$(/sbin/ifconfig "$iface" | awk '/inet addr:/{sub(/.*inet addr:/,"");sub(/ .*/,"");print;exit} /inet /{for(i=1;i<=NF;i++)if($i=="inet"){print $(i+1);exit}}')
+  actual_gateway=$(/sbin/route -n | awk '$1=="0.0.0.0"{print $2;exit}')
+  echo DHCP_ACTUAL_IP=$actual_ip
+  echo DHCP_ACTUAL_GATEWAY=$actual_gateway
+  if [ "$actual_ip" = "${virtualIp}" ] && [ "$actual_gateway" = "${routerIp}" ]; then
     echo DHCP_OK
     exit 0
   fi
-  echo DHCP_RETRYING_NO_LEASE
+  echo DHCP_RETRYING_NO_LEASE_OR_WRONG_ADDRESS
   tries=$((tries+1))
   sleep 3
 done
@@ -292,12 +298,12 @@ exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 105000, true);
+      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 360000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
         ? "guest_nic_missing"
-        : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_dhcp_lease_and_default_route_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
+        : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_expected_dhcp_ip_and_gateway_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
       if (stages.dhcp.passed) {
         await runStage("tls_download",
