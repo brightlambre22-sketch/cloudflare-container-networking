@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { VIRTUAL_NETWORK } from "./virtual-network";
+import { VIRTUAL_NETWORK, virtualIpForOrdinal } from "./virtual-network";
 
 export type AccountStatus = "provisioning" | "ready" | "error";
 
@@ -150,22 +150,33 @@ export class AccountRegistry extends DurableObject {
       const allocationKey = "network-allocation:" + body.account_id;
       const existing = await this.ctx.storage.get<{ account_id: string; virtual_ip: string; virtual_mac: string }>(allocationKey);
       if (existing) return json({ allocation: existing, reused: true });
-      const nextHost = await this.ctx.storage.get<number>("network-next-host") ?? 2;
-      if (!Number.isInteger(nextHost) || nextHost < VIRTUAL_NETWORK.first_allocatable_host || nextHost > VIRTUAL_NETWORK.last_allocatable_host) {
+      const nextHost = await this.ctx.storage.get<number>("network-next-host") ?? VIRTUAL_NETWORK.first_allocatable_ordinal;
+      if (!Number.isInteger(nextHost) || nextHost < VIRTUAL_NETWORK.first_allocatable_ordinal || nextHost > VIRTUAL_NETWORK.last_allocatable_ordinal) {
         return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
       }
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.account_id));
       const bytes = new Uint8Array(digest);
       const virtualMac = [0x02, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]]
         .map((part) => part.toString(16).padStart(2, "0")).join(":");
+      const virtualIp = virtualIpForOrdinal(nextHost);
+      if (!virtualIp) return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
       const allocation = {
         account_id: body.account_id,
-        virtual_ip: VIRTUAL_NETWORK.gateway.split(".").slice(0, 2).join(".") + "." + Math.floor(nextHost / 256) + "." + (nextHost % 256),
+        virtual_ip: virtualIp,
         virtual_mac: virtualMac,
       };
       await this.ctx.storage.put(allocationKey, allocation);
       await this.ctx.storage.put("network-next-host", nextHost + 1);
       return json({ allocation, reused: false }, 201);
+    }
+
+    const networkIdentityMatch = url.pathname.match(/^\\/network\\/identity\\/([^/]+)$/);
+    if (networkIdentityMatch && request.method === "GET") {
+      const accountId = decodeURIComponent(networkIdentityMatch[1]);
+      if (!validAccountId(accountId)) return json({ error: "invalid_account_id" }, 400);
+      const record = await this.ctx.storage.get<StoredAccount>("account:" + accountId);
+      if (!record) return json({ error: "account_not_found" }, 404);
+      return json({ account_id: record.account_id, virtual_ip: record.virtual_ip, virtual_mac: record.virtual_mac });
     }
 
     if (url.pathname === "/create" && request.method === "POST") {
