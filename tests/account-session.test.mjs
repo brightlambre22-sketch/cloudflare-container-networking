@@ -87,8 +87,8 @@ test("account network identity feeds a stable synthetic DHCP lease through the a
   assert.ok(worker.includes("/api/network/ticket"));
   assert.ok(worker.includes("/api/network/wisp"));
   assert.ok(worker.includes("virtual_ip: identity.virtual_ip"));
-  assert.ok(wispRelay.includes("this.ctx.storage.put(\"ticket:\" + ticket"));
-  assert.ok(wispRelay.includes("this.ctx.storage.delete(\"ticket:\" + ticket"));
+  assert.ok(wispRelay.includes("active-ticket"));
+  assert.ok(wispRelay.includes("record.ticket !== ticket"));
   assert.ok(wispRelay.includes("connect({ hostname: host, port })"));
   assert.ok(wispRelay.includes("port !== 80 && port !== 443"));
   assert.ok(wispRelay.includes("INITIAL_BUFFER"));
