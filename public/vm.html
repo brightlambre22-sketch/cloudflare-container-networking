@@ -518,7 +518,7 @@ function beginAccountSession(data,launchVm=true){
   }
   window.snapshotIdentity=data.account_id;
   window.snapshotAuthToken=data.session_token;
-  if(typeof data.virtual_ip==='string'&&/^10\\.240\\.\\d{1,3}\\.(?:[2-9]|[1-9]\\d|1\\d\\d|2[0-4]\\d|25[0-4])$/.test(data.virtual_ip))window.snapshotVirtualIp=data.virtual_ip;
+  if(typeof data.virtual_ip==='string'&&/^10\.240\.\d{1,3}\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])$/.test(data.virtual_ip))window.snapshotVirtualIp=data.virtual_ip;
   if(typeof data.virtual_mac==='string'&&/^02(?::[0-9a-f]{2}){5}$/.test(data.virtual_mac))window.snapshotVirtualMac=data.virtual_mac;
   try {
     if (typeof data.username === 'string') sessionStorage.setItem('vm-username', data.username);
