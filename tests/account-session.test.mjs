@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const registry = readFileSync(new URL("../cloudflare/src/account-registry.ts", import.meta.url), "utf8");
+const wispRelay = readFileSync(new URL("../cloudflare/src/wisp-relay.ts", import.meta.url), "utf8");
+const virtualNetwork = readFileSync(new URL("../cloudflare/src/virtual-network.ts", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../cloudflare/src/index.ts", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../public/vm.html", import.meta.url), "utf8");
 
@@ -72,4 +74,25 @@ test("restored VMs automatically test the network and save after the test return
   assert.match(dashboard, /runDiagnostic\('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true\)/);
   assert.match(dashboard, /if\(saveAfter&&bootComplete\)/);
   assert.match(dashboard, /const saved=await saveVmState\(false\)/);
+});
+
+test("account network identity feeds a stable synthetic DHCP lease through the authenticated Cloudflare WISP relay", () => {
+  assert.ok(virtualNetwork.includes("first_allocatable_ordinal: 1"));
+  assert.ok(virtualNetwork.includes("last_allocatable_ordinal: 64767"));
+  assert.ok(virtualNetwork.includes("virtualIpForOrdinal"));
+  assert.ok(virtualNetwork.includes("virtualGatewayForIp"));
+  assert.ok(registry.includes("/network/allocate"));
+  assert.ok(registry.includes("/network/identity/"));
+  assert.ok(worker.includes("WISP_RELAY"));
+  assert.ok(worker.includes("/api/network/ticket"));
+  assert.ok(worker.includes("/api/network/wisp"));
+  assert.ok(worker.includes("virtual_ip: identity.virtual_ip"));
+  assert.ok(wispRelay.includes("this.ctx.storage.put(\"ticket:\" + ticket"));
+  assert.ok(wispRelay.includes("this.ctx.storage.delete(\"ticket:\" + ticket"));
+  assert.ok(wispRelay.includes("connect({ hostname: host, port })"));
+  assert.ok(wispRelay.includes("port !== 80 && port !== 443"));
+  assert.ok(wispRelay.includes("INITIAL_BUFFER"));
+  assert.ok(dashboard.includes("vm_ip:virtualIp"));
+  assert.ok(dashboard.includes("router_ip:routerIp"));
+  assert.ok(dashboard.includes("/api/network/ticket"));
 });
