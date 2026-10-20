@@ -82,7 +82,7 @@ test("account network identity feeds a stable synthetic DHCP lease through the a
   assert.ok(virtualNetwork.includes("virtualIpForOrdinal"));
   assert.ok(virtualNetwork.includes("virtualGatewayForIp"));
   assert.ok(registry.includes("/network/allocate"));
-  assert.ok(registry.includes("/network/identity/"));
+  assert.ok(registry.includes("networkIdentityMatch"));
   assert.ok(worker.includes("WISP_RELAY"));
   assert.ok(worker.includes("/api/network/ticket"));
   assert.ok(worker.includes("/api/network/wisp"));
