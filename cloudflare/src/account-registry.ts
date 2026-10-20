@@ -8,6 +8,8 @@ export interface AccountRecord {
   status: AccountStatus;
   baseline_id: string;
   snapshot_identity: string;
+  virtual_ip: string;
+  virtual_mac: string;
   created_at: string;
   updated_at: string;
   error: string | null;
@@ -137,16 +139,44 @@ export class AccountRegistry extends DurableObject {
       return json({ ok: true, account_id: session.account_id });
     }
 
+    // Serialized Durable Object allocation makes signup retries idempotent and
+    // prevents concurrent accounts from receiving the same virtual IPv4 address.
+    if (url.pathname === "/network/allocate" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { account_id?: unknown } | null;
+      if (typeof body?.account_id !== "string" || !validAccountId(body.account_id)) {
+        return json({ error: "invalid_account_id" }, 400);
+      }
+      const allocationKey = "network-allocation:" + body.account_id;
+      const existing = await this.ctx.storage.get<{ account_id: string; virtual_ip: string; virtual_mac: string }>(allocationKey);
+      if (existing) return json({ allocation: existing, reused: true });
+      const nextHost = await this.ctx.storage.get<number>("network-next-host") ?? 2;
+      if (!Number.isInteger(nextHost) || nextHost < 2 || nextHost > 65534) {
+        return json({ error: "virtual_ipv4_pool_exhausted" }, 409);
+      }
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.account_id));
+      const bytes = new Uint8Array(digest);
+      const virtualMac = [0x02, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]]
+        .map((part) => part.toString(16).padStart(2, "0")).join(":");
+      const allocation = {
+        account_id: body.account_id,
+        virtual_ip: "10.240." + Math.floor(nextHost / 256) + "." + (nextHost % 256),
+        virtual_mac: virtualMac,
+      };
+      await this.ctx.storage.put(allocationKey, allocation);
+      await this.ctx.storage.put("network-next-host", nextHost + 1);
+      return json({ allocation, reused: false }, 201);
+    }
+
     if (url.pathname === "/create" && request.method === "POST") {
       const body = await request.json().catch(() => null) as {
         account_id?: unknown; name?: unknown; baseline_id?: unknown;
-        snapshot_identity?: unknown; api_key_sha256?: unknown;
+        snapshot_identity?: unknown; api_key_sha256?: unknown; virtual_ip?: unknown; virtual_mac?: unknown;
       } | null;
       if (!body || typeof body.account_id !== "string" || !validAccountId(body.account_id) ||
           typeof body.name !== "string" || body.name.length < 1 || body.name.length > 80 ||
           typeof body.baseline_id !== "string" || !/^[a-zA-Z0-9._-]{1,64}$/.test(body.baseline_id) ||
           typeof body.snapshot_identity !== "string" || !/^acct-[a-f0-9-]{36}$/.test(body.snapshot_identity) ||
-          typeof body.api_key_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(body.api_key_sha256)) {
+          typeof body.api_key_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(body.api_key_sha256) ||\n          typeof body.virtual_ip !== "string" || !/^10\\.240\\.(?:[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.(?:[2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])$/.test(body.virtual_ip) ||\n          typeof body.virtual_mac !== "string" || !/^02(?::[0-9a-f]{2}){5}$/.test(body.virtual_mac)) {
         return json({ error: "invalid_account_record" }, 400);
       }
       const key = "account:" + body.account_id;
@@ -158,6 +188,8 @@ export class AccountRegistry extends DurableObject {
         status: "provisioning",
         baseline_id: body.baseline_id,
         snapshot_identity: body.snapshot_identity,
+        virtual_ip: body.virtual_ip,
+        virtual_mac: body.virtual_mac,
         created_at: now,
         updated_at: now,
         error: null,
