@@ -51,9 +51,18 @@ export default {
     await writeProgress("running", "booting_linux", { wasm_module_loaded: wasm.module_loaded });
     const base = new URL(request.url);
     const allocationRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+    // The allocator intentionally accepts only production account IDs. For test-* snapshot
+    // identities, derive a deterministic synthetic account UUID so repeated test runs reuse
+    // the same address without weakening production account-ID validation.
+    let networkAccountId = snapshotIdentity;
+    if (!networkAccountId.startsWith("acct-")) {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(snapshotIdentity));
+      const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      networkAccountId = "acct-" + hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-4" + hex.slice(13, 16) + "-8" + hex.slice(17, 20) + "-" + hex.slice(20, 32);
+    }
     const allocationResponse = await allocationRegistry.fetch("https://account-registry.internal/network/allocate", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ account_id: snapshotIdentity }),
+      body: JSON.stringify({ account_id: networkAccountId }),
     });
     if (!allocationResponse.ok) {
       await writeProgress("error", "network_identity", { error: "virtual_network_allocation_failed" });
