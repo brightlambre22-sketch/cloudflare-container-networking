@@ -24,7 +24,7 @@ export default {
       const ticket = requestUrl.searchParams.get("ticket") ?? "";
       if (!/^(acct-[a-f0-9-]{36}|test-[a-z0-9-]{1,32})$/.test(identity) || !/^[a-f0-9]{64}$/.test(ticket)) return Response.json({ error: "invalid_network_ticket" }, { status: 401 });
       const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(identity));
-      return relay.fetch(new Request("https://wisp-relay.internal/wisp?ticket=" + encodeURIComponent(ticket), request));
+      return relay.fetch(request);
     }
     if (path === "/ready") return Response.json({ ready: true, probe: "tinycore-dhcp-openssl-ca" });
     if ((path !== "/run" && path !== "/snapshot-roundtrip") || request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
