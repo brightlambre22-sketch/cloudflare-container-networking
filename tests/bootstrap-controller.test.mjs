@@ -40,6 +40,9 @@ test("VM uses a built ISO asset, a single supported relay configuration, and ret
   assert.ok(html.includes("NIC_MISSING"), "report driver diagnostics instead of retrying DHCP forever without a NIC");
   assert.ok(html.includes("DHCP_RETRYING_NO_LEASE"));
   assert.ok(html.includes("echo DHCP_OK"), "successful DHCP path should emit its completion marker");
+  assert.ok(html.includes("DHCP_EXPECTED_IP=$expected_ip"), "DHCP must report the account-assigned address it expects");
+  assert.ok(html.includes("DHCP_ASSIGNED_IP=$ip"), "DHCP must report the address actually leased");
+  assert.ok(html.includes("DHCP_ASSIGNED_GATEWAY=$gw"), "DHCP must report the gateway actually installed");
   const firstCommand = html.match(/const commands=\[\s*`([\s\S]*?)`,/);
   assert.ok(firstCommand, "first startup command should be present");
   assert.ok(firstCommand[1].length < 900, "network init command must stay short enough to avoid terminal input truncation");
