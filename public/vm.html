@@ -347,6 +347,19 @@ next()
 
 results.value='';save();report('\n===== VM RUN STARTED =====\n');
 statusText('Loading v86â¦');
+const networkIdentity=window.snapshotIdentity||'admin';
+const virtualIp=typeof window.snapshotVirtualIp==='string'&&/^10\.240\.\d{1,3}\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])$/.test(window.snapshotVirtualIp)?window.snapshotVirtualIp:'10.240.0.2';
+const ipParts=virtualIp.split('.');
+const routerIp='10.240.'+Number(ipParts[2])+'.1';
+let networkTicket='';
+try{
+  const ticketBody=networkIdentity==='admin'?{account_id:'admin',admin_code:window.snapshotAdminCode}:{account_id:networkIdentity,session_token:window.snapshotAuthToken};
+  const ticketResponse=await fetch(apiUrl+'/api/network/ticket',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ticketBody)});
+  const ticketData=await ticketResponse.json().catch(()=>({}));
+  if(!ticketResponse.ok||typeof ticketData.ticket!=='string'||!/^[a-f0-9]{64}$/.test(ticketData.ticket))throw new Error(ticketData.error||'network_ticket_failed');
+  networkTicket=ticketData.ticket;
+}catch(e){statusText('Could not authorize the account network relay: '+(e&&e.message?e.message:String(e)));report('\n*** NETWORK RELAY TICKET FAILED; VM startup stopped. ***\n');return}
+const relayUrl='wisps://'+window.location.host+'/api/network/wisp?account_id='+encodeURIComponent(networkIdentity)+'&ticket='+encodeURIComponent(networkTicket);
 try{
 window.emulator=new V86({
 wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
