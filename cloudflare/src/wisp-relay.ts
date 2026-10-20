@@ -37,7 +37,7 @@ function isAllowedDestination(host: string, port: number): boolean {
   if (port !== 80 && port !== 443) return false;
   // v86's WISP adapter sends the resolved IPv4 destination, not the original hostname.
   const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
+  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part))) return false;
   const octets = parts.map(Number);
   if (octets.some((part) => part < 0 || part > 255)) return false;
   const [a, b, c] = octets;
