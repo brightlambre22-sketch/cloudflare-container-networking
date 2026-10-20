@@ -160,7 +160,7 @@ export class AccountRegistry extends DurableObject {
         .map((part) => part.toString(16).padStart(2, "0")).join(":");
       const allocation = {
         account_id: body.account_id,
-        virtual_ip: VIRTUAL_NETWORK.cidr.startsWith("10.240.") ? "10.240." + Math.floor(nextHost / 256) + "." + (nextHost % 256) : "",
+        virtual_ip: VIRTUAL_NETWORK.gateway.split(".").slice(0, 2).join(".") + "." + Math.floor(nextHost / 256) + "." + (nextHost % 256),
         virtual_mac: virtualMac,
       };
       await this.ctx.storage.put(allocationKey, allocation);
