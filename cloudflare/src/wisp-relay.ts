@@ -57,6 +57,7 @@ function isAllowedDestination(host: string, port: number): boolean {
 export class WispRelay extends DurableObject {
   private streams = new Map<number, TcpStream>();
   private clients = new Set<WebSocket>();
+  private pendingStreams = new Set<number>();
   private closedStreams = new Set<number>();
 
   async fetch(request: Request): Promise<Response> {
@@ -127,7 +128,7 @@ export class WispRelay extends DurableObject {
       return;
     }
     if (type === 0x04) {
-      this.closedStreams.add(streamId);
+      if (this.pendingStreams.has(streamId)) this.closedStreams.add(streamId);
       await this.closeStream(streamId);
       return;
     }
@@ -137,7 +138,7 @@ export class WispRelay extends DurableObject {
 
   private async openTcp(socket: WebSocket, streamId: number, payload: Uint8Array): Promise<void> {
     this.closedStreams.delete(streamId);
-    if (streamId === 0 || payload.byteLength < 4 || this.streams.size >= MAX_STREAMS) {
+    if (streamId === 0 || payload.byteLength < 4 || this.streams.size + this.pendingStreams.size >= MAX_STREAMS) {
       socket.send(closePacket(streamId, 0x41));
       return;
     }
@@ -149,10 +150,13 @@ export class WispRelay extends DurableObject {
     }
     if (this.streams.has(streamId)) await this.closeStream(streamId);
 
+    this.pendingStreams.add(streamId);
     try {
       const tcp = connect({ hostname: host, port });
       await tcp.opened;
+      this.pendingStreams.delete(streamId);
       if (this.closedStreams.has(streamId) || socket.readyState !== WebSocket.OPEN) {
+        this.closedStreams.delete(streamId);
         try { tcp.close(); } catch { /* already closed */ }
         return;
       }
@@ -165,6 +169,8 @@ export class WispRelay extends DurableObject {
       socket.send(continuePacket(streamId, INITIAL_BUFFER));
       void this.pumpTcpToWebSocket(socket, streamId, stream);
     } catch {
+      this.pendingStreams.delete(streamId);
+      this.closedStreams.delete(streamId);
       socket.send(closePacket(streamId, 0x42));
     }
   }
