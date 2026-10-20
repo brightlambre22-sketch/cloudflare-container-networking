@@ -56,6 +56,7 @@ function isAllowedDestination(host: string, port: number): boolean {
  */
 export class WispRelay extends DurableObject {
   private streams = new Map<number, TcpStream>();
+  private clients = new Set<WebSocket>();
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -73,11 +74,22 @@ export class WispRelay extends DurableObject {
     const record = await this.ctx.storage.get<TicketRecord>("active-ticket");
     if (!record || record.ticket !== ticket || record.expires_at <= Date.now()) return json({ error: "expired_network_ticket" }, 401);
 
-    for (const existing of this.ctx.getWebSockets()) existing.close(1012, "network session replaced");
+    for (const existing of this.clients) {
+      try { existing.close(1012, "network session replaced"); } catch { /* already closed */ }
+    }
+    this.clients.clear();
     await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
+    // This relay keeps live TCP Socket objects in memory. Use a non-hibernating
+    // WebSocket accept so the Durable Object cannot evict those streams while idle.
+    server.accept();
+    this.clients.add(server);
+    server.addEventListener("message", (event) => {
+      void this.webSocketMessage(server, event.data as string | ArrayBuffer);
+    });
+    server.addEventListener("close", () => { void this.webSocketClose(server); });
+    server.addEventListener("error", () => { void this.webSocketError(server); });
     // Sending CONTINUE first selects WISP v1, which is supported by v86.
     server.send(continuePacket(0, INITIAL_BUFFER));
     return new Response(null, { status: 101, webSocket: client });
@@ -175,12 +187,13 @@ export class WispRelay extends DurableObject {
   }
 
   async webSocketClose(socket: WebSocket): Promise<void> {
-    socket.close(1000, "closed");
+    this.clients.delete(socket);
     await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
   }
 
   async webSocketError(socket: WebSocket): Promise<void> {
-    socket.close(1011, "WISP relay error");
+    this.clients.delete(socket);
+    try { if (socket.readyState === WebSocket.OPEN) socket.close(1011, "WISP relay error"); } catch { /* already closed */ }
     await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
   }
 }
