@@ -18,7 +18,7 @@ export default {
   async fetch(request: Request, env: { ASSETS: Fetcher; VM_SNAPSHOTS: R2Bucket; ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>; WISP_RELAY: DurableObjectNamespace<WispRelay> }) {
     const requestUrl = new URL(request.url);
     const path = requestUrl.pathname;
-    if (path === "/api/network/wisp" && request.method === "GET") {
+    if (path === "/api/network/wisp/" && request.method === "GET") {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return Response.json({ error: "websocket_upgrade_required" }, { status: 426 });
       const identity = requestUrl.searchParams.get("identity") ?? "";
       const ticket = requestUrl.searchParams.get("ticket") ?? "";
@@ -78,7 +78,7 @@ export default {
       return Response.json({ probe: "tinycore-snapshot-save-readback", runtime: "workerd", passed: false, guest_booted: false, error: "invalid_network_ticket" }, { status: 500 });
     }
     const wsScheme = base.protocol === "https:" ? "wisps://" : "wisp://";
-    const relayUrl = wsScheme + base.host + "/api/network/wisp?identity=" + encodeURIComponent(snapshotIdentity) + "&ticket=" + encodeURIComponent(ticketData.ticket);
+    const relayUrl = wsScheme + base.host + "/api/network/wisp/?identity=" + encodeURIComponent(snapshotIdentity) + "&ticket=" + encodeURIComponent(ticketData.ticket);
     let finishBoot!: (value: { booted: boolean; reason?: string }) => void;
     const bootObserved = new Promise<{ booted: boolean; reason?: string }>((resolve) => { finishBoot = resolve; });
     let started = false;
