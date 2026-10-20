@@ -38,7 +38,7 @@ test("signup allocates a persistent virtual IP and queues cloning from a ready A
   assert.match(worker, /const baselineId = env\.VM_BASELINE_ID \?\? "admin"/);
   assert.match(worker, /admin_baseline_not_ready/);
   const signup = worker.slice(worker.indexOf('if (url.pathname === "\/api\/auth\/signup"'), worker.indexOf('if (url.pathname === "\/api\/auth\/login"'));
-  assert.match(signup, /baselineGeneration/);
+  assert.match(signup, /baseline_id: baselineId/);
   assert.match(signup, /snapshot_cloned: false/);
   assert.match(signup, /status: "provisioning"/);
   assert.match(signup, /ACCOUNT_PROVISIONER/);
