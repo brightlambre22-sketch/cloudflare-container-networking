@@ -5,6 +5,8 @@ import test from "node:test";
 const registry = readFileSync(new URL("../cloudflare/src/account-registry.ts", import.meta.url), "utf8");
 const wispRelay = readFileSync(new URL("../cloudflare/src/wisp-relay.ts", import.meta.url), "utf8");
 const virtualNetwork = readFileSync(new URL("../cloudflare/src/virtual-network.ts", import.meta.url), "utf8");
+const headlessRoundtrip = readFileSync(new URL("../cloudflare/src/headless-v86-snapshot-roundtrip-worker.ts", import.meta.url), "utf8");
+const headlessRoundtripConfig = readFileSync(new URL("../cloudflare/wrangler.headless-v86-roundtrip.toml", import.meta.url), "utf8");
 const worker = readFileSync(new URL("../cloudflare/src/index.ts", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../public/vm.html", import.meta.url), "utf8");
 
@@ -82,6 +84,7 @@ test("account network identity feeds a stable synthetic DHCP lease through the a
   assert.ok(virtualNetwork.includes("virtualIpForOrdinal"));
   assert.ok(virtualNetwork.includes("virtualGatewayForIp"));
   assert.ok(registry.includes("/network/allocate"));
+  assert.ok(registry.includes("storage.transaction"));
   assert.ok(registry.includes("networkIdentityMatch"));
   assert.ok(worker.includes("WISP_RELAY"));
   assert.ok(worker.includes("/api/network/ticket"));
@@ -95,4 +98,9 @@ test("account network identity feeds a stable synthetic DHCP lease through the a
   assert.ok(dashboard.includes("vm_ip:virtualIp"));
   assert.ok(dashboard.includes("router_ip:routerIp"));
   assert.ok(dashboard.includes("/api/network/ticket"));
+  assert.ok(headlessRoundtrip.includes("vm_ip: virtualIp"));
+  assert.ok(headlessRoundtrip.includes("router_ip: routerIp"));
+  assert.ok(headlessRoundtrip.includes("/api/network/wisp/"));
+  assert.ok(!headlessRoundtrip.includes("relay.widgetry.org"));
+  assert.ok(headlessRoundtripConfig.includes("name = \"WISP_RELAY\""));
 });
