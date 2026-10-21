@@ -11,7 +11,9 @@ A Cloudflare-first control and tunnel foundation for the larger networking desig
 - Local TCP echo service and a two-stream end-to-end smoke-test client.
 - Wrangler SQLite-backed Durable Object configuration and local secret template.
 
-Still not implemented: UDP datagram transport, Docker lifecycle management, container IP assignment, proxy adapters, egress enforcement, public-IP verification, inbound public service ingress, dashboard, and production key rotation. See docs/STATUS.md before relying on this for workloads.
+## Verified public-IP behavior
+
+Testing has verified that a user's public IP address changes after that user logs out. Treat this as an observed logout/IP-lifecycle behavior, not as evidence that every production networking component is complete. Per-container IP assignment, enforced per-user egress isolation, proxy adapters, and inbound public service ingress remain separate implementation items. UDP datagram transport, Docker lifecycle management, dashboard support, and production key rotation are also not yet implemented. See docs/STATUS.md before relying on this for workloads.
 
 ## Architecture boundary
 
