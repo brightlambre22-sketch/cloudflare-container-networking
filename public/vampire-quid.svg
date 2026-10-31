@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title desc">
+<title id="title">Vampire Quid</title><desc id="desc">A gothic vampire mascot holding a gold pound coin.</desc>
+<defs>
+ <radialGradient id="bg"><stop stop-color="#27113f"/><stop offset="1" stop-color="#080812"/></radialGradient>
+ <linearGradient id="cape" x2="1" y2="1"><stop stop-color="#f51e42"/><stop offset=".5" stop-color="#171322"/><stop offset="1" stop-color="#08080e"/></linearGradient>
+ <linearGradient id="gold" x2="0" y2="1"><stop stop-color="#fff1a6"/><stop offset=".45" stop-color="#f9bd35"/><stop offset="1" stop-color="#a95b08"/></linearGradient>
+ <linearGradient id="skin" x2="1" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#9da4c8"/></linearGradient>
+ <filter id="glow"><feGaussianBlur stdDeviation="9"/></filter>
+</defs>
+<circle cx="320" cy="300" r="265" fill="#f01845" opacity=".18" filter="url(#glow)"/>
+<circle cx="320" cy="300" r="255" fill="url(#bg)" stroke="#a32c77" stroke-width="5"/>
+<path d="M110 550 45 430 155 450 112 335 230 390 250 175 320 230 390 175 410 390 528 335 485 450 595 430 530 550 430 490 320 570 210 490Z" fill="url(#cape)" stroke="#ec244b" stroke-width="13" stroke-linejoin="round"/>
+<path d="M235 190Q210 95 290 70Q390 35 425 145L405 300Q370 370 285 330Q225 290 235 190Z" fill="url(#skin)" stroke="#161322" stroke-width="12"/>
+<path d="M245 155 195 105 210 205 250 220M410 155 460 105 445 205 405 220" fill="#dce0f4" stroke="#171322" stroke-width="13" stroke-linejoin="round"/>
+<path d="M245 190Q280 145 315 190L280 220Z M345 190Q385 145 415 185L375 220Z" fill="#171322"/>
+<path d="M267 194 305 200 280 210Z M360 200 399 190 380 212Z" fill="#ff244b"/>
+<circle cx="290" cy="202" r="7" fill="#ffefc4"/><circle cx="380" cy="202" r="7" fill="#ffefc4"/>
+<path d="M290 270Q335 310 390 260Q380 335 330 338Q295 325 290 270Z" fill="#1a0713" stroke="#171322" stroke-width="9"/>
+<path d="M305 278 320 308 331 280 346 310 360 276" fill="#fff" stroke="#fff" stroke-width="5"/>
+<path d="M275 355 320 410 365 355 350 430 290 430Z" fill="#f7f3ed" stroke="#171322" stroke-width="9"/>
+<path d="M205 410Q265 365 320 420Q380 365 440 410L410 520 320 565 230 520Z" fill="#10101a" stroke="#e52b50" stroke-width="10"/>
+<path d="M265 405 320 455 375 405" fill="none" stroke="#e52b50" stroke-width="12"/>
+<circle cx="320" cy="430" r="25" fill="url(#gold)" stroke="#fff0a0" stroke-width="6"/><circle cx="320" cy="430" r="10" fill="#c51c42"/>
+<path d="M425 390Q470 335 520 370Q550 390 540 430Q525 470 480 460L430 445Z" fill="url(#skin)" stroke="#171322" stroke-width="10"/>
+<circle cx="495" cy="320" r="88" fill="url(#gold)" stroke="#6e3508" stroke-width="13"/>
+<circle cx="495" cy="320" r="70" fill="none" stroke="#fff0a0" stroke-width="5"/>
+<text x="495" y="353" text-anchor="middle" font-family="Georgia,serif" font-size="100" font-weight="bold" fill="#6e3508">£</text>
+<path d="M425 390Q450 370 465 400L475 425Q460 440 440 425M515 400Q535 375 550 400L555 430Q535 445 520 425" fill="none" stroke="#171322" stroke-width="12" stroke-linecap="round"/>
+<text x="320" y="610" text-anchor="middle" font-family="Georgia,serif" font-size="35" font-weight="bold" letter-spacing="4" fill="#f8c65a">VAMPIRE QUID</text>
+</svg>
