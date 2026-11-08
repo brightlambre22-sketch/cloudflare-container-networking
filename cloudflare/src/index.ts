@@ -6,7 +6,14 @@ import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
 import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
 import { AccountProvisioner } from "./account-provisioner";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner };
+import { WispRelay } from "./wisp-relay";
+import { handleProjectStorageRequest } from "./project-storage";
+import { handlePayments } from "./payments";
+import { BusinessDatabase, businessDatabaseFetch, handleBusinessDatabaseRequest } from "./business-database";
+import { InventoryLedger } from "./inventory-ledger";
+import { handleMarketplaceRequest } from "./marketplace-directory";
+import { handleDoorDashRequest } from "./doordash";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner, WispRelay, BusinessDatabase, InventoryLedger };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
@@ -15,12 +22,24 @@ export interface Env {
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
   ACCOUNT_PROVISIONER: DurableObjectNamespace<AccountProvisioner>;
+  BUSINESS_DATABASE: DurableObjectNamespace<BusinessDatabase>;
+  INVENTORY_LEDGER: DurableObjectNamespace<InventoryLedger>;
+  WISP_RELAY: DurableObjectNamespace<WispRelay>;
   VM_BASELINE_ID?: string;
-  ADMIN_ACCESS_CODE?: string;
+  ADMIN_ACCESS_KEY?: string;
   VM_SNAPSHOTS: R2Bucket;
+  PROJECT_STORAGE: R2Bucket;
+  PAYMENTS_ENCRYPTION_KEY?: string;
+  DOORDASH_ENVIRONMENT?: string;
+  DOORDASH_DEVELOPER_ID?: string;
+  DOORDASH_KEY_ID?: string;
+  DOORDASH_SIGNING_SECRET?: string;
   ASSETS: Fetcher;
   TUNNEL_TOKEN: string;
   CLIENT_TOKEN: string;
+  ORACLE_ACCOUNT_EXEC_ENABLED?: string;
+  STOCKROOM_ORIGIN?: string;
+  STOCKROOM_GATEWAY_TOKEN?: string;
 }
 
 function authorized(header: string | null, expected: string | undefined): boolean {
@@ -61,9 +80,373 @@ function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
 
+async function getOrAllocateAccountNetworkIdentity(
+  env: Env, accountId: string,
+): Promise<{ virtual_ip: string; virtual_mac: string } | null> {
+  const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+  const read = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
+  if (read.ok) {
+    const current = await read.json() as { virtual_ip?: unknown; virtual_mac?: unknown };
+    if (typeof current.virtual_ip === "string" && typeof current.virtual_mac === "string") {
+      return { virtual_ip: current.virtual_ip, virtual_mac: current.virtual_mac };
+    }
+  }
+  // Existing accounts created before this feature are assigned an address on first login.
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId }),
+  });
+  if (!allocationResponse.ok) return null;
+  const allocationBody = await allocationResponse.json() as {
+    allocation?: { virtual_ip?: unknown; virtual_mac?: unknown };
+  };
+  const allocation = allocationBody.allocation;
+  if (typeof allocation?.virtual_ip !== "string" || typeof allocation.virtual_mac !== "string") return null;
+  const assigned = await accountRegistry.fetch("https://account-registry.internal/network/assign", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId, virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac }),
+  });
+  if (!assigned.ok) return null;
+  const identity = await assigned.json() as { virtual_ip?: unknown; virtual_mac?: unknown };
+  if (typeof identity.virtual_ip !== "string" || typeof identity.virtual_mac !== "string") return null;
+  return { virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Read-only account ID inventory from the shared AccountRegistry Durable Object.
+    // Uses the existing /api/admin/accounts path with GET; does not delete or modify accounts.
+    if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const listed = await authRegistry.fetch("https://account-registry.internal/admin/list-accounts", { method: "GET" })
+        .catch(() => new Response("registry_list_failed", { status: 500 }));
+      if (!listed.ok) return json({ error: "account_registry_list_failed", status: listed.status }, 502);
+      const result = await listed.json() as { accounts?: Array<{ username?: unknown; account_id?: unknown }>; account_ids?: unknown; count?: unknown };
+      const accounts = Array.isArray(result.accounts) ? result.accounts.filter((entry) =>
+        typeof entry.account_id === "string" && /^acct-[a-f0-9-]{36}$/.test(entry.account_id)
+      ) : [];
+      const accountIds = accounts.map((entry) => entry.account_id as string).sort();
+      return json({ ok: true, source: "cloudflare-container-networking_AccountRegistry", prefix: "acct-", count: accountIds.length, account_ids: accountIds, accounts });
+    }
+
+    // Permanently clear all user accounts, sessions, per-account snapshots, and queued provisioning jobs.
+    // The shared auth registry and Admin baseline snapshot are preserved.
+    if (url.pathname === "/api/admin/accounts" && request.method === "DELETE") {
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+
+      let purgeRequest: { dry_run?: unknown; confirm?: unknown };
+      try { purgeRequest = await request.json() as typeof purgeRequest; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      const dryRun = purgeRequest.dry_run !== false;
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+
+      // Preview is the default. Destructive execution requires an explicit body confirmation.
+      if (dryRun) {
+        const inventory = await authRegistry.fetch("https://account-registry.internal/admin/list-accounts", { method: "GET" });
+        if (!inventory.ok) return json({ error: "account_registry_list_failed", status: inventory.status }, 502);
+        const listed = await inventory.json() as { accounts?: Array<{ username?: unknown; account_id?: unknown }> };
+        const accounts = Array.isArray(listed.accounts) ? listed.accounts.filter((entry) =>
+          typeof entry.account_id === "string" && /^acct-[a-f0-9-]{36}$/.test(entry.account_id)
+        ) : [];
+        return json({
+          ok: true, dry_run: true, account_count: accounts.length,
+          accounts: accounts.map((entry) => ({ username: entry.username, account_id: entry.account_id })),
+          next_step: 'Repeat DELETE /api/admin/accounts with a JSON body containing dry_run=false and confirm="PURGE_ALL_VAMPIREQUID_ACCOUNTS" to execute.',
+        });
+      }
+      if (purgeRequest.confirm !== "PURGE_ALL_VAMPIREQUID_ACCOUNTS") {
+        return json({ error: "confirmation_required", required: "PURGE_ALL_VAMPIREQUID_ACCOUNTS" }, 400);
+      }
+
+      const cleared = await authRegistry.fetch("https://account-registry.internal/admin/clear-accounts", { method: "POST" });
+      if (!cleared.ok) return json({ error: "account_registry_clear_failed", status: cleared.status }, 502);
+      const result = await cleared.json() as { accounts?: Array<{ account_id?: unknown; username?: unknown }> };
+      const accounts = Array.isArray(result.accounts) ? result.accounts : [];
+      const failures: Array<{ account_id: string; step: string; error: string }> = [];
+      let snapshotsDeleted = 0;
+      let projectsDeleted = 0;
+      let productMediaDeleted = 0;
+
+      await Promise.all(accounts.map(async (entry) => {
+        const accountId = typeof entry.account_id === "string" ? entry.account_id : "";
+        if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return;
+
+        const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+        const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
+
+        const accountData = await accountRegistry.fetch("https://account-registry.internal/admin/purge-account-data", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        }).catch((error) => new Response(String(error), { status: 500 }));
+        if (!accountData.ok) {
+          failures.push({ account_id: accountId, step: "account_registry", error: "http_" + accountData.status });
+        }
+
+        const provisionerData = await provisioner.fetch("https://account-provisioner.internal/purge", { method: "POST" })
+          .catch((error) => new Response(String(error), { status: 500 }));
+        if (!provisionerData.ok) failures.push({ account_id: accountId, step: "provisioner", error: "http_" + provisionerData.status });
+
+        let cursor: string | undefined;
+        do {
+          const page = await env.VM_SNAPSHOTS.list({ prefix: "vm-snapshots/" + accountId + "/", limit: 1000, cursor })
+            .catch(() => null);
+          if (!page) {
+            failures.push({ account_id: accountId, step: "snapshot_objects", error: "r2_list_failed" });
+            break;
+          }
+          if (page.objects.length) {
+            try {
+              await env.VM_SNAPSHOTS.delete(page.objects.map((object) => object.key));
+              snapshotsDeleted += page.objects.length;
+            } catch {
+              failures.push({ account_id: accountId, step: "snapshot_objects", error: "r2_delete_failed" });
+            }
+          }
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+
+        // Remove the account's saved Studio projects along with its VM snapshot.
+        let projectCursor: string | undefined;
+        do {
+          const page = await env.PROJECT_STORAGE.list({
+            prefix: "accounts/" + accountId + "/projects/", limit: 1000,
+            ...(projectCursor ? { cursor: projectCursor } : {}),
+          }).catch(() => null);
+          if (!page) {
+            failures.push({ account_id: accountId, step: "project_objects", error: "r2_list_failed" });
+            break;
+          }
+          if (page.objects.length) {
+            try {
+              await env.PROJECT_STORAGE.delete(page.objects.map((object) => object.key));
+              projectsDeleted += page.objects.length;
+            } catch {
+              failures.push({ account_id: accountId, step: "project_objects", error: "r2_delete_failed" });
+              break;
+            }
+          }
+          projectCursor = page.truncated ? page.cursor : undefined;
+        } while (projectCursor);
+
+        let mediaCursor: string | undefined;
+        do {
+          const page = await env.PROJECT_STORAGE.list({
+            prefix: "merchants/" + accountId + "/products/", limit: 1000,
+            ...(mediaCursor ? { cursor: mediaCursor } : {}),
+          }).catch(() => null);
+          if (!page) {
+            failures.push({ account_id: accountId, step: "product_media", error: "r2_list_failed" });
+            break;
+          }
+          if (page.objects.length) {
+            try {
+              await env.PROJECT_STORAGE.delete(page.objects.map((object) => object.key));
+              productMediaDeleted += page.objects.length;
+            } catch {
+              failures.push({ account_id: accountId, step: "product_media", error: "r2_delete_failed" });
+              break;
+            }
+          }
+          mediaCursor = page.truncated ? page.cursor : undefined;
+        } while (mediaCursor);
+
+        try {
+          await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json");
+        } catch {
+          failures.push({ account_id: accountId, step: "runtime_job", error: "r2_delete_failed" });
+        }
+      }));
+
+      return json({
+        ok: failures.length === 0,
+        accounts_cleared_from_auth_registry: accounts.length,
+        account_records_and_snapshots_processed: accounts.filter((entry) => typeof entry.account_id === "string" && /^acct-[a-f0-9-]{36}$/.test(entry.account_id)).length,
+        snapshot_objects_deleted: snapshotsDeleted,
+        project_objects_deleted: projectsDeleted,
+        product_media_objects_deleted: productMediaDeleted,
+        failures,
+        preserved: ["auth-users Durable Object namespace identity", "Admin baseline snapshot"],
+      }, failures.length ? 207 : 200);
+    }
+
+    // Targeted, authenticated purge for explicitly supplied account IDs only.
+    // This is separate from DELETE /api/admin/accounts, which clears all registered accounts.
+    if (url.pathname === "/api/admin/purge-accounts" && request.method === "POST") {
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const body = await request.json().catch(() => null) as {
+        account_ids?: unknown; dry_run?: unknown; confirm?: unknown;
+      } | null;
+      if (!body || !Array.isArray(body.account_ids) || body.account_ids.length < 1 ||
+          body.account_ids.length > 50 ||
+          !body.account_ids.every((id) => typeof id === "string" && /^acct-[a-f0-9-]{36}$/.test(id)) ||
+          new Set(body.account_ids).size !== body.account_ids.length) {
+        return json({ error: "invalid_account_ids", note: "Supply 1-50 unique acct- IDs." }, 400);
+      }
+      const dryRun = body.dry_run !== false;
+      if (!dryRun && body.confirm !== "PURGE_SPECIFIED_ACCOUNTS") {
+        return json({ error: "confirmation_required", required: "PURGE_SPECIFIED_ACCOUNTS" }, 400);
+      }
+
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const results: Array<Record<string, unknown>> = [];
+      for (const accountId of body.account_ids as string[]) {
+        const result: Record<string, unknown> = {
+          account_id: accountId, dry_run: dryRun, steps: {}, errors: [],
+        };
+        const steps = result.steps as Record<string, unknown>;
+        const errors = result.errors as Array<{ step: string; error: string }>;
+
+        // Inventory R2 snapshot keys first; never include the Admin baseline prefix.
+        const snapshotKeys: string[] = [];
+        const projectKeys: string[] = [];
+        const mediaKeys: string[] = [];
+        let cursor: string | undefined;
+        let listFailed = false;
+        let projectListFailed = false;
+        let mediaListFailed = false;
+        do {
+          const page = await env.VM_SNAPSHOTS.list({
+            prefix: "vm-snapshots/" + accountId + "/", limit: 1000, cursor,
+          }).catch(() => null);
+          if (!page) { listFailed = true; break; }
+          snapshotKeys.push(...page.objects.map((object) => object.key));
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+        steps.snapshot_objects_found = snapshotKeys.length;
+        steps.runtime_job_exists = Boolean(await env.VM_SNAPSHOTS.head("runtime-jobs/" + accountId + ".json").catch(() => null));
+        if (listFailed) errors.push({ step: "snapshot_list", error: "r2_list_failed" });
+
+        let projectCursor: string | undefined;
+        do {
+          const page = await env.PROJECT_STORAGE.list({
+            prefix: "accounts/" + accountId + "/projects/", limit: 1000,
+            ...(projectCursor ? { cursor: projectCursor } : {}),
+          }).catch(() => null);
+          if (!page) { projectListFailed = true; break; }
+          projectKeys.push(...page.objects.map((object) => object.key));
+          projectCursor = page.truncated ? page.cursor : undefined;
+        } while (projectCursor);
+        steps.project_objects_found = projectKeys.length;
+        if (projectListFailed) errors.push({ step: "project_list", error: "r2_list_failed" });
+        let mediaCursor: string | undefined;
+        do {
+          const page = await env.PROJECT_STORAGE.list({
+            prefix: "merchants/" + accountId + "/products/", limit: 1000,
+            ...(mediaCursor ? { cursor: mediaCursor } : {}),
+          }).catch(() => null);
+          if (!page) { mediaListFailed = true; break; }
+          mediaKeys.push(...page.objects.map((object) => object.key));
+          mediaCursor = page.truncated ? page.cursor : undefined;
+        } while (mediaCursor);
+        steps.product_media_objects_found = mediaKeys.length;
+        if (mediaListFailed) errors.push({ step: "product_media_list", error: "r2_list_failed" });
+
+        if (!dryRun && !listFailed && !projectListFailed && !mediaListFailed) {
+          const authPurge = await authRegistry.fetch("https://account-registry.internal/admin/purge-account", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ account_id: accountId }),
+          }).catch(() => new Response("request_failed", { status: 500 }));
+          if (authPurge.ok) {
+            const authResult = await authPurge.json().catch(() => null) as Record<string, unknown> | null;
+            steps.shared_auth_and_network_records = authResult ?? { ok: false, error: "invalid_json_response" };
+            if (!authResult || authResult.ok !== true || (authResult.verification as { passed?: unknown } | undefined)?.passed !== true) {
+              errors.push({ step: "shared_auth_and_network_records", error: "readback_verification_failed" });
+            }
+          } else errors.push({ step: "shared_auth_and_network_records", error: "http_" + authPurge.status });
+
+          const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+          const accountPurge = await accountRegistry.fetch("https://account-registry.internal/admin/purge-account-data", {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ account_id: accountId }),
+          }).catch(() => new Response("request_failed", { status: 500 }));
+          if (accountPurge.ok) {
+            const accountResult = await accountPurge.json().catch(() => null) as Record<string, unknown> | null;
+            steps.account_durable_object_storage = accountResult ?? { ok: false, error: "invalid_json_response" };
+            if (!accountResult || accountResult.ok !== true || (accountResult.verification as { passed?: unknown } | undefined)?.passed !== true) {
+              errors.push({ step: "account_durable_object_storage", error: "readback_verification_failed" });
+            }
+          } else errors.push({ step: "account_durable_object_storage", error: "http_" + accountPurge.status });
+
+          const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
+          const provisionerPurge = await provisioner.fetch("https://account-provisioner.internal/purge", { method: "POST" })
+            .catch(() => new Response("request_failed", { status: 500 }));
+          if (provisionerPurge.ok) steps.provisioner_durable_object_storage = await provisionerPurge.json().catch(() => ({ ok: true }));
+          else errors.push({ step: "provisioner_durable_object_storage", error: "http_" + provisionerPurge.status });
+
+          for (let offset = 0; offset < snapshotKeys.length; offset += 1000) {
+            try {
+              await env.VM_SNAPSHOTS.delete(snapshotKeys.slice(offset, offset + 1000));
+            } catch {
+              errors.push({ step: "snapshot_objects", error: "r2_delete_failed" });
+              break;
+            }
+          }
+          steps.snapshot_objects_deleted = errors.some((entry) => entry.step === "snapshot_objects") ? null : snapshotKeys.length;
+          for (let offset = 0; offset < projectKeys.length; offset += 1000) {
+            try {
+              await env.PROJECT_STORAGE.delete(projectKeys.slice(offset, offset + 1000));
+            } catch {
+              errors.push({ step: "project_objects", error: "r2_delete_failed" });
+              break;
+            }
+          }
+          steps.project_objects_deleted = errors.some((entry) => entry.step === "project_objects") ? null : projectKeys.length;
+          for (let offset = 0; offset < mediaKeys.length; offset += 1000) {
+            try {
+              await env.PROJECT_STORAGE.delete(mediaKeys.slice(offset, offset + 1000));
+            } catch {
+              errors.push({ step: "product_media_objects", error: "r2_delete_failed" });
+              break;
+            }
+          }
+          steps.product_media_objects_deleted = errors.some((entry) => entry.step === "product_media_objects") ? null : mediaKeys.length;
+          try {
+            await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json");
+            steps.runtime_job_deleted = true;
+          } catch {
+            errors.push({ step: "runtime_job", error: "r2_delete_failed" });
+          }
+        } else if (dryRun) {
+          steps.would_delete = [
+            "matching auth-user and auth-session records",
+            "network allocation for this account (IP counter is preserved)",
+            "all storage keys and alarm in the account-specific AccountRegistry object",
+            "all storage keys and alarm in the account-specific AccountProvisioner object",
+            "R2 objects under vm-snapshots/" + accountId + "/",
+            "R2 objects under accounts/" + accountId + "/projects/",
+            "R2 objects under merchants/" + accountId + "/products/",
+            "R2 object runtime-jobs/" + accountId + ".json",
+          ];
+        }
+
+        result.ok = dryRun ? !listFailed && !projectListFailed && !mediaListFailed : errors.length === 0;
+        results.push(result);
+      }
+      return json({
+        ok: results.every((entry) => entry.ok === true),
+        dry_run: dryRun,
+        account_count: results.length,
+        results,
+        limitations: [
+          "This purges account-scoped storage and R2 objects, not the Durable Object namespace itself.",
+          "Cloudflare dashboard request metrics or historical metadata may remain visible.",
+          "Any account data stored outside these known Durable Object keys and R2 prefixes is not covered.",
+        ],
+      }, results.some((entry) => entry.ok !== true) ? 207 : 200);
+    }
 
     // Authenticated API read-back verification for a snapshot written by Workerd.
     // This validates R2 bytes only; it does not claim that v86 restored the guest.
@@ -200,14 +583,242 @@ export default {
     }
 
 
-    // Signup clones the verified Admin baseline; it never starts a Linux boot.
+    if (url.pathname === "/api/ambassador/signup" && request.method === "POST") {
+      let body: { username?: unknown; password?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 8 || password.length > 128) {
+        return json({ error: "username_must_be_2_to_32_chars_and_password_8_to_128_chars" }, 400);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const rateLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "signup" }),
+      });
+      if (!rateLimit.ok) return json(await rateLimit.json(), rateLimit.status);
+      const response = await authRegistry.fetch("https://account-registry.internal/ambassador/signup", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }),
+      });
+      return json(await response.json(), response.status);
+    }
+
+    if (url.pathname === "/api/ambassador/login" && request.method === "POST") {
+      let body: { username?: unknown; password?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || !password || password.length > 128) return json({ error: "invalid_credentials" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const rateLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "login" }),
+      });
+      if (!rateLimit.ok) return json({ error: "rate_limited" }, 429);
+      const response = await authRegistry.fetch("https://account-registry.internal/ambassador/login", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }),
+      });
+      return json(await response.json(), response.status);
+    }
+
+    if (url.pathname === "/api/ambassador/deals" && (request.method === "GET" || request.method === "POST")) {
+      const body = request.method === "POST"
+        ? await request.json().catch(() => null) as Record<string, unknown> | null
+        : null;
+      const ambassadorId = request.method === "GET"
+        ? url.searchParams.get("ambassador_id") ?? ""
+        : (typeof body?.ambassador_id === "string" ? body.ambassador_id : "");
+      const token = request.method === "GET"
+        ? url.searchParams.get("session_token") ?? ""
+        : (typeof body?.session_token === "string" ? body.session_token : "");
+      if (!/^amb-[a-f0-9-]{36}$/.test(ambassadorId) || !/^[a-f0-9]{64}$/.test(token)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/ambassador/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ambassador_id: ambassadorId, token }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const merchantAccountId = request.method === "POST" && body?.action !== "list"
+        ? "acct-" + crypto.randomUUID() : "";
+      const payload = request.method === "POST"
+        ? { ...body, ambassador_id: ambassadorId, token, ...(merchantAccountId ? { account_id: merchantAccountId } : {}) }
+        : null;
+      const path = request.method === "GET"
+        ? "/ambassador/deals?ambassador_id=" + encodeURIComponent(ambassadorId) + "&token=" + encodeURIComponent(token)
+        : "/ambassador/deals";
+      const result = await authRegistry.fetch("https://account-registry.internal" + path, {
+        method: request.method,
+        ...(payload ? { headers: { "content-type": "application/json" }, body: JSON.stringify(payload) } : {}),
+      });
+      const resultBody = await result.json().catch(() => ({ error: "deal_service_failed" })) as Record<string, unknown>;
+      if (request.method === "POST" && body?.action !== "list" && result.ok) {
+        const businessName = typeof body?.business_name === "string" ? body.business_name.trim() : "";
+        const baselineId = env.VM_BASELINE_ID ?? "admin";
+        const markDeal = async (status: "account_created" | "error") => authRegistry.fetch(
+          "https://account-registry.internal/ambassador/deal/status",
+          { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ambassador_id: ambassadorId, token, deal_id: (resultBody.deal as { deal_id?: string } | undefined)?.deal_id,
+              account_id: merchantAccountId, status }) },
+        );
+        if (!/^[a-zA-Z0-9._-]{1,64}$/.test(baselineId) || baselineId.startsWith("acct-")) {
+          await markDeal("error");
+          return json({ error: "invalid_vm_baseline_id" }, 500);
+        }
+        const baselineObject = await env.VM_SNAPSHOTS.get("vm-snapshots/" + baselineId + "/manifest.json");
+        if (!baselineObject) {
+          await markDeal("error");
+          return json({ error: "admin_baseline_snapshot_not_found", baseline_id: baselineId }, 409);
+        }
+        const baseline = await baselineObject.json().catch(() => null) as { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown } | null;
+        if (!baseline || baseline.version !== 1 || typeof baseline.generation !== "string" ||
+            !/^[a-z0-9-]{1,40}$/.test(baseline.generation) || !Number.isInteger(baseline.chunks) ||
+            (baseline.chunks as number) < 1 || (baseline.chunks as number) > 128 ||
+            !Number.isInteger(baseline.byteLength) || (baseline.byteLength as number) < 1 ||
+            (baseline.byteLength as number) > 536870912 ||
+            baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
+          await markDeal("error");
+          return json({ error: "admin_baseline_manifest_invalid" }, 500);
+        }
+        const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+        const accountApiKey = "acct_" + Array.from(keyBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
+        const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+        const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account_id: merchantAccountId }),
+        });
+        if (!allocationResponse.ok) {
+          await markDeal("error");
+          return json({ error: "virtual_network_allocation_failed" }, 503);
+        }
+        const allocationBody = await allocationResponse.json() as { allocation?: { virtual_ip?: string; virtual_mac?: string } };
+        const allocation = allocationBody.allocation;
+        if (typeof allocation?.virtual_ip !== "string" || typeof allocation.virtual_mac !== "string") {
+          await markDeal("error");
+          return json({ error: "virtual_network_allocation_invalid" }, 502);
+        }
+        const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(merchantAccountId));
+        const created = await accountRegistry.fetch("https://account-registry.internal/create", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account_id: merchantAccountId, name: businessName.slice(0, 80), baseline_id: baselineId,
+            snapshot_identity: merchantAccountId, api_key_sha256: apiKeyHash, api_key: accountApiKey,
+            virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac, oracle_execution_enabled: true }),
+        });
+        if (!created.ok) {
+          await markDeal("error");
+          return json({ error: "merchant_account_record_creation_failed" }, 502);
+        }
+        const databaseReady = await businessDatabaseFetch(env, merchantAccountId, "initialize", { method: "POST" });
+        if (!databaseReady.ok) {
+          await markDeal("error");
+          return json({ error: "merchant_business_database_initialization_failed" }, 503);
+        }
+        const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(merchantAccountId));
+        const queued = await provisioner.fetch("https://account-provisioner.internal/start", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            identity: merchantAccountId,
+            username: "pending-" + merchantAccountId.slice(5, 17),
+            baseline_id: baselineId,
+            ambassador_id: ambassadorId,
+            deal_id: (resultBody.deal as { deal_id?: string } | undefined)?.deal_id,
+          }),
+        });
+        if (!queued.ok || queued.status !== 202) {
+          await markDeal("error");
+          return json({ error: "merchant_snapshot_clone_queue_failed" }, 502);
+        }
+        await markDeal("account_created");
+      }
+      if (request.method === "POST" && result.ok && typeof resultBody.invitation_token === "string") {
+        resultBody.claim_url = new URL("/signup.html?invite=" + encodeURIComponent(resultBody.invitation_token), url.origin).toString();
+      }
+      return json(resultBody, result.status);
+    }
+
+    // Claim a pre-created merchant account using the one-time invitation token.
+    // The merchant chooses their own credentials; the ambassador never receives them.
+    if (url.pathname === "/api/auth/claim-invitation" && request.method === "POST") {
+      let body: { username?: unknown; password?: unknown; invite_token?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      const inviteToken = typeof body.invite_token === "string" ? body.invite_token : "";
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 8 || password.length > 128 ||
+          !/^[a-f0-9]{64}$/.test(inviteToken)) return json({ error: "invalid_merchant_claim_fields" }, 400);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const rateLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "signup" }),
+      });
+      if (!rateLimit.ok) return json(await rateLimit.json(), rateLimit.status);
+      const lookup = await authRegistry.fetch("https://account-registry.internal/merchant-invite/lookup", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: inviteToken }),
+      });
+      if (!lookup.ok) return json({ error: "invitation_invalid_or_expired" }, 404);
+      const invitation = await lookup.json() as { account_id?: unknown; deal_id?: unknown };
+      const accountId = typeof invitation.account_id === "string" ? invitation.account_id : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invitation_account_invalid" }, 409);
+      const reservationId = crypto.randomUUID();
+      const jobObject = await env.VM_SNAPSHOTS.get("runtime-jobs/" + accountId + ".json");
+      const job = jobObject ? await jobObject.json().catch(() => null) as Record<string, unknown> | null : null;
+      if (job?.status === "error") return json({ error: "merchant_workspace_provisioning_failed", detail: job.error ?? "See provisioning diagnostics." }, 503);
+      const reserved = await authRegistry.fetch("https://account-registry.internal/merchant-invite/reserve", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: inviteToken, account_id: accountId, reservation_id: reservationId }),
+      });
+      if (!reserved.ok) return json({ error: "invitation_already_claimed_or_in_use" }, 409);
+      const createdUser = await authRegistry.fetch("https://account-registry.internal/auth/signup", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password, account_id: accountId }),
+      });
+      if (!createdUser.ok) return json(await createdUser.json().catch(() => ({ error: "merchant_login_creation_failed" })), createdUser.status);
+      const isComplete = job?.status === "complete";
+      if (isComplete) {
+        await authRegistry.fetch("https://account-registry.internal/auth/status", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, status: "ready" }),
+        });
+      }
+      let sessionResponse = await authRegistry.fetch(
+        "https://account-registry.internal/" + (isComplete ? "auth/login" : "auth/provisioning-session"),
+        { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password }) },
+      );
+      // The provisioner may finish between the progress read and session issue.
+      if (!sessionResponse.ok && !isComplete) {
+        sessionResponse = await authRegistry.fetch("https://account-registry.internal/auth/login", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+      }
+      if (!sessionResponse.ok) return json({ error: "merchant_claim_session_failed" }, 502);
+      const linked = await authRegistry.fetch("https://account-registry.internal/merchant-invite/complete", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: inviteToken, account_id: accountId, username, reservation_id: reservationId }),
+      });
+      if (!linked.ok) return json({ error: "merchant_login_created_but_invitation_link_failed" }, 502);
+      const session = await sessionResponse.json() as { account_id: string; session_token: string; expires_at: string };
+      const identityRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const identityResponse = await identityRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
+      const identity = identityResponse.ok ? await identityResponse.json() as { virtual_ip?: string; virtual_mac?: string } : {};
+      return json({ ...session, username, status: isComplete ? "complete" : "provisioning",
+        snapshot_identity: accountId, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac,
+        snapshot_cloned: isComplete, baseline_id: env.VM_BASELINE_ID ?? "admin",
+        progress_endpoint: "/api/auth/registration-status" }, 202);
+    }
+
+    // Ordinary merchant signup provisions a new merchant account directly.
     if (url.pathname === "/api/auth/signup" && request.method === "POST") {
       let body: { username?: unknown; password?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
       const password = typeof body.password === "string" ? body.password : "";
-      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 4 || password.length > 128) {
-        return json({ error: "username_must_be_2_to_32_chars_and_password_4_to_128_chars" }, 400);
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(username) || password.length < 8 || password.length > 128) {
+        return json({ error: "username_must_be_2_to_32_chars_and_password_8_to_128_chars" }, 400);
       }
 
       const baselineId = env.VM_BASELINE_ID ?? "admin";
@@ -217,7 +828,7 @@ export default {
       const baselinePrefix = "vm-snapshots/" + baselineId + "/";
       const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
       if (!baselineObject) return json({ error: "admin_baseline_snapshot_not_found", baseline_id: baselineId }, 409);
-      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; savedAt?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; dns_passed?: unknown; https_passed?: unknown } };
+      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; savedAt?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; ca_certificates_passed?: unknown } };
       try { baseline = await baselineObject.json() as typeof baseline; }
       catch { return json({ error: "admin_baseline_manifest_invalid" }, 500); }
       if (baseline.version !== 1 || typeof baseline.generation !== "string" ||
@@ -229,13 +840,6 @@ export default {
           baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
         return json({ error: "admin_baseline_manifest_invalid" }, 500);
       }
-      const checks = baseline.checks;
-      if (baseline.adminReady !== true || !checks || checks.guest_booted !== true ||
-          checks.shell_command_passed !== true || checks.dhcp_passed !== true ||
-          checks.dns_passed !== true || checks.https_passed !== true) {
-        return json({ error: "admin_baseline_not_ready", detail: "Save the Admin snapshot only after startup, DHCP, DNS, SSL and CA checks have completed." }, 409);
-      }
-
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
       const rateLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -257,10 +861,25 @@ export default {
       if (!claim.ok) return json(await claim.json(), claim.status);
 
       const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (!allocationResponse.ok) {
+        await authRegistry.fetch("https://account-registry.internal/auth/status", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, status: "error" }),
+        });
+        return json({ error: "virtual_network_allocation_failed", detail: (await allocationResponse.text()).slice(0, 160) }, 503);
+      }
+      const allocationBody = await allocationResponse.json() as { allocation: { virtual_ip: string; virtual_mac: string } };
+      const allocation = allocationBody.allocation;
       const created = await accountRegistry.fetch("https://account-registry.internal/create", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ account_id: accountId, name: username, baseline_id: baselineId,
-          snapshot_identity: accountId, api_key_sha256: apiKeyHash }),
+          snapshot_identity: accountId, api_key_sha256: apiKeyHash, api_key: accountApiKey,
+          virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
+          oracle_execution_enabled: true }),
       });
       if (!created.ok) {
         await authRegistry.fetch("https://account-registry.internal/auth/status", {
@@ -268,6 +887,21 @@ export default {
           body: JSON.stringify({ username, status: "error" }),
         });
         return json({ error: "account_record_creation_failed" }, 502);
+      }
+
+      // Provision the account's isolated SQLite business database during signup.
+      // Schema creation is idempotent; existing business records are never overwritten.
+      const databaseReady = await businessDatabaseFetch(env, accountId, "initialize", { method: "POST" });
+      if (!databaseReady.ok) {
+        await accountRegistry.fetch("https://account-registry.internal/account/" + accountId, {
+          method: "PATCH", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status: "error", error: "business_database_initialization_failed" }),
+        });
+        await authRegistry.fetch("https://account-registry.internal/auth/status", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, status: "error" }),
+        });
+        return json({ error: "business_database_initialization_failed" }, 503);
       }
 
       // Issue the browser session before marking the auth record ready.
@@ -297,6 +931,7 @@ export default {
 
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
       return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+        virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         snapshot_cloned: false, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
         provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." }, 202);
     }
@@ -320,7 +955,12 @@ export default {
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) return json({ error: "invalid_credentials" }, 401);
-      return json({ ...(await response.json() as Record<string, unknown>), username });
+      const login = await response.json() as Record<string, unknown>;
+      const accountId = typeof login.account_id === "string" ? login.account_id : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
+      const identity = await getOrAllocateAccountNetworkIdentity(env, accountId);
+      if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
+      return json({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac });
     }
 
     if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
@@ -339,6 +979,133 @@ export default {
       return json({ ...progress, complete: progress.status === "complete", ready_to_login: progress.status === "complete" });
     }
 
+    // Return the signed-in user's current API key when it was created after dashboard key display was enabled.
+    if (url.pathname === "/api/account/api-key" && request.method === "GET") {
+      const accountId = url.searchParams.get("account_id") ?? "";
+      const sessionToken = request.headers.get("authorization")?.startsWith("Bearer ")
+        ? request.headers.get("authorization")!.slice(7) : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(sessionToken)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, token: sessionToken }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const current = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/api-key", { method: "GET" });
+      if (!current.ok) return json(await current.json().catch(() => ({ error: "api_key_not_retrievable" })), current.status);
+      return json(await current.json());
+    }
+
+    // Rotate the signed-in user's POS API key. The raw key and its SHA-256 are stored for dashboard retrieval.
+    if (url.pathname === "/api/account/api-key/rotate" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      const sessionToken = typeof body.session_token === "string" ? body.session_token : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(sessionToken)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, token: sessionToken }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+
+      const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+      const apiKey = "acct_" + Array.from(keyBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(apiKey));
+      const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const updated = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/api-key", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key_sha256: apiKeyHash, api_key: apiKey }),
+      }).catch(() => new Response("account_key_rotation_failed", { status: 500 }));
+      if (!updated.ok) return json({ error: "api_key_rotation_failed", status: updated.status }, 502);
+      return json({ ok: true, account_id: accountId, api_key: apiKey, notice: "Copy this key now. It will not be shown again." });
+    }
+
+    // Permanently delete the authenticated user's account and all account-scoped data.
+    if (url.pathname === "/api/account/delete" && request.method === "DELETE") {
+      let body: { account_id?: unknown; session_token?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      const sessionToken = typeof body.session_token === "string" ? body.session_token : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(sessionToken)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, token: sessionToken }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+
+      const failures: string[] = [];
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const accountData = await accountRegistry.fetch("https://account-registry.internal/admin/purge-account-data", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      }).catch(() => new Response("account_data_purge_failed", { status: 500 }));
+      if (!accountData.ok) failures.push("account_registry");
+
+      const businessDatabasePurge = await businessDatabaseFetch(env, accountId, "purge", { method: "POST" })
+        .catch(() => new Response("business_database_purge_failed", { status: 500 }));
+      if (!businessDatabasePurge.ok) failures.push("business_database");
+
+      const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
+      const provisionerData = await provisioner.fetch("https://account-provisioner.internal/purge", { method: "POST" })
+        .catch(() => new Response("provisioner_purge_failed", { status: 500 }));
+      if (!provisionerData.ok) failures.push("provisioner");
+
+      for (const [bucket, prefix, label] of [
+        [env.VM_SNAPSHOTS, "vm-snapshots/" + accountId + "/", "snapshots"],
+        [env.PROJECT_STORAGE, "accounts/" + accountId + "/projects/", "projects"],
+      ] as Array<[R2Bucket, string, string]>) {
+        let cursor: string | undefined;
+        do {
+          const page = await bucket.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) }).catch(() => null);
+          if (!page) { failures.push(label + "_list"); break; }
+          if (page.objects.length) {
+            try { await bucket.delete(page.objects.map((object) => object.key)); }
+            catch { failures.push(label + "_delete"); break; }
+          }
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+      }
+      try { await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json"); }
+      catch { failures.push("runtime_job"); }
+
+      // Keep the auth record until all account data is removed so a failed deletion can be retried.
+      if (failures.length) return json({ error: "account_data_cleanup_incomplete", failures }, 207);
+      const authPurge = await authRegistry.fetch("https://account-registry.internal/admin/purge-account", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      }).catch(() => new Response("auth_purge_failed", { status: 500 }));
+      if (!authPurge.ok) return json({ error: "account_auth_cleanup_failed" }, 502);
+      const result = await authPurge.json().catch(() => ({})) as { verification?: { passed?: unknown } };
+      if (result.verification?.passed !== true) return json({ error: "account_auth_cleanup_unverified" }, 502);
+      return json({ ok: true, deleted: true, account_id: accountId });
+    }
+
+    if (url.pathname === "/api/auth/logout" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      const sessionToken = typeof body.session_token === "string" ? body.session_token : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(sessionToken)) return json({ error: "unauthorized" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const revoked = await authRegistry.fetch("https://account-registry.internal/auth/logout", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, token: sessionToken }),
+      });
+      if (!revoked.ok) return json({ error: "logout_failed" }, 502);
+      return json({ ok: true });
+    }
+
     if (url.pathname === "/api/auth/session" && request.method === "POST") {
       let body: { account_id?: unknown; session_token?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
@@ -348,7 +1115,41 @@ export default {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ account_id: body.account_id, token: body.session_token }),
       });
-      return response.ok ? json({ ok: true }) : json({ error: "unauthorized" }, 401);
+      if (!response.ok) return json({ error: "unauthorized" }, 401);
+      const verified = await response.json() as { username?: unknown };
+      const identity = await getOrAllocateAccountNetworkIdentity(env, body.account_id);
+      if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
+      return json({ ok: true, ...(typeof verified.username === "string" ? { username: verified.username } : {}), ...identity });
+    }
+
+    if (url.pathname === "/api/network/ticket" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown; admin_key?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      if (accountId === "admin") {
+                if (!env.ADMIN_ACCESS_KEY || typeof body.admin_key !== "string" || !authorized("Bearer " + body.admin_key, env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      } else {
+        if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account_id: accountId, token: body.session_token }),
+        });
+        if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      }
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+      const ticketResponse = await relay.fetch("https://wisp-relay.internal/ticket", { method: "POST" });
+      if (!ticketResponse.ok) return json({ error: "network_ticket_unavailable" }, 503);
+      return json(await ticketResponse.json());
+    }
+
+    if (url.pathname === "/api/network/wisp/" && request.method === "GET") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
+      const accountId = url.searchParams.get("account_id") ?? "";
+      const ticket = url.searchParams.get("ticket") ?? "";
+      if (!(accountId === "admin" || /^acct-[a-f0-9-]{36}$/.test(accountId)) || !/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+      return relay.fetch(request);
     }
 
     if (url.pathname === "/v1/accounts" && request.method === "POST") {
@@ -370,7 +1171,7 @@ export default {
       const baselinePrefix = "vm-snapshots/" + baselineId + "/";
       const baselineObject = await env.VM_SNAPSHOTS.get(baselinePrefix + "manifest.json");
       if (!baselineObject) return json({ error: "baseline_snapshot_not_found", baseline_id: baselineId }, 409);
-      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; dns_passed?: unknown; https_passed?: unknown } };
+      let baseline: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; ca_certificates_passed?: unknown } };
       try { baseline = await baselineObject.json() as typeof baseline; }
       catch { return json({ error: "baseline_manifest_invalid" }, 500); }
       if (baseline.version !== 1 || typeof baseline.generation !== "string" ||
@@ -382,13 +1183,6 @@ export default {
           baseline.chunks !== Math.ceil((baseline.byteLength as number) / 8388608)) {
         return json({ error: "baseline_manifest_invalid" }, 500);
       }
-      const baselineChecks = baseline.checks;
-      if (baselineId === "admin" && (baseline.adminReady !== true || !baselineChecks ||
-          baselineChecks.guest_booted !== true || baselineChecks.shell_command_passed !== true ||
-          baselineChecks.dhcp_passed !== true || baselineChecks.dns_passed !== true || baselineChecks.https_passed !== true)) {
-        return json({ error: "admin_baseline_not_ready" }, 409);
-      }
-
       const accountId = "acct-" + crypto.randomUUID();
       const generation = crypto.randomUUID();
       const keyBytes = crypto.getRandomValues(new Uint8Array(32));
@@ -396,12 +1190,20 @@ export default {
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
       const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
       const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const allocationResponse = await env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users")).fetch("https://account-registry.internal/network/allocate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (!allocationResponse.ok) return json({ error: "virtual_network_allocation_failed" }, 503);
+      const allocationBody = await allocationResponse.json() as { allocation: { virtual_ip: string; virtual_mac: string } };
+      const allocation = allocationBody.allocation;
       const created = await registry.fetch("https://account-registry.internal/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           account_id: accountId, name, baseline_id: baselineId,
           snapshot_identity: accountId, api_key_sha256: apiKeyHash,
+          virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         }),
       });
       if (!created.ok) return json({ error: "account_record_creation_failed" }, 502);
@@ -444,7 +1246,8 @@ export default {
 
       return json({
         account_id: accountId, name, status: "ready", baseline_id: baselineId,
-        snapshot_identity: accountId, api_key: accountApiKey,
+        snapshot_identity: accountId, virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
+        api_key: accountApiKey,
         api_key_notice: "Store this key securely; it is returned only once.",
         runtime: "snapshot-provisioned; no container started; headless VM execution not yet wired",
       }, 201);
@@ -468,7 +1271,7 @@ export default {
 
     if (url.pathname === "/api/admin/reset-snapshots") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.ADMIN_ACCESS_CODE || request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      if (!env.ADMIN_ACCESS_KEY || !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
       let body: { confirm?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       if (body.confirm !== "DELETE_ALL_VM_SNAPSHOTS") return json({ error: "confirmation_required", expected: "DELETE_ALL_VM_SNAPSHOTS" }, 400);
@@ -491,19 +1294,166 @@ export default {
 
     if (url.pathname === "/api/admin/access") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      let body: { code?: unknown };
-      try { body = (await request.json()) as { code?: unknown }; }
+      let body: { key?: unknown };
+      try { body = (await request.json()) as { key?: unknown }; }
       catch { return json({ error: "invalid_json" }, 400); }
-      if (!env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
-      if (typeof body.code !== "string" || body.code !== env.ADMIN_ACCESS_CODE) return json({ error: "invalid_admin_code" }, 401);
+      if (!env.ADMIN_ACCESS_KEY || !/^[A-Za-z0-9]{15,128}$/.test(env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "admin_access_key_not_configured" }, 503);
+      }
+
+      // Three attempts per source IP in a rolling 15-minute window. The IP is
+      // SHA-256 hashed before it is persisted; it is used only as a rate-limit key,
+      // never as an allowlist or an authorization factor.
+      const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "unknown";
+      const ipDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(clientIp));
+      const rateLimitKey = Array.from(new Uint8Array(ipDigest), (b) => b.toString(16).padStart(2, "0")).join("");
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const attemptResponse = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: rateLimitKey, action: "consume" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!attemptResponse.ok && attemptResponse.status !== 429) {
+        return json({ error: "admin_login_rate_limit_unavailable" }, 503);
+      }
+      const attempt = await attemptResponse.json().catch(() => ({})) as {
+        allowed?: boolean; attempts_remaining?: number; retry_after_ms?: number;
+      };
+      if (!attemptResponse.ok || attempt.allowed !== true) {
+        return json({ error: "admin_login_locked", retry_after_ms: attempt.retry_after_ms ?? 900000 }, 429);
+      }
+      if (typeof body.key !== "string" || !/^[A-Za-z0-9]{15,128}$/.test(body.key) ||
+          !authorized("Bearer " + body.key, env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "invalid_admin_key", attempts_remaining: attempt.attempts_remaining ?? 0 }, 401);
+      }
+      const resetResponse = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: rateLimitKey, action: "reset" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!resetResponse.ok) return json({ error: "admin_login_state_reset_failed" }, 503);
       return json({ ok: true });
+    }
+
+    // Admin-only Oracle smoke-test route used to verify the outbound agent and
+    // terminal UI without granting regular accounts host-shell access.
+    if (url.pathname === "/api/admin/oracle-exec") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY || !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      let body: { command?: unknown; timeout_ms?: unknown };
+      try { body = await request.json() as typeof body; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      if (typeof body.command !== "string" || !body.command.trim() || body.command.length > 4096) {
+        return json({ error: "command_must_be_1_to_4096_characters" }, 400);
+      }
+      const timeout = body.timeout_ms === undefined ? 15000 : body.timeout_ms;
+      if (!Number.isInteger(timeout) || (timeout as number) < 1000 || (timeout as number) > 20000) {
+        return json({ error: "timeout_ms_must_be_1000_to_20000" }, 400);
+      }
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("oracle"));
+      return coordinator.fetch(new Request("https://vm-execution.internal/exec", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-vm-id": "oracle", "x-account-id": "admin" },
+        body: JSON.stringify({ command: body.command, timeout_ms: timeout }),
+      }));
+    }
+
+    // Authenticated account terminal capability probe. It never runs a shell command.
+    if (url.pathname === "/api/account/exec/status") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      let body: { account_id?: unknown; session_token?: unknown };
+      try { body = await request.json() as typeof body; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      const sessionToken = typeof body.session_token === "string" ? body.session_token : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(sessionToken)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, token: sessionToken }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const capability = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/oracle-execution");
+      const capabilityData = capability.ok ? await capability.json() as { enabled?: unknown } : {};
+      const enabled = env.ORACLE_ACCOUNT_EXEC_ENABLED === "true" && capabilityData.enabled === true;
+      return json({
+        enabled,
+        runtime: "oracle-host",
+        ...(enabled ? {} : {
+          reason: env.ORACLE_ACCOUNT_EXEC_ENABLED !== "true"
+            ? "Oracle account execution is disabled in the Worker configuration."
+            : "Oracle execution is not enabled for this account."
+        })
+      });
+    }
+
+    // Authenticated account terminal -> Oracle persistent session. This route is
+    // deliberately fail-closed until Oracle per-account OS/container isolation is
+    // enabled; account-named directories alone do not isolate arbitrary shell code.
+    if (url.pathname === "/api/account/exec") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      let body: { account_id?: unknown; session_token?: unknown; command?: unknown; timeout_ms?: unknown };
+      try { body = await request.json() as typeof body; }
+      catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      const sessionToken = typeof body.session_token === "string" ? body.session_token : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(sessionToken)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      if (typeof body.command !== "string" || !body.command.trim() || body.command.length > 4096) {
+        return json({ error: "command_must_be_1_to_4096_characters" }, 400);
+      }
+      const timeout = body.timeout_ms === undefined ? 15000 : body.timeout_ms;
+      if (!Number.isInteger(timeout) || (timeout as number) < 1000 || (timeout as number) > 20000) {
+        return json({ error: "timeout_ms_must_be_1000_to_20000" }, 400);
+      }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, token: sessionToken }),
+      });
+      if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const capability = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/oracle-execution");
+      const capabilityData = capability.ok ? await capability.json() as { enabled?: unknown } : {};
+      if (env.ORACLE_ACCOUNT_EXEC_ENABLED !== "true" || capabilityData.enabled !== true) {
+        return json({
+          error: "oracle_account_execution_disabled",
+          reason: "Oracle execution is not enabled for this account."
+        }, 503);
+      }
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("oracle"));
+      return coordinator.fetch(new Request("https://vm-execution.internal/exec", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vm-id": "oracle",
+          "x-account-id": accountId,
+        },
+        body: JSON.stringify({ command: body.command, timeout_ms: timeout }),
+      }));
+    }
+
+    // Safe startup health probe for the existing outbound Oracle agent. It exposes
+    // connectivity only; command execution remains behind the authenticated route.
+    if (url.pathname === "/api/vm/oracle-status") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("oracle"));
+      return coordinator.fetch("https://vm-execution.internal/status?identity=oracle");
     }
 
     if (url.pathname === "/api/vm/agent-ticket") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
-      if (request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
-      const vmId = "admin";
+            if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      const requestedIdentity = request.headers.get("x-agent-identity") ?? "admin";
+      if (requestedIdentity !== "admin" && requestedIdentity !== "oracle") {
+        return json({ error: "unknown_agent_identity", supported_identities: ["admin", "oracle"] }, 400);
+      }
+      const vmId = requestedIdentity;
       const ticket = crypto.randomUUID();
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
       const ticketResponse = await coordinator.fetch("https://vm-execution.internal/ticket", {
@@ -520,8 +1470,11 @@ export default {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return json({ error: "websocket_upgrade_required" }, 426);
       }
-      const ticket = url.searchParams.get("ticket") ?? "";
-      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("admin"));
+      const identity = url.searchParams.get("identity") ?? "admin";
+            if (identity !== "admin" && identity !== "oracle") {
+        return json({ error: "unknown_agent_identity" }, 400);
+      }
+      const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(identity));
       return coordinator.fetch(request);
     }
 
@@ -529,12 +1482,14 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
-      const vmId = request.headers.get("x-vm-id") ?? "admin";
-      if (vmId !== "admin") return json({ error: "unknown_vm_id", supported_vm_ids: ["admin"] }, 404);
+      const vmId = request.headers.get("x-vm-id") ?? "oracle";
+      if (vmId !== "admin" && vmId !== "oracle") {
+        return json({ error: "unknown_vm_id", supported_vm_ids: ["admin", "oracle"] }, 404);
+      }
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
       if (url.pathname.endsWith("/status")) {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-        return coordinator.fetch("https://vm-execution.internal/status?identity=admin");
+        return coordinator.fetch("https://vm-execution.internal/status?identity=" + encodeURIComponent(vmId));
       }
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const raw = await request.text();
@@ -552,8 +1507,8 @@ export default {
     if (snapshotIdentity) {
       const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin";
-      if (isAdmin && !env.ADMIN_ACCESS_CODE) return json({ error: "admin_access_not_configured" }, 503);
-      if (isAdmin && request.headers.get("x-admin-code") !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+            if (isAdmin && !env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (isAdmin && !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
 
       // Account snapshots accept either the one-time provisioning API key or a
       // short-lived login session bound to this exact account ID.
@@ -580,7 +1535,7 @@ export default {
         if (!accountAuthorized) return json({ error: "unauthorized" }, 401);
       }
 
-      // Non-Admin baselines are managed with the provisioning token; the Admin baseline uses ADMIN_ACCESS_CODE.
+      // Non-Admin baselines are managed with the provisioning token; the Admin baseline uses ADMIN_ACCESS_KEY.
       if (identity === (env.VM_BASELINE_ID ?? "admin") && identity !== "admin") {
         const vmApiToken = await getVmApiToken(env);
         if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
@@ -613,8 +1568,8 @@ export default {
         return new Response(object.body, { headers });
       }
       if (request.method === "PUT") {
-        let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: { guest_booted?: unknown; shell_command_passed?: unknown; dhcp_passed?: unknown; dns_passed?: unknown; https_passed?: unknown } | null };
-        try { manifest = (await request.json()) as { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown }; }
+        let manifest: { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: unknown };
+        try { manifest = (await request.json()) as { version?: unknown; generation?: unknown; chunks?: unknown; byteLength?: unknown; adminReady?: unknown; checks?: unknown }; }
         catch { return json({ error: "invalid_manifest" }, 400); }
         if (
           manifest.version !== 1 ||
@@ -623,11 +1578,6 @@ export default {
           !Number.isInteger(manifest.chunks) || (manifest.chunks as number) < 1 || (manifest.chunks as number) > 128 ||
           !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912 || manifest.chunks !== Math.ceil((manifest.byteLength as number) / 8388608)
         ) return json({ error: "invalid_manifest" }, 400);
-        if (identity === "admin" && (manifest.adminReady !== true || !manifest.checks ||
-            manifest.checks.guest_booted !== true || manifest.checks.shell_command_passed !== true ||
-            manifest.checks.dhcp_passed !== true || manifest.checks.dns_passed !== true || manifest.checks.https_passed !== true)) {
-          return json({ error: "admin_baseline_not_ready", detail: "Complete startup and network/certificate checks before saving the Admin baseline." }, 409);
-        }
         const generation = manifest.generation;
         const count = manifest.chunks as number;
         const present = await Promise.all(Array.from({ length: count }, (_, part) =>
@@ -654,6 +1604,22 @@ export default {
       } while (cursor);
       return json({ ok: true });
     }
+
+
+    const marketplaceResponse = await handleMarketplaceRequest(request, env);
+    if (marketplaceResponse) return marketplaceResponse;
+
+    const businessDatabaseResponse = await handleBusinessDatabaseRequest(request, env);
+    if (businessDatabaseResponse) return businessDatabaseResponse;
+
+    const doorDashResponse = await handleDoorDashRequest(request, env);
+    if (doorDashResponse) return doorDashResponse;
+
+    const paymentResponse = await handlePayments(request, env);
+    if (paymentResponse) return paymentResponse;
+
+    const projectStorageResponse = await handleProjectStorageRequest(request, env);
+    if (projectStorageResponse) return projectStorageResponse;
 
     if (url.pathname === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
