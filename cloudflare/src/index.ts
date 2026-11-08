@@ -35,9 +35,13 @@ export interface Env {
   DOORDASH_KEY_ID?: string;
   DOORDASH_SIGNING_SECRET?: string;
   ASSETS: Fetcher;
-  TUNNEL_TOKEN: string;
-  CLIENT_TOKEN: string;
+  // Optional platform-wide credentials for the legacy paired tunnel route.
+  // Account-scoped WISP networking uses short-lived tickets and does not require these.
+  TUNNEL_TOKEN?: string;
+  CLIENT_TOKEN?: string;
   ORACLE_ACCOUNT_EXEC_ENABLED?: string;
+  // Optional upstream TinyCore Stockroom. When unset, each merchant uses its isolated
+  // BusinessDatabase Durable Object; these values are not generated per merchant.
   STOCKROOM_ORIGIN?: string;
   STOCKROOM_GATEWAY_TOKEN?: string;
 }
