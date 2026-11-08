@@ -10,6 +10,8 @@ const wispRelay = readFileSync(new URL("../cloudflare/src/wisp-relay.ts", import
 const virtualNetwork = readFileSync(new URL("../cloudflare/src/virtual-network.ts", import.meta.url), "utf8");
 const headlessRoundtrip = readFileSync(new URL("../cloudflare/src/headless-v86-snapshot-roundtrip-worker.ts", import.meta.url), "utf8");
 const headlessRoundtripConfig = readFileSync(new URL("../cloudflare/wrangler.headless-v86-roundtrip.toml", import.meta.url), "utf8");
+const marketplace = readFileSync(new URL("../cloudflare/src/marketplace-directory.ts", import.meta.url), "utf8");
+const merchantLocation = readFileSync(new URL("../public/merchant-location.html", import.meta.url), "utf8");
 
 test("signup stores server-side PBKDF2 credentials and enforces eight-character passwords", () => {
   assert.match(registry, /PBKDF2/);
@@ -97,4 +99,17 @@ test("each merchant receives a stable private network identity and authenticated
   assert.ok(headlessRoundtrip.includes("/api/network/wisp/"));
   assert.ok(!headlessRoundtrip.includes("relay.widgetry.org"));
   assert.ok(headlessRoundtripConfig.includes('name = "WISP_RELAY"'));
+});
+
+test("published Store projects remain discoverable across legacy casing and require owner-matched publish records", () => {
+  assert.ok(marketplace.includes('project.kind.trim().toLowerCase()'));
+  assert.ok(marketplace.includes('projectKind !== "store"'));
+  assert.ok(marketplace.includes('mapping?.account_id !== accountId || mapping.project_id !== project.id'));
+  assert.ok(marketplace.includes('url.pathname === "/api/marketplace/profile"'));
+  assert.ok(marketplace.includes('url.pathname === "/api/marketplace/geocode"'));
+  assert.ok(marketplace.includes('env.PROJECT_STORAGE'));
+  assert.ok(merchantLocation.includes('/api/marketplace/profile?account_id='));
+  assert.ok(merchantLocation.includes('/api/marketplace/geocode?account_id='));
+  assert.ok(merchantLocation.includes('Find address on map'));
+  assert.ok(merchantLocation.includes('latitude:coordinates.latitude,longitude:coordinates.longitude'));
 });
