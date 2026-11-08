@@ -1812,6 +1812,12 @@ export default {
       return json({ error: "method_not_allowed" }, 405);
     }
 
+    if (url.pathname === "/marketplace" || url.pathname === "/marketplace/") {
+      const assetUrl = new URL(request.url);
+      assetUrl.pathname = "/marketplace.html";
+      return env.ASSETS.fetch(new Request(assetUrl, request));
+    }
+
     return env.ASSETS.fetch(request);
   },
 };
