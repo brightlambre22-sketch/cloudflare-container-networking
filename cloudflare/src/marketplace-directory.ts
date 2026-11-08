@@ -287,28 +287,31 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       );
       if (mapping?.account_id !== profile.account_id || mapping.project_id !== profile.project_id) continue;
       const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(profile.account_id));
-      let catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
+      // Stockroom is the merchant's catalog authority. Refresh at most once
+      // per minute so a missed product sync is repaired without making every
+      // shopper search perform a full database read for every merchant.
+      const syncKey = "marketplace/catalog-sync/" + profile.account_id + ".json";
+      const syncState = await readJson<{ synced_at?: string }>(env.PROJECT_STORAGE, syncKey);
+      const syncedAt = syncState?.synced_at ? Date.parse(syncState.synced_at) : 0;
+      if (!Number.isFinite(syncedAt) || Date.now() - syncedAt > 60_000) {
+        try {
+          await syncInventoryCatalog(env, profile.account_id);
+          await env.PROJECT_STORAGE.put(syncKey, JSON.stringify({ synced_at: new Date().toISOString() }), {
+            httpMetadata: { contentType: "application/json" },
+          });
+        } catch {
+          // Fall back to the last known online catalog if this merchant's Stockroom is offline.
+        }
+      }
+      const catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
       if (!catalogResponse.ok) continue;
-      let catalog = await catalogResponse.json() as {
+      const catalog = await catalogResponse.json() as {
         products?: Array<{
           id: string; sku: string; name: string; description?: string; category?: string;
           image_url?: string; variations?: unknown[]; external_url?: string;
           price: number; quantity: number; in_stock: boolean;
         }>;
       };
-      // Stockroom is the merchant's catalog authority. A missed background sync
-      // must not make a published merchant disappear from marketplace search.
-      if (!catalog.products?.length) {
-        try {
-          await syncInventoryCatalog(env, profile.account_id);
-          catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
-          if (!catalogResponse.ok) continue;
-          catalog = await catalogResponse.json() as typeof catalog;
-        } catch {
-          // Keep the search available for other merchants if one Stockroom is offline.
-          continue;
-        }
-      }
       const storeName = String(profile.store_name ?? "Local store");
       for (const product of catalog.products ?? []) {
         if (!product.in_stock || Number(product.quantity) < 1) continue;
