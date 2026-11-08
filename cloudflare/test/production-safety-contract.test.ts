@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { baselineIsReady } from "../src/account-provisioner.ts";
+import { baselineIsReady } from "../src/snapshot-readiness.ts";
 import { handleDoorDashRequest } from "../src/doordash.ts";
 
 const source = async (path: string) => readFile(new URL(path, import.meta.url), "utf8");
