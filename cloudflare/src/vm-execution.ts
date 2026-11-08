@@ -32,7 +32,7 @@ function validIdentity(value: string | null): value is string {
 }
 
 export class VmExecution extends DurableObject {
-  private pending = new Map<string, (response: Response) => void>();
+  private pending = new Map<string, { accountId: string; resolve: (response: Response) => void }>();
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -81,7 +81,7 @@ export class VmExecution extends DurableObject {
     if (url.pathname === "/status" && request.method === "GET") {
       const identity = url.searchParams.get("identity");
       if (!validIdentity(identity)) return json({ error: "invalid_vm_id" }, 400);
-      const socket = this.ctx.getWebSockets(identity)[0];
+      const socket = this.ctx.getWebSockets(identity).find((candidate) => candidate.readyState === WebSocket.OPEN);
       if (!socket) return json({ vm_id: identity, status: "offline", execution_available: false });
       const attachment = socket.deserializeAttachment() as AgentAttachment;
       return json({
@@ -90,8 +90,10 @@ export class VmExecution extends DurableObject {
         execution_available: true,
         connected_at: new Date(attachment.connectedAt).toISOString(),
         last_seen_at: new Date(attachment.lastSeenAt).toISOString(),
-        runtime: "browser-v86",
-        limitation: "The browser tab must remain open for command execution.",
+        runtime: attachment.identity === "oracle" ? "oracle-host" : "browser-v86",
+        limitation: attachment.identity === "oracle"
+          ? "Commands execute on the connected persistent Oracle host."
+          : "The browser tab must remain open for browser-v86 command execution.",
       });
     }
 
@@ -108,25 +110,43 @@ export class VmExecution extends DurableObject {
       if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 20_000) {
         return json({ error: "timeout_ms_must_be_1000_to_20000" }, 400);
       }
-      const socket = this.ctx.getWebSockets(identity)[0];
-      if (!socket) return json({ error: "vm_offline", vm_id: identity, hint: "Open the VM dashboard, sign in as admin, and wait for startup or snapshot restore to finish." }, 503);
+      // The Oracle connection is a single transport, but each command must name
+      // the authenticated account session that Oracle will execute in.
+      const requestedAccount = request.headers.get("x-account-id");
+      const accountId = identity === "admin" ? "admin" : (requestedAccount ?? "");
+      if (identity === "admin" && accountId !== "admin") return json({ error: "invalid_account_id" }, 400);
+      if (identity === "oracle" && accountId !== "admin" && !/^acct-[a-f0-9-]{36}$/.test(accountId)) {
+        return json({ error: "invalid_or_missing_account_id" }, 400);
+      }
+      if (identity !== "admin" && identity !== "oracle") {
+        return json({ error: "unsupported_execution_transport" }, 400);
+      }
+      const socket = this.ctx.getWebSockets(identity).find((candidate) => candidate.readyState === WebSocket.OPEN);
+      if (!socket) return json({ error: "vm_offline", vm_id: identity, hint: "The Oracle outbound agent must be connected before execution." }, 503);
 
       const id = crypto.randomUUID();
-      try {
-        socket.send(JSON.stringify({ type: "exec", id, command: body.command, timeout_ms: timeout }));
-      } catch {
-        return json({ error: "vm_agent_send_failed" }, 502);
-      }
       return await new Promise<Response>((resolve) => {
         const timer = setTimeout(() => {
           this.pending.delete(id);
           resolve(json({ error: "execution_timeout", id, timeout_ms: timeout }, 504));
-        }, timeout + 1500);
-        this.pending.set(id, (response) => {
+        }, timeout + 5000);
+        // Register the response handler before sending. This prevents a fast
+        // Oracle result from arriving before the coordinator knows the request.
+        this.pending.set(id, {
+          accountId,
+          resolve: (response) => {
+            clearTimeout(timer);
+            this.pending.delete(id);
+            resolve(response);
+          },
+        });
+        try {
+          socket.send(JSON.stringify({ type: "exec", id, account_id: accountId, command: body.command, timeout_ms: timeout }));
+        } catch {
           clearTimeout(timer);
           this.pending.delete(id);
-          resolve(response);
-        });
+          resolve(json({ error: "vm_agent_send_failed" }, 502));
+        }
       });
     }
 
@@ -151,15 +171,19 @@ export class VmExecution extends DurableObject {
       socket.close(1008, "invalid result");
       return;
     }
-    this.pending.get(body.id)?.(json({
-      vm_id: attachment.identity,
+    const pending = this.pending.get(body.id);
+    if (!pending) return;
+    pending.resolve(json({
+      vm_id: pending.accountId,
       execution_id: body.id,
       stdout: body.stdout,
       stderr: typeof body.stderr === "string" ? body.stderr : "",
       exit_code: body.exit_code,
       timed_out: body.timed_out === true,
-      runtime: "browser-v86",
-      notice: "Command executed in the connected browser VM; this is not a server-side persistent runtime.",
+      runtime: attachment.identity === "oracle" ? "oracle-host" : "browser-v86",
+      notice: attachment.identity === "oracle"
+        ? "Command executed by the connected Oracle host executor."
+        : "Command executed in the connected browser v86 agent.",
     }));
   }
 

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Store address · Vampirequid</title>
+<style>
+:root{color-scheme:light;--navy:#172b4d;--ink:#182230;--muted:#64748b;--line:#d7dee8;--paper:#fff;--bg:#f3f5f8;--accent:#f5a623;--blue:#2563eb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Arial,Helvetica,sans-serif}
+header{background:var(--navy);color:white;padding:16px max(20px,calc((100% - 1120px)/2));display:flex;align-items:center;justify-content:space-between;gap:18px}
+header strong{font-size:20px;letter-spacing:.02em}header nav{display:flex;gap:16px;flex-wrap:wrap}a{color:inherit}
+header a{color:#fff;text-decoration:none;font-size:14px}
+main{max-width:1120px;margin:28px auto;padding:0 20px 48px}
+h1{font-size:28px;margin:0 0 6px}p{color:var(--muted);margin:0 0 20px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:20px;align-items:start}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:22px;box-shadow:0 2px 8px #15243a0a}
+label{display:block;font-weight:700;font-size:13px;margin:14px 0 6px}
+input,select{width:100%;padding:12px;border:1px solid #c7d0dc;border-radius:7px;font:inherit;background:white}
+input:focus,select:focus{outline:2px solid #93c5fd;border-color:var(--blue)}
+.address-grid{display:grid;grid-template-columns:1fr 110px;gap:12px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+button,.button{border:0;border-radius:7px;padding:11px 16px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.primary{background:var(--accent);color:#241800}.secondary{background:#e8eef7;color:#19365f}
+button:disabled{opacity:.55;cursor:wait}
+.status{min-height:24px;margin-top:14px;color:var(--muted);font-size:14px}.status.good{color:#166534}.status.bad{color:#b91c1c}
+.map-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.map-head strong{font-size:15px}
+.map-frame{width:100%;height:190px;border:1px solid var(--line);border-radius:8px;background:#eef2f6}
+.map-empty{height:190px;border:1px dashed #bac5d3;border-radius:8px;display:grid;place-items:center;text-align:center;padding:16px;color:var(--muted);font-size:13px}
+.attribution{font-size:11px;color:var(--muted);margin:7px 0 0}
+.note{font-size:13px;background:#fff8e8;border:1px solid #f2d79a;border-radius:8px;padding:12px;margin-top:18px;color:#704d0b}
+@media(max-width:760px){main{margin:18px auto}.layout{grid-template-columns:1fr}.map-panel{grid-row:1}.map-frame,.map-empty{height:220px}}
+</style>
+</head>
+<body>
+<header><strong>Vampirequid</strong><nav><a href="/marketplace.html">Shop marketplace</a><a href="/vm.html">Merchant dashboard</a></nav></header>
+<main>
+<h1>Set your store location</h1>
+<p>Enter the real street address customers should use to find your physical store. We’ll look it up on the map before saving it to your published store listing.</p>
+<div class="layout">
+<section class="panel">
+<form id="location-form">
+<label for="store">Published store</label><select id="store" required><option value="">Loading your stores…</option></select>
+<label for="street">Street address</label><input id="street" autocomplete="street-address" maxlength="180" placeholder="123 Main Street" required>
+<div class="address-grid">
+<div><label for="city">City</label><input id="city" autocomplete="address-level2" maxlength="80" required></div>
+<div><label for="state">State</label><input id="state" autocomplete="address-level1" maxlength="2" placeholder="TX" required></div>
+</div>
+<label for="postal">ZIP / postal code</label><input id="postal" autocomplete="postal-code" maxlength="12" required>
+<div class="actions"><button class="primary" id="find" type="button">Find address on map</button><button class="secondary" id="save" type="submit" disabled>Save store location</button></div>
+<div id="status" class="status" role="status" aria-live="polite">Loading your merchant profile…</div>
+<div class="note">Your store address is public business information. It will be shown with your store’s products so shoppers can find your location. Only save a customer-facing business address.</div>
+</form>
+</section>
+<aside class="panel map-panel">
+<div class="map-head"><strong>Map preview</strong><span id="map-state" class="status">Not located</span></div>
+<div id="map"><div class="map-empty">Find your address to see its location here.</div></div>
+<p class="attribution">Map data © OpenStreetMap contributors.</p>
+</aside>
+</div>
+</main>
+<script>
+(function(){
+const $=id=>document.getElementById(id),accountId=sessionStorage.getItem('vm-account-id')||'',token=sessionStorage.getItem('vm-session-token')||'';
+let stores=[],coordinates=null,profile=null;
+const headers=()=>({'content-type':'application/json','authorization':'Bearer '+token});
+function say(message,kind=''){ $('status').textContent=message;$('status').className='status '+kind; }
+function showMap(lat,lng,label){
+ const d=.012,bbox=[lng-d,lat-d,lng+d,lat+d].join(',');
+ $('map').innerHTML='<iframe class="map-frame" title="Store location map" loading="lazy" referrerpolicy="no-referrer" src="https://www.openstreetmap.org/export/embed.html?bbox='+bbox+'&layer=mapnik&marker='+lat+','+lng+'"></iframe>';
+ $('map-state').textContent='Location found';$('map-state').className='status good';
+ coordinates={latitude:lat,longitude:lng,display_name:label||''};$('save').disabled=false;
+}
+function loadProfile(){
+ if(!accountId||!token){say('Please log in to your merchant account first.','bad');setTimeout(()=>location.assign('/vm.html'),900);return;}
+ fetch('/api/marketplace/profile?account_id='+encodeURIComponent(accountId),{headers:{authorization:'Bearer '+token},cache:'no-store'})
+ .then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error||'Could not load store profile');profile=data.profile;stores=data.stores||[];const select=$('store');select.innerHTML='';
+ if(!stores.length){select.innerHTML='<option value="">No published Store projects found</option>';say('Publish a Store project first. Then return here to add its address.','bad');return;}
+ for(const item of stores){const option=document.createElement('option');option.value=item.project_id;option.textContent=item.name;select.appendChild(option);}
+ if(profile){$('store').value=profile.project_id;$('street').value=profile.street_address||'';$('city').value=profile.city||'';$('state').value=profile.state||'';$('postal').value=profile.postal_code||'';if(Number.isFinite(profile.latitude)&&Number.isFinite(profile.longitude))showMap(profile.latitude,profile.longitude,profile.street_address);}
+ say('Choose your store and enter its physical address.');})
+ .catch(e=>say(e.message,'bad'));
+}
+$('find').addEventListener('click',async()=>{
+ const body={street_address:$('street').value.trim(),city:$('city').value.trim(),state:$('state').value.trim().toUpperCase(),postal_code:$('postal').value.trim(),country:'USA'};
+ if(!body.street_address||!body.city||!body.state||!body.postal_code){say('Enter the street, city, state, and ZIP code first.','bad');return;}
+ $('find').disabled=true;$('save').disabled=true;say('Searching the map for this address…');
+ try{const r=await fetch('/api/marketplace/geocode?account_id='+encodeURIComponent(accountId),{method:'POST',headers:headers(),body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.message||data.error||'Address lookup failed');showMap(data.latitude,data.longitude,data.display_name);say('Address found: '+data.display_name,'good');}
+ catch(e){coordinates=null;say(e.message,'bad');$('map').innerHTML='<div class="map-empty">No map location found. Check the address and try again.</div>';$('map-state').textContent='Not located';}
+ finally{$('find').disabled=false;}
+});
+$('location-form').addEventListener('submit',async e=>{
+ e.preventDefault();if(!coordinates){say('Find and confirm the address on the map before saving.','bad');return;}
+ const body={project_id:$('store').value,street_address:$('street').value.trim(),city:$('city').value.trim(),state:$('state').value.trim().toUpperCase(),postal_code:$('postal').value.trim(),latitude:coordinates.latitude,longitude:coordinates.longitude,active:true};
+ $('save').disabled=true;say('Saving your store location…');
+ try{const r=await fetch('/api/marketplace/profile?account_id='+encodeURIComponent(accountId),{method:'PUT',headers:headers(),body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw new Error(data.error||'Could not save store location');profile=data.profile;say('Store address saved. The map coordinates are ready for marketplace search.','good');}
+ catch(e){say(e.message,'bad');$('save').disabled=false;}
+});
+$('store').addEventListener('change',()=>{coordinates=null;$('save').disabled=true;$('map').innerHTML='<div class="map-empty">Find the selected store address to preview it here.</div>';});
+loadProfile();
+})();
+</script>
+</body></html>

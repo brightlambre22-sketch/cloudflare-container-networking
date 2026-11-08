@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="/vampire-quid.svg">
 <title>Mysterium Browser VM</title>
 <style>
 body{margin:0;background:#111;color:#ddd;font-family:monospace}#login-panel{padding:12px;background:#181818;border-bottom:1px solid #333}#login-panel h2{font-size:16px;margin:0 0 8px}#login-panel p{font-size:12px;line-height:1.5}#login-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}#login-form input,#login-form select{font:inherit;padding:7px;max-width:100%}#login-message{color:#ffc66d}body:not(.logged-in) #status,body:not(.logged-in) #toolbar,body:not(.logged-in) #results,body:not(.logged-in) #myst-log,body:not(.logged-in) #screen_container{display:none}
@@ -18,7 +17,6 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 </head>
 <body>
 <section id="login-panel">
-  <img src="/vampire-quid.svg" alt="Vampire Quid mascot logo" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:contain;margin:0 0 8px;border-radius:12px">
   <h2>Open your VM</h2>
   <p>Regular accounts are stored server-side and each account gets its own persistent VM snapshot. Passwords are never stored in browser localStorage. Admin access still uses the five-digit admin code. <a href="/signup.html">Use the signup page with snapshot progress</a>.</p>
   <form id="login-form">
@@ -47,7 +45,7 @@ button{font:inherit;padding:6px 10px;cursor:pointer}
 <div id="screen_container"><div></div><canvas></canvas></div>
 <script src="/v86/libv86.js"></script>
 <script>
-window.startVm=function(){
+window.startVm=async function(){
 const status=document.getElementById('status'),results=document.getElementById('results'),mystLog=document.getElementById('myst-log'),copyStatus=document.getElementById('copy-status'),stateStatus=document.getElementById('state-status');
 const nodeId='7cbee0e9-da6b-4808-92a7-4a3c2a45a840',apiUrl=window.location.origin;
 let reportTimer=null,bootstrapStarted=false,bootComplete=false;
@@ -293,7 +291,7 @@ await window.emulator.keyboard_send_text(cmd,2);
 async function startBootstrap(){
 if(bootstrapStarted)return;if(manualCommandRunning){requestAnimationFrame(startBootstrap);return}bootstrapStarted=true;statusText('Tiny Core ready; running sequential network/TLS preflight. Mysterium is disabled.');
 const commands=[
-`echo "--- NETWORK INIT ---"; id; sudo -n sh -c 'set +e; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E "^(eth|en|wlan)" | head -n 1 | cut -d " " -f 1); if [ -z "$iface" ]; then /sbin/modprobe ne2k-pci 2>&1; /sbin/modprobe 8390 2>&1; sleep 1; iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E "^(eth|en|wlan)" | head -n 1 | cut -d " " -f 1); fi; echo DHCP_INTERFACE=$iface; if [ -z "$iface" ]; then echo NIC_MISSING; cat /proc/net/dev; dmesg 2>/dev/null | tail -n 20; exit 1; fi; /sbin/ifconfig "$iface" up; while :; do /sbin/udhcpc -f -n -q -i "$iface"; /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0" && break; echo DHCP_RETRYING_NO_LEASE; sleep 3; done; echo DHCP_OK'; echo DHCP_DONE`,
+`echo "--- NETWORK INIT ---"; sudo -n sh -c 'set +e; /sbin/modprobe ne2k-pci 2>/dev/null; /sbin/modprobe 8390 2>/dev/null; iface=eth0; /sbin/ifconfig -a | grep -q "^eth0" || { echo NIC_MISSING; exit 1; }; /sbin/ifconfig "$iface" up; expected_ip="${window.snapshotVirtualIp||'10.240.0.2'}"; expected_gateway="${window.snapshotRouterIp||'10.240.0.1'}"; echo DHCP_EXPECTED_IP=$expected_ip; echo DHCP_EXPECTED_GATEWAY=$expected_gateway; while :; do /sbin/udhcpc -f -n -q -i "$iface"; ip=$(/sbin/ifconfig "$iface" | grep -Eo "inet (addr:)?[0-9.]+" | head -1 | sed "s/inet addr://;s/inet //"); gw=$(/sbin/route -n | grep -E "^0[.]0[.]0[.]0[[:space:]]" | tr -s " " | cut -d " " -f 2); [ "$ip" = "$expected_ip" ] && [ "$gw" = "$expected_gateway" ] && break; echo DHCP_RETRYING_NO_LEASE; sleep 3; done; echo DHCP_OK; echo DHCP_ASSIGNED_IP=$ip; echo DHCP_ASSIGNED_GATEWAY=$gw'; echo DHCP_DONE`,
 'echo "--- RESOURCE PREFLIGHT ---"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo "TLS prerequisite installation will run before HTTPS preflight."; printf "\n__RESOURCE_""PREFLIGHT_DONE\n"',
 'echo "--- TLS package downloads ---"; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; tce-load -w ca-certificates.tcz; ca_dl=$?; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl; printf "\n__TLS_DOWNLOAD_""DONE:%s:%s\n" "$openssl_dl" "$ca_dl"',
 'echo "--- OpenSSL install ---"; tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1; install_rc=$?; if [ "$install_rc" -eq 0 ] && openssl version >/dev/null 2>&1; then rc=0; else rc=1; fi; echo OPENSSL_PATH=$(command -v openssl 2>/dev/null); echo OPENSSL_INSTALL_RC=$rc; printf "\n__OPENSSL_INSTALL_""DONE:%s\n" "$rc"',
@@ -349,14 +347,28 @@ next()
 
 results.value='';save();report('\n===== VM RUN STARTED =====\n');
 statusText('Loading v86â¦');
+const networkIdentity=window.snapshotIdentity||'admin';
+const virtualIp=typeof window.snapshotVirtualIp==='string'&&/^10\.240\.\d{1,3}\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])$/.test(window.snapshotVirtualIp)?window.snapshotVirtualIp:'10.240.0.2';
+const ipParts=virtualIp.split('.');
+const routerIp='10.240.'+Number(ipParts[2])+'.1';
+window.snapshotVirtualIp=virtualIp;
+window.snapshotRouterIp=routerIp;
+let networkTicket='';
+try{
+  const ticketBody=networkIdentity==='admin'?{account_id:'admin',admin_code:window.snapshotAdminCode}:{account_id:networkIdentity,session_token:window.snapshotAuthToken};
+  const ticketResponse=await fetch(apiUrl+'/api/network/ticket',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ticketBody)});
+  const ticketData=await ticketResponse.json().catch(()=>({}));
+  if(!ticketResponse.ok||typeof ticketData.ticket!=='string'||!/^[a-f0-9]{64}$/.test(ticketData.ticket))throw new Error(ticketData.error||'network_ticket_failed');
+  networkTicket=ticketData.ticket;
+}catch(e){statusText('Could not authorize the account network relay: '+(e&&e.message?e.message:String(e)));report('\n*** NETWORK RELAY TICKET FAILED; VM startup stopped. ***\n');return}
+const relayUrl='wisps://'+window.location.host+'/api/network/wisp/?account_id='+encodeURIComponent(networkIdentity)+'&ticket='+encodeURIComponent(networkTicket);
 try{
 window.emulator=new V86({
 wasm_path:'/v86/v86.wasm',memory_size:128*1024*1024,vga_memory_size:8*1024*1024,
 screen_container:document.getElementById('screen_container'),
 bios:{url:'/bios/seabios.bin'},vga_bios:{url:'/bios/vgabios.bin'},
 cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'},
-net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'},
-network_relay_url:'wss://relay.widgetry.org/',autostart:false
+net_device:{type:'ne2k',relay_url:relayUrl,router_ip:routerIp,vm_ip:virtualIp,masquerade:true,dns_method:'doh',doh_server:'cloudflare-dns.com'},autostart:false
 });
 statusText('Loading VM engine and checking for a saved stateâ¦');
 window.emulator.add_listener('emulator-loaded',async function(){
@@ -508,6 +520,8 @@ function beginAccountSession(data,launchVm=true){
   }
   window.snapshotIdentity=data.account_id;
   window.snapshotAuthToken=data.session_token;
+  if(typeof data.virtual_ip==='string'&&/^10\.240\.\d{1,3}\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])$/.test(data.virtual_ip))window.snapshotVirtualIp=data.virtual_ip;
+  if(typeof data.virtual_mac==='string'&&/^02(?::[0-9a-f]{2}){5}$/.test(data.virtual_mac))window.snapshotVirtualMac=data.virtual_mac;
   try {
     if (typeof data.username === 'string') sessionStorage.setItem('vm-username', data.username);
     if (typeof data.login_time === 'string') sessionStorage.setItem('vm-login-time', data.login_time);
@@ -570,7 +584,7 @@ form.addEventListener('submit',async function(event){
   }
   const name=username.value.trim().toLowerCase(),pass=password.value;
   if(!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(name)){message.textContent='Username must be 2–32 characters: letters, numbers, _ or -.';return}
-  if(creating&&pass.length<4){message.textContent='New passwords must be at least 4 characters.';return}
+  if(creating&&pass.length<8){message.textContent='New passwords must be at least 8 characters.';return}
    if(!creating&&!pass){message.textContent='Enter your password.';return}
   message.textContent=creating?'Creating your account; the VM snapshot will be saved after its first network test…':'Signing in and loading your saved VM…';
   try{
@@ -595,13 +609,14 @@ updateFields();
   try{
     const response=await fetch('/api/auth/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
     if(!response.ok)throw new Error('session expired');
+    const sessionData=await response.json().catch(()=>({}));
     const statusResponse=await fetch('/api/auth/registration-status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:accountId,session_token:token})});
     const registration=await statusResponse.json().catch(()=>({}));
-    if(statusResponse.ok&&['provisioning','queued','running'].includes(registration.status))await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true});
+    if(statusResponse.ok&&['provisioning','queued','running'].includes(registration.status))await waitForRegistration({account_id:accountId,session_token:token,snapshot_initialization_required:true,virtual_ip:sessionData.virtual_ip,virtual_mac:sessionData.virtual_mac});
     else if(statusResponse.ok&&registration.status==='error')throw new Error('VM initialization failed: '+(registration.error||registration.step||'check failed'));
     else {
       if(registration.status==='complete'){try{sessionStorage.removeItem('vm-initial-snapshot-pending')}catch(e){}}
-      beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:false});
+      beginAccountSession({account_id:accountId,session_token:token,snapshot_initialization_required:false,virtual_ip:sessionData.virtual_ip,virtual_mac:sessionData.virtual_mac});
     }
   }catch(e){
     try{sessionStorage.removeItem('vm-account-id');sessionStorage.removeItem('vm-session-token')}catch(ignore){}

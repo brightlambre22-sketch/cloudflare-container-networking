@@ -23,6 +23,10 @@ binding = "ASSETS"
 binding = "VM_SNAPSHOTS"
 bucket_name = "cloudflare-container-vm-snapshots"
 
+[[r2_buckets]]
+binding = "PROJECT_STORAGE"
+bucket_name = "vampiresquid-project-storage"
+
 [[durable_objects.bindings]]
 name = "TUNNEL_HUB"
 class_name = "TunnelHub"
@@ -70,6 +74,30 @@ storage = "sqlite"
 name = "ACCOUNT_PROVISIONER"
 class_name = "AccountProvisioner"
 
+[[durable_objects.bindings]]
+name = "BUSINESS_DATABASE"
+class_name = "BusinessDatabase"
+
+[[durable_objects.bindings]]
+name = "INVENTORY_LEDGER"
+class_name = "InventoryLedger"
+
+[[durable_objects.bindings]]
+name = "WISP_RELAY"
+class_name = "WispRelay"
+
 [exports.AccountProvisioner]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.BusinessDatabase]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.InventoryLedger]
+type = "durable-object"
+storage = "sqlite"
+
+[exports.WispRelay]
 type = "durable-object"
 storage = "sqlite"
