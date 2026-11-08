@@ -185,6 +185,33 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     }
   }
 
+  // Resolve a shopper's ZIP code to a geographic point so marketplace search
+  // can find stores within the configured radius instead of requiring an exact ZIP match.
+  if (url.pathname === "/api/marketplace/location") {
+    if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+    const postalCode = (url.searchParams.get("postal_code") ?? "").trim();
+    if (!/^[0-9]{5}(?:-[0-9]{4})?$/.test(postalCode)) {
+      return json({ error: "invalid_postal_code", message: "Enter a valid US ZIP code." }, 400);
+    }
+    try {
+      const location = await geocodeStoreAddress(env.PROJECT_STORAGE, postalCode + ", USA");
+      if (!location) return json({ error: "location_not_found", message: "We couldn't locate that ZIP code. Check it and try again." }, 404);
+      return json({
+        ok: true,
+        postal_code: postalCode,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        display_name: location.display_name,
+        provider: "OpenStreetMap Nominatim",
+      });
+    } catch (error) {
+      return json({
+        error: "location_lookup_unavailable",
+        message: error instanceof Error ? error.message : "ZIP code lookup failed.",
+      }, 502);
+    }
+  }
+
   if (url.pathname !== "/api/marketplace/products") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
