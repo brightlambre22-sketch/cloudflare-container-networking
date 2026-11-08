@@ -65,6 +65,8 @@ storage = "sqlite"
 
 [vars]
 VM_BASELINE_ID = "admin"
+ORACLE_ACCOUNT_EXEC_ENABLED = "true"
+DOORDASH_ENVIRONMENT = "sandbox"
 
 [exports.AccountRegistry]
 type = "durable-object"
