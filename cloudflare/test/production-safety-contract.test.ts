@@ -1,19 +1,44 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { baselineIsReady } from "../src/account-provisioner.ts";
 import { handleDoorDashRequest } from "../src/doordash.ts";
 
 const source = async (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("snapshot manifests satisfy the merchant provisioner readiness contract", async () => {
-  const [snapshot, provisioner] = await Promise.all([
-    source("../src/headless-snapshot-store.ts"),
-    source("../src/account-provisioner.ts"),
-  ]);
-  assert.match(snapshot, /adminReady: true/);
-  assert.match(snapshot, /ca_certificates_passed: true/);
-  assert.match(provisioner, /value\.adminReady === true/);
-  assert.match(provisioner, /checks!\.ca_certificates_passed === true/);
+const readyBaseline = {
+  version: 1,
+  generation: "baseline-1",
+  chunks: 1,
+  byteLength: 16,
+  adminReady: true,
+  checks: {
+    guest_booted: true,
+    shell_command_passed: true,
+    dhcp_passed: true,
+    ca_certificates_passed: true,
+  },
+};
+
+test("merchant provisioner accepts only a fully ready Admin baseline", () => {
+  assert.equal(baselineIsReady(readyBaseline), true);
+  assert.equal(baselineIsReady({ ...readyBaseline, adminReady: false }), false);
+  assert.equal(baselineIsReady({
+    ...readyBaseline,
+    checks: { ...readyBaseline.checks, ca_certificates_passed: false },
+  }), false);
+  assert.equal(baselineIsReady({
+    ...readyBaseline,
+    checks: { ...readyBaseline.checks, dhcp_passed: false },
+  }), false);
+});
+
+test("Admin baseline uploads enforce the same readiness contract", async () => {
+  const worker = await source("../src/index.ts");
+  assert.match(worker, /identity === \(env\.VM_BASELINE_ID \?\? "admin"\)/);
+  assert.match(worker, /manifest\.adminReady !== true/);
+  assert.match(worker, /checks\.ca_certificates_passed !== true/);
+  assert.match(worker, /admin_baseline_not_ready/);
 });
 
 test("root homepage explicitly resolves public/index.html", async () => {
@@ -26,7 +51,6 @@ test("root homepage explicitly resolves public/index.html", async () => {
 test("production diagnostics require the administrator bearer key", async () => {
   const worker = await source("../src/index.ts");
   for (const route of ["/debug/egress-ip", "/debug/fineproxy-tcp"]) {
-    const escaped = route.replaceAll("/", "\\/");
     const index = worker.indexOf('if (url.pathname === "' + route + '")');
     assert.notEqual(index, -1, `Missing diagnostic route ${route}`);
     const block = worker.slice(index, index + 300);
@@ -34,7 +58,7 @@ test("production diagnostics require the administrator bearer key", async () => 
   }
 });
 
-test("DoorDash production mode reaches credential validation without enabling itself", async () => {
+test("DoorDash production mode stays disabled until production credentials exist", async () => {
   const request = new Request(
     "https://vampirequid.example/api/delivery/quote/123e4567-e89b-12d3-a456-426614174000",
     { method: "POST" },
