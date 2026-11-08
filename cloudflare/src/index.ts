@@ -6,6 +6,7 @@ import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
 import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
 import { AccountProvisioner } from "./account-provisioner";
+import { baselineIsReady, type BaselineManifest } from "./snapshot-readiness";
 import { WispRelay } from "./wisp-relay";
 import { handleProjectStorageRequest } from "./project-storage";
 import { handlePayments } from "./payments";
@@ -1583,15 +1584,10 @@ export default {
           !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912 || manifest.chunks !== Math.ceil((manifest.byteLength as number) / 8388608)
         ) return json({ error: "invalid_manifest" }, 400);
         // Never publish an Admin baseline manifest that the account provisioner cannot clone.
-        if (identity === (env.VM_BASELINE_ID ?? "admin")) {
-          const checks = manifest.checks as Record<string, unknown> | undefined;
-          if (manifest.adminReady !== true || !checks ||
-              checks.guest_booted !== true || checks.shell_command_passed !== true ||
-              checks.dhcp_passed !== true || checks.ca_certificates_passed !== true) {
-            return json({ error: "admin_baseline_not_ready", required_checks: [
-              "adminReady", "guest_booted", "shell_command_passed", "dhcp_passed", "ca_certificates_passed",
-            ] }, 409);
-          }
+        if (identity === (env.VM_BASELINE_ID ?? "admin") && !baselineIsReady(manifest as BaselineManifest)) {
+          return json({ error: "admin_baseline_not_ready", required_checks: [
+            "adminReady", "guest_booted", "shell_command_passed", "dhcp_passed", "ca_certificates_passed",
+          ] }, 409);
         }
         const generation = manifest.generation;
         const count = manifest.chunks as number;
