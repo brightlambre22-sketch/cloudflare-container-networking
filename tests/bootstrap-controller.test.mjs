@@ -30,14 +30,19 @@ test("shell prompt detection tolerates blank rows but only accepts the current l
 
 test("VM uses a built ISO asset, a single supported relay configuration, and retries DHCP until a lease is valid", () => {
   assert.ok(html.includes("cdrom:{url:'/boot/TinyCorePure64-11.0-v86-ne2k-dhcp-experimental.iso'}"), "VM should use the existing NIC-enabled experimental ISO");
-  assert.ok(html.includes("net_device:{type:'ne2k',relay_url:'wss://relay.widgetry.org/'}"));
-  assert.ok(html.includes("network_relay_url:'wss://relay.widgetry.org/'"), "retain relay fallback for this deployed v86 runtime");
+  assert.ok(html.includes("net_device:{type:'ne2k',relay_url:relayUrl,router_ip:routerIp,vm_ip:virtualIp,masquerade:true,dns_method:'doh',doh_server:'cloudflare-dns.com'}"), "use account-specific synthetic DHCP/DNS through WISP");
+  assert.ok(html.includes("wisps://'+window.location.host+'/api/network/wisp"), "route WISP streams through the Cloudflare Worker");
+  assert.ok(html.includes("router_ip:routerIp,vm_ip:virtualIp"));
+  assert.ok(!html.includes("relay.widgetry.org"), "do not depend on the shared raw-Ethernet relay for DHCP");
   assert.ok(html.includes("function snapshotUrl(){if(!window.snapshotIdentity)"), "snapshots should remain scoped to the selected account identity");
   assert.ok(html.includes("while :; do /sbin/udhcpc -f -n -q -i \"$iface\";"), "DHCP should retry instead of abandoning the relay after three discovers");
   assert.ok(html.includes("/sbin/modprobe ne2k-pci"), "try loading the NE2000 PCI driver when no interface is present");
   assert.ok(html.includes("NIC_MISSING"), "report driver diagnostics instead of retrying DHCP forever without a NIC");
   assert.ok(html.includes("DHCP_RETRYING_NO_LEASE"));
   assert.ok(html.includes("echo DHCP_OK"), "successful DHCP path should emit its completion marker");
+  assert.ok(html.includes("DHCP_EXPECTED_IP=$expected_ip"), "DHCP must report the account-assigned address it expects");
+  assert.ok(html.includes("DHCP_ASSIGNED_IP=$ip"), "DHCP must report the address actually leased");
+  assert.ok(html.includes("DHCP_ASSIGNED_GATEWAY=$gw"), "DHCP must report the gateway actually installed");
   const firstCommand = html.match(/const commands=\[\s*`([\s\S]*?)`,/);
   assert.ok(firstCommand, "first startup command should be present");
   assert.ok(firstCommand[1].length < 900, "network init command must stay short enough to avoid terminal input truncation");
@@ -99,10 +104,9 @@ test("TLS installs run in the foreground before HTTPS and certificate checks", (
   assert.ok(html.includes("CA_BUNDLE_PATH=$CA_BUNDLE"));
   assert.ok(!html.includes("tce-load -i openssl-1.1.1 >/tmp/openssl-install.log 2>&1 &"));
   assert.ok(!html.includes("tce-load -i ca-certificates >/tmp/ca.log 2>&1 &"));
-  const bootstrapStart = html.indexOf("async function startBootstrap()");
-  const commandListStart = html.indexOf("const commands=[", bootstrapStart);
-  const commandListEnd = html.indexOf("\n];", commandListStart);
-  assert.ok(bootstrapStart >= 0 && commandListStart > bootstrapStart && commandListEnd > commandListStart, "startup command list should be present");
+  const commandListStart = html.indexOf("const commands=[");
+  const commandListEnd = html.indexOf("const markers=", commandListStart);
+  assert.ok(commandListStart >= 0 && commandListEnd > commandListStart, "startup command list should be present");
   const commandList = html.slice(commandListStart, commandListEnd);
   assert.ok(commandList.indexOf("tce-load -i openssl-1.1.1") < commandList.indexOf("tce-load -i ca-certificates"));
   assert.ok(commandList.indexOf("tce-load -i ca-certificates") < commandList.indexOf("${apiUrl}/health"));
