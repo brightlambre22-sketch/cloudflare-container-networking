@@ -36,11 +36,10 @@ test("an empty public catalog retries Stockroom synchronization", async () => {
 });
 
 test("merchant product images are stored in account-scoped R2 paths", async () => {
-  const storage = await source("../src/project-storage.ts");
-  assert.match(storage, /merchants\/\$\{accountId\}/);
-  assert.match(storage, /PROJECT_STORAGE/);
+  const stockroom = await source("../src/business-database.ts");
+  assert.match(stockroom, /merchants\/\$\{accountId2\}\/products\//);
+  assert.match(stockroom, /env\.PROJECT_STORAGE\.put/);
 });
-
 test("Wrangler declares all production Stockroom and merchant storage bindings", async () => {
   const config = await source("../wrangler.toml");
   for (const binding of [
