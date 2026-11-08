@@ -35,7 +35,8 @@ async function load(){
   for(const order of orders){
    const card=el("article","order"),head=el("div","order-head"),left=el("div","");
    left.append(el("div","order-id","Order "+String(order.order_id||"").slice(0,8).toUpperCase()),el("div","meta",new Date(order.created_at||Date.now()).toLocaleString()));
-   const amount=el("div","amount",money(order.amount_cents));head.append(left,amount);card.append(head);
+   const totalCents=Number.isFinite(Number(order.amount_cents))?Number(order.amount_cents):(Array.isArray(order.items)?order.items.reduce((sum,item)=>sum+Number(item.unit_price_cents||0)*Number(item.quantity||0),0):0);
+   const amount=el("div","amount",money(totalCents));head.append(left,amount);card.append(head);
    const payment=String(order.payment_method||"payment").toUpperCase();
    const sync=order.sync_status==="synced"?"Synced to Stockroom":"Saved; Stockroom sync pending";
    card.append(el("div","meta",payment+" · Paid · "+sync));
