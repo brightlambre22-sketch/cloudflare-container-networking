@@ -115,16 +115,12 @@ test("published Store projects remain discoverable across legacy casing and requ
 });
 
 test("the original Vampirequid dashboard branding and login-to-VM transition are preserved", () => {
-  assert.match(dashboard, /href="\\/vampire-quid\\.svg"/);
-  assert.match(dashboard, /<img src="\\/vampire-quid\\.svg" alt="Vampire Quid mascot logo"/);
-  assert.match(dashboard, /if\\(launchVm\\)\\{panel\\.hidden=true;document\\.body\\.classList\\.add\\('logged-in'\\);window\\.startVm\\(\\);\\}/);
-  assert.match(dashboard, /id="save-vm-state"/);
-  assert.match(dashboard, /id="clear-vm-state"/);
-  assert.match(dashboard, /id="run-network-test"/);
-  assert.match(dashboard, /id="run-bootstrap"/);
-  assert.match(dashboard, /id="copy-results"/);
-  assert.match(dashboard, /id="paste-terminal"/);
-  assert.match(dashboard, /id="screen_container"/);
-  assert.match(dashboard, /Merchant orders/);
-  assert.doesNotMatch(dashboard, /Use at least 4 characters for the password/);
+  assert.ok(dashboard.includes('href="/vampire-quid.svg"'));
+  assert.ok(dashboard.includes('<img src="/vampire-quid.svg" alt="Vampire Quid mascot logo"'));
+  assert.ok(dashboard.includes("if(launchVm){panel.hidden=true;document.body.classList.add('logged-in');window.startVm();}"));
+  for (const id of ["save-vm-state", "clear-vm-state", "run-network-test", "run-bootstrap", "copy-results", "paste-terminal", "screen_container"]) {
+    assert.ok(dashboard.includes('id="' + id + '"'), "dashboard control should remain: " + id);
+  }
+  assert.ok(dashboard.includes("Merchant orders"));
+  assert.ok(!dashboard.includes("Use at least 4 characters for the password"));
 });
