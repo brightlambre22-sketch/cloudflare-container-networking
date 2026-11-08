@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { Script } from "node:vm";
 
 const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -44,4 +45,14 @@ test("merchant order history is authenticated and renders account-scoped paid or
   assert.match(page, /\/api\/stockroom\/orders\?account_id=/);
   assert.match(page, /vm-session-token/);
   assert.match(page, /Paid/);
+});
+
+test("commerce and merchant dashboard inline scripts parse", async () => {
+  for (const path of ["../../public/marketplace.html", "../../public/checkout.html", "../../public/merchant-orders.html", "../../public/vm.html"]) {
+    const html = await read(path);
+    const scripts = Array.from(html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi))
+      .map(match => match[1]).filter(source => source.trim());
+    assert.ok(scripts.length > 0, path + " should contain an inline controller");
+    for (const source of scripts) new Script(source, { filename: path });
+  }
 });
