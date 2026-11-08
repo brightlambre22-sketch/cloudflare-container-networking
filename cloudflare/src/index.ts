@@ -6,7 +6,8 @@ import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
 import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
 import { AccountProvisioner } from "./account-provisioner";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner };
+import { WispRelay } from "./wisp-relay";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner, WispRelay };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
@@ -15,6 +16,7 @@ export interface Env {
   VM_EXECUTION: DurableObjectNamespace<VmExecution>;
   ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>;
   ACCOUNT_PROVISIONER: DurableObjectNamespace<AccountProvisioner>;
+  WISP_RELAY: DurableObjectNamespace<WispRelay>;
   VM_BASELINE_ID?: string;
   ADMIN_ACCESS_CODE?: string;
   VM_SNAPSHOTS: R2Bucket;
@@ -59,6 +61,39 @@ function json(data: unknown, status = 200): Response {
 
 function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
+}
+
+async function getOrAllocateAccountNetworkIdentity(
+  env: Env, accountId: string,
+): Promise<{ virtual_ip: string; virtual_mac: string } | null> {
+  const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+  const read = await accountRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
+  if (read.ok) {
+    const current = await read.json() as { virtual_ip?: unknown; virtual_mac?: unknown };
+    if (typeof current.virtual_ip === "string" && typeof current.virtual_mac === "string") {
+      return { virtual_ip: current.virtual_ip, virtual_mac: current.virtual_mac };
+    }
+  }
+  // Existing accounts created before this feature are assigned an address on first login.
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId }),
+  });
+  if (!allocationResponse.ok) return null;
+  const allocationBody = await allocationResponse.json() as {
+    allocation?: { virtual_ip?: unknown; virtual_mac?: unknown };
+  };
+  const allocation = allocationBody.allocation;
+  if (typeof allocation?.virtual_ip !== "string" || typeof allocation.virtual_mac !== "string") return null;
+  const assigned = await accountRegistry.fetch("https://account-registry.internal/network/assign", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId, virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac }),
+  });
+  if (!assigned.ok) return null;
+  const identity = await assigned.json() as { virtual_ip?: unknown; virtual_mac?: unknown };
+  if (typeof identity.virtual_ip !== "string" || typeof identity.virtual_mac !== "string") return null;
+  return { virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac };
 }
 
 export default {
@@ -257,10 +292,24 @@ export default {
       if (!claim.ok) return json(await claim.json(), claim.status);
 
       const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const allocationResponse = await authRegistry.fetch("https://account-registry.internal/network/allocate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (!allocationResponse.ok) {
+        await authRegistry.fetch("https://account-registry.internal/auth/status", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, status: "error" }),
+        });
+        return json({ error: "virtual_network_allocation_failed", detail: (await allocationResponse.text()).slice(0, 160) }, 503);
+      }
+      const allocationBody = await allocationResponse.json() as { allocation: { virtual_ip: string; virtual_mac: string } };
+      const allocation = allocationBody.allocation;
       const created = await accountRegistry.fetch("https://account-registry.internal/create", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ account_id: accountId, name: username, baseline_id: baselineId,
-          snapshot_identity: accountId, api_key_sha256: apiKeyHash }),
+          snapshot_identity: accountId, api_key_sha256: apiKeyHash,
+          virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac }),
       });
       if (!created.ok) {
         await authRegistry.fetch("https://account-registry.internal/auth/status", {
@@ -297,6 +346,7 @@ export default {
 
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
       return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+        virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         snapshot_cloned: false, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
         provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." }, 202);
     }
@@ -320,7 +370,12 @@ export default {
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) return json({ error: "invalid_credentials" }, 401);
-      return json({ ...(await response.json() as Record<string, unknown>), username });
+      const login = await response.json() as Record<string, unknown>;
+      const accountId = typeof login.account_id === "string" ? login.account_id : "";
+      if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
+      const identity = await getOrAllocateAccountNetworkIdentity(env, accountId);
+      if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
+      return json({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac });
     }
 
     if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
@@ -348,7 +403,40 @@ export default {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ account_id: body.account_id, token: body.session_token }),
       });
-      return response.ok ? json({ ok: true }) : json({ error: "unauthorized" }, 401);
+      if (!response.ok) return json({ error: "unauthorized" }, 401);
+      const identity = await getOrAllocateAccountNetworkIdentity(env, body.account_id);
+      if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
+      return json({ ok: true, ...identity });
+    }
+
+    if (url.pathname === "/api/network/ticket" && request.method === "POST") {
+      let body: { account_id?: unknown; session_token?: unknown; admin_code?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      if (accountId === "admin") {
+        if (!env.ADMIN_ACCESS_CODE || typeof body.admin_code !== "string" || body.admin_code !== env.ADMIN_ACCESS_CODE) return json({ error: "unauthorized" }, 401);
+      } else {
+        if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ account_id: accountId, token: body.session_token }),
+        });
+        if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      }
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+      const ticketResponse = await relay.fetch("https://wisp-relay.internal/ticket", { method: "POST" });
+      if (!ticketResponse.ok) return json({ error: "network_ticket_unavailable" }, 503);
+      return json(await ticketResponse.json());
+    }
+
+    if (url.pathname === "/api/network/wisp/" && request.method === "GET") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
+      const accountId = url.searchParams.get("account_id") ?? "";
+      const ticket = url.searchParams.get("ticket") ?? "";
+      if (!(accountId === "admin" || /^acct-[a-f0-9-]{36}$/.test(accountId)) || !/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+      return relay.fetch(request);
     }
 
     if (url.pathname === "/v1/accounts" && request.method === "POST") {
@@ -396,12 +484,20 @@ export default {
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accountApiKey));
       const apiKeyHash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
       const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+      const allocationResponse = await env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users")).fetch("https://account-registry.internal/network/allocate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ account_id: accountId }),
+      });
+      if (!allocationResponse.ok) return json({ error: "virtual_network_allocation_failed" }, 503);
+      const allocationBody = await allocationResponse.json() as { allocation: { virtual_ip: string; virtual_mac: string } };
+      const allocation = allocationBody.allocation;
       const created = await registry.fetch("https://account-registry.internal/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           account_id: accountId, name, baseline_id: baselineId,
           snapshot_identity: accountId, api_key_sha256: apiKeyHash,
+          virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         }),
       });
       if (!created.ok) return json({ error: "account_record_creation_failed" }, 502);
@@ -444,7 +540,8 @@ export default {
 
       return json({
         account_id: accountId, name, status: "ready", baseline_id: baselineId,
-        snapshot_identity: accountId, api_key: accountApiKey,
+        snapshot_identity: accountId, virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
+        api_key: accountApiKey,
         api_key_notice: "Store this key securely; it is returned only once.",
         runtime: "snapshot-provisioned; no container started; headless VM execution not yet wired",
       }, 201);

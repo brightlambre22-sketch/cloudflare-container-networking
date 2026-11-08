@@ -1,6 +1,11 @@
 import V86 from "../dist/headless-v86-bundle.js";
 import { createCompiledV86WasmFn, getCompiledV86WasmInfo } from "./headless-v86-wasm";
 import { commitGuestSnapshot, readCommittedGuestSnapshot } from "./headless-snapshot-store";
+import { AccountRegistry } from "./account-registry";
+import { WispRelay } from "./wisp-relay";
+import { virtualGatewayForIp } from "./virtual-network";
+
+export { AccountRegistry, WispRelay };
 
 const BOOTLOADER_PROMPT_TIMEOUT_MS = 20000;
 // Tiny Core can take several minutes to reach a usable console in this image.
@@ -10,8 +15,17 @@ const SHELL_COMMAND_TIMEOUT_MS = 20000;
 type Stage = { attempted: boolean; passed: boolean; marker: string; error?: string; output?: string };
 
 export default {
-  async fetch(request: Request, env: { ASSETS: Fetcher; VM_SNAPSHOTS: R2Bucket; NETWORK_RELAY_URL?: string }) {
-    const path = new URL(request.url).pathname;
+  async fetch(request: Request, env: { ASSETS: Fetcher; VM_SNAPSHOTS: R2Bucket; ACCOUNT_REGISTRY: DurableObjectNamespace<AccountRegistry>; WISP_RELAY: DurableObjectNamespace<WispRelay> }) {
+    const requestUrl = new URL(request.url);
+    const path = requestUrl.pathname;
+    if (path === "/api/network/wisp/" && request.method === "GET") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return Response.json({ error: "websocket_upgrade_required" }, { status: 426 });
+      const identity = requestUrl.searchParams.get("identity") ?? "";
+      const ticket = requestUrl.searchParams.get("ticket") ?? "";
+      if (!/^(acct-[a-f0-9-]{36}|test-[a-z0-9-]{1,32})$/.test(identity) || !/^[a-f0-9]{64}$/.test(ticket)) return Response.json({ error: "invalid_network_ticket" }, { status: 401 });
+      const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(identity));
+      return relay.fetch(request);
+    }
     if (path === "/ready") return Response.json({ ready: true, probe: "tinycore-dhcp-openssl-ca" });
     if ((path !== "/run" && path !== "/snapshot-roundtrip") || request.method !== "POST") return Response.json({ error: "method_not_allowed" }, { status: 405 });
     let requestedIdentity = path === "/snapshot-roundtrip" ? "test-v86-roundtrip" : "";
@@ -36,6 +50,44 @@ export default {
     const wasm = getCompiledV86WasmInfo();
     await writeProgress("running", "booting_linux", { wasm_module_loaded: wasm.module_loaded });
     const base = new URL(request.url);
+    const allocationRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+    // The allocator intentionally accepts only production account IDs. For test-* snapshot
+    // identities, derive a deterministic synthetic account UUID so repeated test runs reuse
+    // the same address without weakening production account-ID validation.
+    let networkAccountId = snapshotIdentity;
+    if (!networkAccountId.startsWith("acct-")) {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(snapshotIdentity));
+      const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      networkAccountId = "acct-" + hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-4" + hex.slice(13, 16) + "-8" + hex.slice(17, 20) + "-" + hex.slice(20, 32);
+    }
+    const allocationResponse = await allocationRegistry.fetch("https://account-registry.internal/network/allocate", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ account_id: networkAccountId }),
+    });
+    if (!allocationResponse.ok) {
+      await writeProgress("error", "network_identity", { error: "virtual_network_allocation_failed" });
+      return Response.json({ probe: "tinycore-snapshot-save-readback", runtime: "workerd", passed: false, guest_booted: false, error: "virtual_network_allocation_failed" }, { status: 503 });
+    }
+    const allocationResult = await allocationResponse.json() as { allocation?: { virtual_ip?: unknown } };
+    const virtualIp = typeof allocationResult.allocation?.virtual_ip === "string" ? allocationResult.allocation.virtual_ip : "";
+    const routerIp = virtualGatewayForIp(virtualIp);
+    if (!routerIp) {
+      await writeProgress("error", "network_identity", { error: "invalid_virtual_network_identity" });
+      return Response.json({ probe: "tinycore-snapshot-save-readback", runtime: "workerd", passed: false, guest_booted: false, error: "invalid_virtual_network_identity" }, { status: 500 });
+    }
+    const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(snapshotIdentity));
+    const ticketResponse = await relay.fetch("https://wisp-relay.internal/ticket", { method: "POST" });
+    if (!ticketResponse.ok) {
+      await writeProgress("error", "network_identity", { error: "network_ticket_unavailable" });
+      return Response.json({ probe: "tinycore-snapshot-save-readback", runtime: "workerd", passed: false, guest_booted: false, error: "network_ticket_unavailable" }, { status: 503 });
+    }
+    const ticketData = await ticketResponse.json() as { ticket?: unknown };
+    if (typeof ticketData.ticket !== "string") {
+      await writeProgress("error", "network_identity", { error: "invalid_network_ticket" });
+      return Response.json({ probe: "tinycore-snapshot-save-readback", runtime: "workerd", passed: false, guest_booted: false, error: "invalid_network_ticket" }, { status: 500 });
+    }
+    const wsScheme = base.protocol === "https:" ? "wisps://" : "wisp://";
+    const relayUrl = wsScheme + base.host + "/api/network/wisp/?identity=" + encodeURIComponent(snapshotIdentity) + "&ticket=" + encodeURIComponent(ticketData.ticket);
     let finishBoot!: (value: { booted: boolean; reason?: string }) => void;
     const bootObserved = new Promise<{ booted: boolean; reason?: string }>((resolve) => { finishBoot = resolve; });
     let started = false;
@@ -63,13 +115,11 @@ export default {
     }
     (globalThis as unknown as { XMLHttpRequest: typeof AssetXMLHttpRequest }).XMLHttpRequest = AssetXMLHttpRequest;
 
-    // Match the relay already used by the real browser VM in public/vm.html.
-    // Keep this in fetch() scope because the DHCP stages and response also use it.
-    // Allow CI to override it, but do not silently boot an unconnected NE2000 device.
-    const relayUrl = env.NETWORK_RELAY_URL || "wss://relay.widgetry.org/";
-
     try {
-      const netDevice: { type: "ne2k"; relay_url?: string } = { type: "ne2k", relay_url: relayUrl };
+      const netDevice: { type: "ne2k"; relay_url: string; vm_ip: string; router_ip: string; masquerade: boolean; dns_method: string; doh_server: string } = {
+        type: "ne2k", relay_url: relayUrl, vm_ip: virtualIp, router_ip: routerIp,
+        masquerade: true, dns_method: "doh", doh_server: "cloudflare-dns.com",
+      };
       emulator = new V86({
         wasm_fn: createCompiledV86WasmFn(),
         memory_size: 128 * 1024 * 1024,
@@ -226,6 +276,8 @@ if [ -z "$iface" ]; then
   iface=$(/sbin/ifconfig -a 2>/dev/null | grep -E "^(eth|en|wlan)" | head -n 1 | cut -d " " -f 1)
 fi
 echo DHCP_INTERFACE=$iface
+echo DHCP_EXPECTED_IP=${virtualIp}
+echo DHCP_EXPECTED_GATEWAY=${routerIp}
 if [ -z "$iface" ]; then
   echo NIC_MISSING
   cat /proc/net/dev
@@ -236,11 +288,15 @@ fi
 tries=0
 while [ "$tries" -lt 30 ]; do
   /sbin/udhcpc -f -n -q -i "$iface"
-  if /sbin/ifconfig "$iface" | grep -Eq "inet (addr:)?[0-9]" && /sbin/route -n | grep -q "0.0.0.0"; then
+  actual_ip=$(/sbin/ifconfig "$iface" | awk '/inet addr:/{sub(/.*inet addr:/,"");sub(/ .*/,"");print;exit} /inet /{for(i=1;i<=NF;i++)if($i=="inet"){print $(i+1);exit}}')
+  actual_gateway=$(/sbin/route -n | awk '$1=="0.0.0.0"{print $2;exit}')
+  echo DHCP_ACTUAL_IP=$actual_ip
+  echo DHCP_ACTUAL_GATEWAY=$actual_gateway
+  if [ "$actual_ip" = "${virtualIp}" ] && [ "$actual_gateway" = "${routerIp}" ]; then
     echo DHCP_OK
     exit 0
   fi
-  echo DHCP_RETRYING_NO_LEASE
+  echo DHCP_RETRYING_NO_LEASE_OR_WRONG_ADDRESS
   tries=$((tries+1))
   sleep 3
 done
@@ -251,12 +307,12 @@ exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
-      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 105000, true);
+      const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 360000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
       if (!stages.dhcp.passed) stages.dhcp.error = /NIC_MISSING/.test(dhcpOutput)
         ? "guest_nic_missing"
-        : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_dhcp_lease_and_default_route_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
+        : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_expected_dhcp_ip_and_gateway_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
       if (stages.dhcp.passed) {
         await runStage("tls_download",
