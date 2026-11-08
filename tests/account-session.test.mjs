@@ -124,3 +124,9 @@ test("the original Vampirequid dashboard branding and login-to-VM transition are
   assert.ok(dashboard.includes("Merchant orders"));
   assert.ok(!dashboard.includes("Use at least 4 characters for the password"));
 });
+
+test("the Cloudflare deployment retains the original runtime feature flags", () => {
+  const config = readFileSync(new URL("../cloudflare/wrangler.toml", import.meta.url), "utf8");
+  assert.match(config, /ORACLE_ACCOUNT_EXEC_ENABLED\s*=\s*"true"/);
+  assert.match(config, /DOORDASH_ENVIRONMENT\s*=\s*"sandbox"/);
+});
