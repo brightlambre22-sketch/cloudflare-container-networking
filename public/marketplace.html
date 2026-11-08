@@ -11,13 +11,14 @@
 header{background:#fff;border-bottom:1px solid var(--line)}.top{max-width:1160px;margin:auto;padding:18px 24px;display:flex;align-items:center;gap:24px}.brand{font-weight:850;letter-spacing:-.04em;font-size:21px;white-space:nowrap}.brand span{color:var(--green)}
 .search{display:flex;gap:10px;align-items:center;flex:1;min-width:0}.search input{height:48px;border:1px solid var(--line);border-radius:12px;padding:0 15px;background:#fff;font:inherit;outline:none;min-width:0}.search input:focus{border-color:var(--green);box-shadow:0 0 0 3px #1c65481a}.search .query{flex:1}.search .zip{width:142px}.search button{height:48px;border:0;border-radius:12px;padding:0 24px;background:var(--green);color:white;font:700 14px inherit;cursor:pointer}.search button:hover{background:var(--green-dark)}
 main{max-width:1160px;margin:0 auto;padding:22px 24px 64px}.intro{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:4px 0 22px;padding:0 2px}.intro-copy{min-width:0}.eyebrow{font-size:10px;letter-spacing:.16em;font-weight:800;color:var(--green);margin:0 0 3px}.intro h1{font-size:clamp(19px,2vw,24px);line-height:1.2;letter-spacing:-.035em;margin:0 0 4px}.intro p{margin:0;color:var(--muted);font-size:13px}.intro-note{font-size:12px;color:var(--muted);white-space:nowrap}
-.results-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 13px}.results-head h2{font-size:16px;margin:0;letter-spacing:-.02em}.status{font-size:12px;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}.product{background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;min-width:0}.photo{height:170px;background:#eef1ed;display:grid;place-items:center;color:#8a968d;font-size:12px;overflow:hidden}.photo img{width:100%;height:100%;object-fit:cover}.details{padding:14px}.category{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-weight:800}.name{font-weight:700;margin:4px 0 3px;line-height:1.3}.description{font-size:12px;color:var(--muted);min-height:34px;margin:0 0 10px}.price-row{display:flex;justify-content:space-between;align-items:center;gap:8px}.price{font-size:18px;font-weight:800;letter-spacing:-.03em}.store{font-size:11px;color:var(--muted);margin-top:9px}.empty{border:1px dashed #cbd5cc;border-radius:14px;padding:28px;text-align:center;color:var(--muted);background:#fff;grid-column:1/-1}.empty strong{display:block;color:var(--ink);margin-bottom:4px}
+.results-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 13px}.results-head h2{font-size:16px;margin:0;letter-spacing:-.02em}.status{font-size:12px;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}.product{background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;min-width:0}.photo{height:170px;background:#eef1ed;display:grid;place-items:center;color:#8a968d;font-size:12px;overflow:hidden}.photo img{width:100%;height:100%;object-fit:cover}.details{padding:14px}.category{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-weight:800}.name{font-weight:700;margin:4px 0 3px;line-height:1.3}.description{font-size:12px;color:var(--muted);min-height:34px;margin:0 0 10px}.price-row{display:flex;justify-content:space-between;align-items:center;gap:8px}.price{font-size:18px;font-weight:800;letter-spacing:-.03em}.store{font-size:11px;color:var(--muted);margin-top:9px}.buy{width:100%;margin-top:12px;border:0;border-radius:9px;padding:11px 14px;background:var(--green);color:#fff;font:700 13px inherit;cursor:pointer}.buy:disabled{opacity:.6;cursor:wait}.buy:hover:not(:disabled){background:var(--green-dark)}.empty{border:1px dashed #cbd5cc;border-radius:14px;padding:28px;text-align:center;color:var(--muted);background:#fff;grid-column:1/-1}.empty strong{display:block;color:var(--ink);margin-bottom:4px}
 @media(max-width:680px){.top{padding:14px 16px;display:block}.brand{margin-bottom:12px}.search{display:grid;grid-template-columns:1fr 104px}.search .query{grid-column:1/-1}.search .zip{width:100%}.search button{width:100%;padding:0 12px}main{padding:18px 16px 48px}.intro{align-items:flex-start;display:block}.intro-note{display:block;margin-top:8px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.photo{height:130px}.details{padding:11px}.description{min-height:0}}
 </style>
 </head>
 <body>
 <header><div class="top">
-  <div class="brand">vampire<span>quid</span></div>\n  <a href="/merchant-location.html" style="color:#176044;font-size:13px;font-weight:700;white-space:nowrap">List your store</a>
+  <div class="brand">vampire<span>quid</span></div>
+  <a href="/merchant-location.html" style="color:#176044;font-size:13px;font-weight:700;white-space:nowrap">List your store</a>
   <form class="search" id="searchForm" role="search" aria-label="Search local products">
     <input class="query" id="query" type="search" maxlength="100" placeholder="Search products, brands, or local shops" aria-label="What are you looking for?">
     <input class="zip" id="postal" inputmode="numeric" maxlength="12" placeholder="ZIP code" aria-label="ZIP code" required>
@@ -52,6 +53,22 @@ function render(items){
     const details=node("div","details");details.append(node("div","category",item.category||"Local find"),node("div","name",item.name||"Product"),node("p","description",item.description||"Available from a nearby independent shop."));
     const row=node("div","price-row");row.append(node("div","price",money(item.price)),node("span","status",(item.quantity||0)+" in stock"));details.append(row);
     const store=item.store||{};details.append(node("div","store",[store.name,store.city,store.state].filter(Boolean).join(" · ")));
+    const buy=node("button","buy","Buy now");
+    buy.type="button";
+    buy.addEventListener("click",async()=>{
+      if(!/^[a-f0-9]{32}$/.test(String(item.site_id||""))||!/^[a-f0-9-]{36}$/.test(String(item.product_id||item.id||""))){status.textContent="This product is not ready for checkout.";return}
+      buy.disabled=true;buy.textContent="Preparing checkout…";
+      try{
+        const response=await fetch("/api/payments/public/checkout/"+encodeURIComponent(item.site_id),{
+          method:"POST",headers:{"content-type":"application/json",accept:"application/json"},
+          body:JSON.stringify({items:[{product_id:item.product_id||item.id,quantity:1}]})
+        });
+        const data=await response.json();
+        if(!response.ok||!data.url)throw new Error(data.error||"Checkout could not be created.");
+        location.assign(data.url);
+      }catch(error){status.textContent=error.message||"Checkout could not be created.";buy.disabled=false;buy.textContent="Try again"}
+    });
+    details.append(buy);
     card.append(photo,details);results.append(card);
   }
 }
