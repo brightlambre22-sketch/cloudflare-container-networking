@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { baselineIsReady, type BaselineManifest } from "./snapshot-readiness";
 
 interface ProvisionerEnv {
   ACCOUNT_REGISTRY: DurableObjectNamespace;
@@ -18,21 +19,6 @@ interface ProvisioningJob {
   attempts: number;
   error?: string;
 }
-interface BaselineManifest {
-  version?: unknown;
-  generation?: unknown;
-  chunks?: unknown;
-  byteLength?: unknown;
-  savedAt?: unknown;
-  adminReady?: unknown;
-  checks?: {
-    guest_booted?: unknown;
-    shell_command_passed?: unknown;
-    dhcp_passed?: unknown;
-    ca_certificates_passed?: unknown;
-  };
-}
-
 const SNAPSHOT_CHUNK_BYTES = 8 * 1024 * 1024;
 const MAX_CHUNKS = 128;
 const MAX_ATTEMPTS = 3;
@@ -43,13 +29,6 @@ function json(data: unknown, status = 200): Response {
 function validAccountId(value: string): boolean {
   return /^acct-[a-f0-9-]{36}$/.test(value);
 }
-function baselineIsReady(value: BaselineManifest): boolean {
-  const checks = value.checks;
-  return value.adminReady === true && Boolean(checks) &&
-    checks!.guest_booted === true && checks!.shell_command_passed === true &&
-    checks!.dhcp_passed === true && checks!.ca_certificates_passed === true;
-}
-
 /**
  * Durable coordinator for cloning the golden Admin snapshot into account-owned R2
  * storage. It intentionally does not import v86 or boot Linux. Chunk writes are

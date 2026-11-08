@@ -6,6 +6,7 @@ import { VmExecution } from "./vm-execution";
 import { AccountRegistry } from "./account-registry";
 import { readCommittedGuestSnapshot } from "./headless-snapshot-store";
 import { AccountProvisioner } from "./account-provisioner";
+import { baselineIsReady, type BaselineManifest } from "./snapshot-readiness";
 import { WispRelay } from "./wisp-relay";
 import { handleProjectStorageRequest } from "./project-storage";
 import { handlePayments } from "./payments";
@@ -1582,6 +1583,12 @@ export default {
           !Number.isInteger(manifest.chunks) || (manifest.chunks as number) < 1 || (manifest.chunks as number) > 128 ||
           !Number.isInteger(manifest.byteLength) || (manifest.byteLength as number) < 1 || (manifest.byteLength as number) > 536870912 || manifest.chunks !== Math.ceil((manifest.byteLength as number) / 8388608)
         ) return json({ error: "invalid_manifest" }, 400);
+        // Never publish an Admin baseline manifest that the account provisioner cannot clone.
+        if (identity === (env.VM_BASELINE_ID ?? "admin") && !baselineIsReady(manifest as BaselineManifest)) {
+          return json({ error: "admin_baseline_not_ready", required_checks: [
+            "adminReady", "guest_booted", "shell_command_passed", "dhcp_passed", "ca_certificates_passed",
+          ] }, 409);
+        }
         const generation = manifest.generation;
         const count = manifest.chunks as number;
         const present = await Promise.all(Array.from({ length: count }, (_, part) =>
@@ -1631,6 +1638,7 @@ export default {
     }
 
     if (url.pathname === "/debug/egress-ip") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
       try {
@@ -1650,6 +1658,7 @@ export default {
     }
 
     if (url.pathname === "/debug/fineproxy-tcp") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
       const target = { hostname: "104.245.241.241", port: 1085 };
@@ -1810,6 +1819,14 @@ export default {
       }
 
       return json({ error: "method_not_allowed" }, 405);
+    }
+
+    // Explicitly resolve the homepage through the configured static asset bundle.
+    // This avoids depending on implicit directory-index behavior at the Worker boundary.
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const assetUrl = new URL(request.url);
+      assetUrl.pathname = "/index.html";
+      return env.ASSETS.fetch(new Request(assetUrl, request));
     }
 
     if (url.pathname === "/marketplace" || url.pathname === "/marketplace/") {
