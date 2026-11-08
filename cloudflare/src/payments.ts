@@ -1,9 +1,13 @@
 import type { InventoryLedger } from "./inventory-ledger";
 import { handleDoorDashRequest } from "./doordash.ts";
+import { synchronizePendingOrders } from "./business-database";
 export interface PaymentEnv {
   ACCOUNT_REGISTRY: DurableObjectNamespace;
   PROJECT_STORAGE: R2Bucket;
   INVENTORY_LEDGER: DurableObjectNamespace<InventoryLedger>;
+  BUSINESS_DATABASE: DurableObjectNamespace;
+  STOCKROOM_ORIGIN?: string;
+  STOCKROOM_GATEWAY_TOKEN?: string;
   PAYMENTS_ENCRYPTION_KEY?: string;
   DOORDASH_ENVIRONMENT?: string;
   DOORDASH_DEVELOPER_ID?: string;
@@ -34,6 +38,12 @@ async function commitInventory(env: PaymentEnv, checkout: { id: string; account_
       body: JSON.stringify({ checkout_id: checkout.id, payment_reference: paymentReference, payment_method: paymentMethod }),
     });
     const result = await response.json() as { order_id?: string };
+    if (response.ok) {
+      // The ledger commit is authoritative. Push the order into the merchant's
+      // Stockroom immediately when available; if TinyCore is offline, the durable
+      // ledger queue remains intact and the merchant order API still exposes it.
+      await synchronizePendingOrders(env, checkout.account_id).catch(() => undefined);
+    }
     return { ok: response.ok, order_id: result.order_id };
   } catch {
     return { ok: false };

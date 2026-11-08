@@ -1,9 +1,13 @@
 import type { InventoryLedger } from "./inventory-ledger";
+import { syncInventoryCatalog } from "./business-database";
 
 export interface MarketplaceEnv {
   ACCOUNT_REGISTRY: DurableObjectNamespace;
   INVENTORY_LEDGER: DurableObjectNamespace<InventoryLedger>;
+  BUSINESS_DATABASE: DurableObjectNamespace;
   PROJECT_STORAGE: R2Bucket;
+  STOCKROOM_ORIGIN?: string;
+  STOCKROOM_GATEWAY_TOKEN?: string;
 }
 
 const ACCOUNT_ID = /^acct-[a-f0-9-]{36}$/;
@@ -283,6 +287,22 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       );
       if (mapping?.account_id !== profile.account_id || mapping.project_id !== profile.project_id) continue;
       const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(profile.account_id));
+      // Stockroom is the merchant's catalog authority. Refresh at most once
+      // per minute so a missed product sync is repaired without making every
+      // shopper search perform a full database read for every merchant.
+      const syncKey = "marketplace/catalog-sync/" + profile.account_id + ".json";
+      const syncState = await readJson<{ synced_at?: string }>(env.PROJECT_STORAGE, syncKey);
+      const syncedAt = syncState?.synced_at ? Date.parse(syncState.synced_at) : 0;
+      if (!Number.isFinite(syncedAt) || Date.now() - syncedAt > 60_000) {
+        try {
+          await syncInventoryCatalog(env, profile.account_id);
+          await env.PROJECT_STORAGE.put(syncKey, JSON.stringify({ synced_at: new Date().toISOString() }), {
+            httpMetadata: { contentType: "application/json" },
+          });
+        } catch {
+          // Fall back to the last known online catalog if this merchant's Stockroom is offline.
+        }
+      }
       const catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
       if (!catalogResponse.ok) continue;
       const catalog = await catalogResponse.json() as {

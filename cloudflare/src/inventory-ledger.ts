@@ -136,7 +136,9 @@ export class InventoryLedger extends DurableObject {
       const items=sql.exec("SELECT product_id,quantity,unit_price_cents,name FROM inventory_reservation_items WHERE checkout_id=?",checkoutId).toArray() as Array<Record<string,unknown>>;
       if (!items.length) return json({error:"reservation_items_missing"},409);
       const orderId=crypto.randomUUID();
-      const payload={order_id:orderId,checkout_id:checkoutId,items:items.map(x=>({product_id:x.product_id,quantity:x.quantity,unit_price_cents:x.unit_price_cents,name:x.name})),
+      const payload={order_id:orderId,checkout_id:checkoutId,
+        items:items.map(x=>({product_id:x.product_id,quantity:x.quantity,unit_price_cents:x.unit_price_cents,name:x.name})),
+        amount_cents:items.reduce((sum,x)=>sum+Number(x.unit_price_cents)*Number(x.quantity),0),
         payment_reference:typeof body?.payment_reference==="string"?body.payment_reference.slice(0,160):null,
         payment_method:typeof body?.payment_method==="string"?body.payment_method.slice(0,32):"unknown",status:"paid",created_at:now};
       try {
@@ -216,6 +218,10 @@ export class InventoryLedger extends DurableObject {
     if (url.pathname === "/orders" && request.method === "GET") {
       const rows=sql.exec("SELECT order_id,payload_json,created_at FROM inventory_orders WHERE status='pending_sync' ORDER BY created_at LIMIT 250").toArray() as Array<{order_id:string;payload_json:string;created_at:string}>;
       return json({ok:true,orders:rows.map(x=>JSON.parse(x.payload_json)),count:rows.length});
+    }
+    if (url.pathname === "/orders/all" && request.method === "GET") {
+      const rows=sql.exec("SELECT order_id,payload_json,status,created_at FROM inventory_orders ORDER BY created_at DESC LIMIT 250").toArray() as Array<{order_id:string;payload_json:string;status:string;created_at:string}>;
+      return json({ok:true,orders:rows.map(x=>({...JSON.parse(x.payload_json),sync_status:x.status})),count:rows.length});
     }
     if (url.pathname === "/orders/ack" && request.method === "POST") {
       const body=await request.json().catch(()=>null) as {order_ids?:unknown}|null;

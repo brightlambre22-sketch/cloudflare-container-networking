@@ -1,0 +1,32 @@
+name: Vampirequid commerce validation
+
+on:
+  pull_request:
+    paths:
+      - "cloudflare/**"
+      - "public/**"
+      - ".github/workflows/commerce-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/**"
+      - "public/**"
+      - ".github/workflows/commerce-validation.yml"
+
+jobs:
+  commerce-and-worker-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Worker dependencies
+        working-directory: cloudflare
+        run: npm install --no-audit --no-fund
+      - name: Run Worker and commerce contract tests
+        working-directory: cloudflare
+        run: npm run test:headless
+      - name: Validate Worker build
+        working-directory: cloudflare
+        run: npm run check
