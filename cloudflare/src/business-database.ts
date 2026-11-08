@@ -295,10 +295,21 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
     const mapping = await mappingObject.json<{ account_id?: unknown }>().catch(() => null);
     const accountId = typeof mapping?.account_id === "string" ? mapping.account_id : "";
     if (!ACCOUNT_ID.test(accountId)) return json({ error: "site_not_found" }, 404);
+    // Repair missed catalog syncs when the public storefront is next visited.
+    // Keep serving the last known good ledger catalog if the merchant's Stockroom is offline.
+    let catalogSyncError: string | null = null;
+    try {
+      await syncInventoryCatalog(env, accountId);
+    } catch (error) {
+      catalogSyncError = error instanceof Error ? error.message : "catalog_sync_failed";
+    }
     const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
-    let catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
-    let catalog = await catalogResponse.json() as { products?: Array<{id:string;sku:string;name:string;description:string;category:string;image_url:string;variations:unknown[];external_url:string;price:number;in_stock:boolean}> };
+    const catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
+    const catalog = await catalogResponse.json() as { products?: Array<{id:string;sku:string;name:string;description:string;category:string;image_url:string;variations:unknown[];external_url:string;price:number;in_stock:boolean}> };
     if (!catalogResponse.ok) return json({ error: "store_catalog_unavailable" }, 503);
+    if ((!catalog.products || catalog.products.length === 0) && catalogSyncError) {
+      return json({ error: "store_catalog_sync_unavailable", detail: catalogSyncError }, 503);
+    }
     return json({ ok: true, products: (catalog.products ?? []).map(p => ({
       id:p.id, sku:p.sku, name:p.name, description:p.description, category:p.category,
       image_url:p.image_url, price:p.price, in_stock:p.in_stock, variations:p.variations, external_url:p.external_url,
