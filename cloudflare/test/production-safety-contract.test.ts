@@ -36,8 +36,8 @@ test("merchant provisioner accepts only a fully ready Admin baseline", () => {
 test("Admin baseline uploads enforce the same readiness contract", async () => {
   const worker = await source("../src/index.ts");
   assert.match(worker, /identity === \(env\.VM_BASELINE_ID \?\? "admin"\)/);
-  assert.match(worker, /manifest\.adminReady !== true/);
-  assert.match(worker, /checks\.ca_certificates_passed !== true/);
+  assert.match(worker, /baselineIsReady\(manifest as BaselineManifest\)/);
+  assert.match(worker, /required_checks:[\s\S]*"ca_certificates_passed"/);
   assert.match(worker, /admin_baseline_not_ready/);
 });
 
