@@ -8,6 +8,8 @@ const dashboard = readFileSync(new URL("../public/vm.html", import.meta.url), "u
 const stockroom = readFileSync(new URL("../cloudflare/src/business-database.ts", import.meta.url), "utf8");
 const wispRelay = readFileSync(new URL("../cloudflare/src/wisp-relay.ts", import.meta.url), "utf8");
 const virtualNetwork = readFileSync(new URL("../cloudflare/src/virtual-network.ts", import.meta.url), "utf8");
+const headlessRoundtrip = readFileSync(new URL("../cloudflare/src/headless-v86-snapshot-roundtrip-worker.ts", import.meta.url), "utf8");
+const headlessRoundtripConfig = readFileSync(new URL("../cloudflare/wrangler.headless-v86-roundtrip.toml", import.meta.url), "utf8");
 
 test("signup stores server-side PBKDF2 credentials and enforces eight-character passwords", () => {
   assert.match(registry, /PBKDF2/);
@@ -90,4 +92,9 @@ test("each merchant receives a stable private network identity and authenticated
   assert.ok(dashboard.includes("/api/network/ticket"));
   assert.ok(dashboard.includes("/api/network/wisp/"));
   assert.ok(!dashboard.includes("relay.widgetry.org"));
+  assert.ok(headlessRoundtrip.includes("vm_ip: virtualIp"));
+  assert.ok(headlessRoundtrip.includes("router_ip: routerIp"));
+  assert.ok(headlessRoundtrip.includes("/api/network/wisp/"));
+  assert.ok(!headlessRoundtrip.includes("relay.widgetry.org"));
+  assert.ok(headlessRoundtripConfig.includes('name = "WISP_RELAY"'));
 });
