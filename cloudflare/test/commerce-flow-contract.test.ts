@@ -50,7 +50,7 @@ test("merchant order history is authenticated and renders account-scoped paid or
 test("commerce and merchant dashboard inline scripts parse", async () => {
   for (const path of ["../../public/marketplace.html", "../../public/checkout.html", "../../public/merchant-orders.html", "../../public/vm.html"]) {
     const html = await read(path);
-    const scripts = Array.from(html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi))
+    const scripts = Array.from(html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi))
       .map(match => match[1]).filter(source => source.trim());
     assert.ok(scripts.length > 0, path + " should contain an inline controller");
     for (const source of scripts) new Script(source, { filename: path });
