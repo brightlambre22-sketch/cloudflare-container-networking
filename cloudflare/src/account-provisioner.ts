@@ -43,7 +43,7 @@ function json(data: unknown, status = 200): Response {
 function validAccountId(value: string): boolean {
   return /^acct-[a-f0-9-]{36}$/.test(value);
 }
-function baselineIsReady(value: BaselineManifest): boolean {
+export function baselineIsReady(value: BaselineManifest): boolean {
   const checks = value.checks;
   return value.adminReady === true && Boolean(checks) &&
     checks!.guest_booted === true && checks!.shell_command_passed === true &&
