@@ -1,0 +1,37 @@
+name: Cloudflare Worker validation
+
+on:
+  pull_request:
+    paths:
+      - "cloudflare/**"
+      - "public/**"
+      - ".github/workflows/cloudflare-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cloudflare/**"
+      - "public/**"
+      - ".github/workflows/cloudflare-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run Worker unit and contract tests
+        run: npm run test:headless
+      - name: Build Worker and run Wrangler dry-run
+        run: npm run check
