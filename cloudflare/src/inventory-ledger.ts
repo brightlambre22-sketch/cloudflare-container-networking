@@ -217,6 +217,10 @@ export class InventoryLedger extends DurableObject {
       const rows=sql.exec("SELECT order_id,payload_json,created_at FROM inventory_orders WHERE status='pending_sync' ORDER BY created_at LIMIT 250").toArray() as Array<{order_id:string;payload_json:string;created_at:string}>;
       return json({ok:true,orders:rows.map(x=>JSON.parse(x.payload_json)),count:rows.length});
     }
+    if (url.pathname === "/orders/all" && request.method === "GET") {
+      const rows=sql.exec("SELECT order_id,payload_json,status,created_at FROM inventory_orders ORDER BY created_at DESC LIMIT 250").toArray() as Array<{order_id:string;payload_json:string;status:string;created_at:string}>;
+      return json({ok:true,orders:rows.map(x=>({...JSON.parse(x.payload_json),sync_status:x.status})),count:rows.length});
+    }
     if (url.pathname === "/orders/ack" && request.method === "POST") {
       const body=await request.json().catch(()=>null) as {order_ids?:unknown}|null;
       if (!Array.isArray(body?.order_ids)||body.order_ids.length>250||body.order_ids.some(x=>typeof x!=="string"||!UUID.test(x))) return json({error:"invalid_order_ids"},400);
