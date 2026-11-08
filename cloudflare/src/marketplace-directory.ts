@@ -88,7 +88,10 @@ async function getPublishedStores(env: MarketplaceEnv, accountId: string): Promi
     const page = await env.PROJECT_STORAGE.list({ prefix, limit: 100, ...(cursor ? { cursor } : {}) });
     for (const item of page.objects) {
       const project = await readJson<Record<string, unknown>>(env.PROJECT_STORAGE, item.key);
-      if (!project || project.kind !== "Store" || typeof project.id !== "string" ||
+      // Older Studio releases saved the Store type with different casing.
+      // Publication is confirmed independently by the signed-in owner's site index.
+      const projectKind = typeof project?.kind === "string" ? project.kind.trim().toLowerCase() : "";
+      if (!project || projectKind !== "store" || typeof project.id !== "string" ||
           !PROJECT_ID.test(project.id) || typeof project.publishSlug !== "string" || !SITE_ID.test(project.publishSlug)) continue;
       const mapping = await readJson<{ account_id?: string; project_id?: string }>(
         env.PROJECT_STORAGE, "published-sites/index/" + project.publishSlug + ".json",
