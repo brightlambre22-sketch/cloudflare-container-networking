@@ -570,7 +570,7 @@ form.addEventListener('submit',async function(event){
   }
   const name=username.value.trim().toLowerCase(),pass=password.value;
   if(!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(name)){message.textContent='Username must be 2–32 characters: letters, numbers, _ or -.';return}
-  if(creating&&pass.length<4){message.textContent='New passwords must be at least 4 characters.';return}
+  if(creating&&pass.length<8){message.textContent='New passwords must be at least 8 characters.';return}
    if(!creating&&!pass){message.textContent='Enter your password.';return}
   message.textContent=creating?'Creating your account; the VM snapshot will be saved after its first network test…':'Signing in and loading your saved VM…';
   try{
