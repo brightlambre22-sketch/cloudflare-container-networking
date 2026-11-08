@@ -113,3 +113,20 @@ test("published Store projects remain discoverable across legacy casing and requ
   assert.ok(merchantLocation.includes('Find address on map'));
   assert.ok(merchantLocation.includes('latitude:coordinates.latitude,longitude:coordinates.longitude'));
 });
+
+test("the original Vampirequid dashboard branding and login-to-VM transition are preserved", () => {
+  assert.ok(dashboard.includes('href="/vampire-quid.svg"'));
+  assert.ok(dashboard.includes('<img src="/vampire-quid.svg" alt="Vampire Quid mascot logo"'));
+  assert.ok(dashboard.includes("if(launchVm){panel.hidden=true;document.body.classList.add('logged-in');window.startVm();}"));
+  for (const id of ["save-vm-state", "clear-vm-state", "run-network-test", "run-bootstrap", "copy-results", "paste-terminal", "screen_container"]) {
+    assert.ok(dashboard.includes('id="' + id + '"'), "dashboard control should remain: " + id);
+  }
+  assert.ok(dashboard.includes("Merchant orders"));
+  assert.ok(!dashboard.includes("Use at least 4 characters for the password"));
+});
+
+test("the Cloudflare deployment retains the original runtime feature flags", () => {
+  const config = readFileSync(new URL("../cloudflare/wrangler.toml", import.meta.url), "utf8");
+  assert.match(config, /ORACLE_ACCOUNT_EXEC_ENABLED\s*=\s*"true"/);
+  assert.match(config, /DOORDASH_ENVIRONMENT\s*=\s*"sandbox"/);
+});
