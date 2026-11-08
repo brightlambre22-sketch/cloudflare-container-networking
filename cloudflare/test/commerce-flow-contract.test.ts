@@ -19,14 +19,14 @@ test("paid orders are committed and immediately synchronized when Stockroom is a
   assert.match(ledger, /amount_cents:items\.reduce/);
   assert.match(ledger, /\/orders\/all/);
   assert.match(stockroom, /internalPath === "\/orders" && request\.method === "GET"/);
-  assert.match(stockroom, /inventory\.internal\/orders\/all/);
+  assert.match(stockroom, /inventory-ledger\.internal\/orders\/all/);
 });
 
 test("public merchant checkout has a real PayPal create-order and capture flow", async () => {
   const payments = await read("../src/payments.ts");
   const checkout = await read("../../public/checkout.html");
-  assert.match(payments, /paypal\/create-order/);
-  assert.match(payments, /paypal\/capture/);
+  assert.match(payments, /paypalCreateMatch/);
+  assert.match(payments, /paypalCaptureMatch/);
   assert.match(checkout, /paypal\.Buttons/);
   assert.match(checkout, /\/paypal\/create-order/);
   assert.match(checkout, /\/paypal\/capture/);
