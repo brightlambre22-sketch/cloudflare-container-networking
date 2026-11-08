@@ -6,9 +6,12 @@ const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
 test("marketplace refreshes the merchant Stockroom catalog before discovery", async () => {
   const marketplace = await read("../src/marketplace-directory.ts");
+  const page = await read("../../public/marketplace.html");
   assert.match(marketplace, /syncInventoryCatalog\(env, profile\.account_id\)/);
   assert.match(marketplace, /marketplace\/catalog-sync\//);
   assert.match(marketplace, /Date\.now\(\) - syncedAt > 60_000/);
+  assert.match(page, /Buy now/);
+  assert.match(page, /api\/payments\/public\/checkout/);
 });
 
 test("paid orders are committed and immediately synchronized when Stockroom is available", async () => {
