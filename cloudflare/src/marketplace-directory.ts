@@ -16,7 +16,7 @@ const MARKET_RADIUS_MILES = 10;
 // cached in R2 so repeat edits do not repeatedly query the public geocoder.
 let lastGeocodeRequestAt = 0;
 async function geocodeStoreAddress(bucket: R2Bucket, address: string): Promise<{ latitude: number; longitude: number; display_name: string } | null> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address.toLowerCase().replace(/\\s+/g, " ").trim()));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address.toLowerCase().replace(/\s+/g, " ").trim()));
   const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   const cacheKey = "marketplace/geocode/" + hash + ".json";
   const cached = await readJson<{ latitude: number; longitude: number; display_name: string; cached_at: string }>(bucket, cacheKey);
