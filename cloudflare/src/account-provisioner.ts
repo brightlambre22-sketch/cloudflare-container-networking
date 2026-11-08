@@ -29,13 +29,6 @@ function json(data: unknown, status = 200): Response {
 function validAccountId(value: string): boolean {
   return /^acct-[a-f0-9-]{36}$/.test(value);
 }
-function baselineIsReady(value: BaselineManifest): boolean {
-  const checks = value.checks;
-  return value.adminReady === true && Boolean(checks) &&
-    checks!.guest_booted === true && checks!.shell_command_passed === true &&
-    checks!.dhcp_passed === true && checks!.ca_certificates_passed === true;
-}
-
 /**
  * Durable coordinator for cloning the golden Admin snapshot into account-owned R2
  * storage. It intentionally does not import v86 or boot Linux. Chunk writes are
