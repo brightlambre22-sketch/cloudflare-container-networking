@@ -1,9 +1,13 @@
 import type { InventoryLedger } from "./inventory-ledger";
+import { syncInventoryCatalog } from "./business-database";
 
 export interface MarketplaceEnv {
   ACCOUNT_REGISTRY: DurableObjectNamespace;
   INVENTORY_LEDGER: DurableObjectNamespace<InventoryLedger>;
+  BUSINESS_DATABASE: DurableObjectNamespace;
   PROJECT_STORAGE: R2Bucket;
+  STOCKROOM_ORIGIN?: string;
+  STOCKROOM_GATEWAY_TOKEN?: string;
 }
 
 const ACCOUNT_ID = /^acct-[a-f0-9-]{36}$/;
@@ -283,15 +287,28 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       );
       if (mapping?.account_id !== profile.account_id || mapping.project_id !== profile.project_id) continue;
       const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(profile.account_id));
-      const catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
+      let catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
       if (!catalogResponse.ok) continue;
-      const catalog = await catalogResponse.json() as {
+      let catalog = await catalogResponse.json() as {
         products?: Array<{
           id: string; sku: string; name: string; description?: string; category?: string;
           image_url?: string; variations?: unknown[]; external_url?: string;
           price: number; quantity: number; in_stock: boolean;
         }>;
       };
+      // Stockroom is the merchant's catalog authority. A missed background sync
+      // must not make a published merchant disappear from marketplace search.
+      if (!catalog.products?.length) {
+        try {
+          await syncInventoryCatalog(env, profile.account_id);
+          catalogResponse = await ledger.fetch("https://inventory-ledger.internal/catalog");
+          if (!catalogResponse.ok) continue;
+          catalog = await catalogResponse.json() as typeof catalog;
+        } catch {
+          // Keep the search available for other merchants if one Stockroom is offline.
+          continue;
+        }
+      }
       const storeName = String(profile.store_name ?? "Local store");
       for (const product of catalog.products ?? []) {
         if (!product.in_stock || Number(product.quantity) < 1) continue;
