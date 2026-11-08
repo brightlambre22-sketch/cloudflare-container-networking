@@ -1631,6 +1631,7 @@ export default {
     }
 
     if (url.pathname === "/debug/egress-ip") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
       try {
@@ -1650,6 +1651,7 @@ export default {
     }
 
     if (url.pathname === "/debug/fineproxy-tcp") {
+      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
       const target = { hostname: "104.245.241.241", port: 1085 };
@@ -1810,6 +1812,14 @@ export default {
       }
 
       return json({ error: "method_not_allowed" }, 405);
+    }
+
+    // Explicitly resolve the homepage through the configured static asset bundle.
+    // This avoids depending on implicit directory-index behavior at the Worker boundary.
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const assetUrl = new URL(request.url);
+      assetUrl.pathname = "/index.html";
+      return env.ASSETS.fetch(new Request(assetUrl, request));
     }
 
     if (url.pathname === "/marketplace" || url.pathname === "/marketplace/") {
