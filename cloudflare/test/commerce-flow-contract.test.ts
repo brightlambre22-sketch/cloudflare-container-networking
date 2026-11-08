@@ -24,7 +24,7 @@ test("paid orders are committed and immediately synchronized when Stockroom is a
 
 test("public merchant checkout has a real PayPal create-order and capture flow", async () => {
   const payments = await read("../src/payments.ts");
-  const checkout = await read("../../../public/checkout.html");
+  const checkout = await read("../../public/checkout.html");
   assert.match(payments, /paypal\/create-order/);
   assert.match(payments, /paypal\/capture/);
   assert.match(checkout, /paypal\.Buttons/);
@@ -35,7 +35,7 @@ test("public merchant checkout has a real PayPal create-order and capture flow",
 
 test("merchant order history is authenticated and renders account-scoped paid orders", async () => {
   const stockroom = await read("../src/business-database.ts");
-  const page = await read("../../../public/merchant-orders.html");
+  const page = await read("../../public/merchant-orders.html");
   assert.match(stockroom, /authenticate|auth\/verify/);
   assert.match(stockroom, /synchronizePendingOrders\(env, accountId\)/);
   assert.match(page, /\/api\/stockroom\/orders\?account_id=/);
