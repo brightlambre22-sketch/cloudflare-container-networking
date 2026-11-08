@@ -31,7 +31,7 @@ main{max-width:1160px;margin:0 auto;padding:22px 24px 64px}.intro{display:flex;a
       <h1>Find something good. Close to home.</h1>
       <p>Discover in-stock finds from independent shops near you.</p>
     </div>
-    <div class="intro-note">Shop local · Checkout with the store</div>
+    <div class="intro-note">Shop local · Within 10 miles · Checkout with the store</div>
   </section>
   <section aria-live="polite">
     <div class="results-head"><h2>Local finds</h2><span class="status" id="status">Enter a ZIP code to explore nearby shops.</span></div>
@@ -57,10 +57,18 @@ function render(items){
 }
 form.addEventListener("submit",async event=>{
   event.preventDefault();const zip=postal.value.trim();if(!zip)return;
-  status.textContent="Searching local inventory…";results.replaceChildren(node("div","empty","Looking for in-stock products near "+zip+"…"));
-  const params=new URLSearchParams({postal_code:zip,limit:"60",sort:"price_asc"});if(query.value.trim())params.set("q",query.value.trim());
-  try{const response=await fetch("/api/marketplace/products?"+params.toString(),{headers:{accept:"application/json"}});const data=await response.json();if(!response.ok)throw new Error(data.message||data.error||"Search failed");render(data.products||[]);status.textContent=(data.total_count||0)+" in-stock result"+((data.total_count||0)===1?"":"s")+" for ZIP "+zip}
-  catch(error){results.replaceChildren();const empty=node("div","empty");empty.append(node("strong","","We couldn't load local inventory."),document.createTextNode(error.message||"Please try again."));results.append(empty);status.textContent="Search unavailable"}
+  status.textContent="Finding your area…";results.replaceChildren(node("div","empty","Locating ZIP "+zip+"…"));
+  try{
+    const locationResponse=await fetch("/api/marketplace/location?postal_code="+encodeURIComponent(zip),{headers:{accept:"application/json"}});
+    const location=await locationResponse.json();if(!locationResponse.ok)throw new Error(location.message||"We couldn't locate that ZIP code.");
+    status.textContent="Searching stores within 10 miles…";results.replaceChildren(node("div","empty","Looking for in-stock products within 10 miles of "+zip+"…"));
+    const params=new URLSearchParams({lat:String(location.latitude),lng:String(location.longitude),radius:"10",limit:"60",sort:"distance"});
+    if(query.value.trim())params.set("q",query.value.trim());
+    const response=await fetch("/api/marketplace/products?"+params.toString(),{headers:{accept:"application/json"}});
+    const data=await response.json();if(!response.ok)throw new Error(data.message||data.error||"Search failed");
+    render(data.products||[]);
+    status.textContent=(data.total_count||0)+" in-stock result"+((data.total_count||0)===1?"":"s")+" within 10 miles of "+zip;
+  }catch(error){results.replaceChildren();const empty=node("div","empty");empty.append(node("strong","","We couldn't load local inventory."),document.createTextNode(error.message||"Please try again."));results.append(empty);status.textContent="Search unavailable"}
 });
 const savedZip=new URLSearchParams(location.search).get("postal_code");if(savedZip){postal.value=savedZip;form.requestSubmit()}
 </script>

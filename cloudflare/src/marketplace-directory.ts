@@ -16,7 +16,7 @@ const MARKET_RADIUS_MILES = 10;
 // cached in R2 so repeat edits do not repeatedly query the public geocoder.
 let lastGeocodeRequestAt = 0;
 async function geocodeStoreAddress(bucket: R2Bucket, address: string): Promise<{ latitude: number; longitude: number; display_name: string } | null> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address.toLowerCase().replace(/\\s+/g, " ").trim()));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address.toLowerCase().replace(/\s+/g, " ").trim()));
   const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   const cacheKey = "marketplace/geocode/" + hash + ".json";
   const cached = await readJson<{ latitude: number; longitude: number; display_name: string; cached_at: string }>(bucket, cacheKey);
@@ -182,6 +182,33 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       return json({ ok: true, latitude: result.latitude, longitude: result.longitude, display_name: result.display_name, provider: "OpenStreetMap Nominatim" });
     } catch (error) {
       return json({ error: "geocoding_unavailable", message: error instanceof Error ? error.message : "Address lookup failed." }, 502);
+    }
+  }
+
+  // Resolve a shopper's ZIP code to a geographic point so marketplace search
+  // can find stores within the configured radius instead of requiring an exact ZIP match.
+  if (url.pathname === "/api/marketplace/location") {
+    if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+    const postalCode = (url.searchParams.get("postal_code") ?? "").trim();
+    if (!/^[0-9]{5}(?:-[0-9]{4})?$/.test(postalCode)) {
+      return json({ error: "invalid_postal_code", message: "Enter a valid US ZIP code." }, 400);
+    }
+    try {
+      const location = await geocodeStoreAddress(env.PROJECT_STORAGE, postalCode + ", USA");
+      if (!location) return json({ error: "location_not_found", message: "We couldn't locate that ZIP code. Check it and try again." }, 404);
+      return json({
+        ok: true,
+        postal_code: postalCode,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        display_name: location.display_name,
+        provider: "OpenStreetMap Nominatim",
+      });
+    } catch (error) {
+      return json({
+        error: "location_lookup_unavailable",
+        message: error instanceof Error ? error.message : "ZIP code lookup failed.",
+      }, 502);
     }
   }
 
