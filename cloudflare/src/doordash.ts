@@ -113,9 +113,11 @@ export async function handleDoorDashRequest(request: Request, env: DoorDashEnv):
   const match = url.pathname.match(/^\/api\/delivery\/(quote|accept|status)\/([a-f0-9-]{36})$/);
   if (!match) return null;
   if (request.method !== (match[1] === "status" ? "GET" : "POST")) return json({ error: "method_not_allowed" }, 405);
-  if (env.DOORDASH_ENVIRONMENT !== "sandbox") return json({ error: "doordash_sandbox_mode_required" }, 503);
+  if (env.DOORDASH_ENVIRONMENT !== "sandbox" && env.DOORDASH_ENVIRONMENT !== "production") {
+    return json({ error: "doordash_environment_not_configured" }, 503);
+  }
   if (!env.DOORDASH_DEVELOPER_ID || !env.DOORDASH_KEY_ID || !env.DOORDASH_SIGNING_SECRET) {
-    return json({ error: "doordash_sandbox_not_configured" }, 503);
+    return json({ error: "doordash_credentials_not_configured" }, 503);
   }
   const action = match[1];
   const checkoutId = match[2];
