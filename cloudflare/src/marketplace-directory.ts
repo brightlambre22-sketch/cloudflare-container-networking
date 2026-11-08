@@ -11,6 +11,36 @@ const SITE_ID = /^[a-f0-9]{32}$/;
 const PROJECT_ID = /^[a-z0-9-]{3,80}$/;
 const PROFILE_PREFIX = "marketplace/merchants/";
 const MARKET_RADIUS_MILES = 10;
+
+// Nominatim is used for low-volume address verification. Successful lookups are
+// cached in R2 so repeat edits do not repeatedly query the public geocoder.
+let lastGeocodeRequestAt = 0;
+async function geocodeStoreAddress(bucket: R2Bucket, address: string): Promise<{ latitude: number; longitude: number; display_name: string } | null> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address.toLowerCase().replace(/\\s+/g, " ").trim()));
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const cacheKey = "marketplace/geocode/" + hash + ".json";
+  const cached = await readJson<{ latitude: number; longitude: number; display_name: string; cached_at: string }>(bucket, cacheKey);
+  if (cached && Date.now() - Date.parse(cached.cached_at) < 30 * 24 * 60 * 60 * 1000 &&
+      validCoordinates(cached.latitude, cached.longitude)) return cached;
+
+  const waitMs = Math.max(0, 1100 - (Date.now() - lastGeocodeRequestAt));
+  if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  lastGeocodeRequestAt = Date.now();
+  const endpoint = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(address);
+  const response = await fetch(endpoint, {
+    headers: { "accept": "application/json", "user-agent": "Vampirequid-Store-Locator/1.0" },
+  });
+  if (!response.ok) throw new Error("geocoder_http_" + response.status);
+  const results = await response.json() as Array<{ lat?: string; lon?: string; display_name?: string }>;
+  const first = Array.isArray(results) ? results[0] : undefined;
+  const latitude = first?.lat === undefined ? NaN : Number(first.lat);
+  const longitude = first?.lon === undefined ? NaN : Number(first.lon);
+  if (!first || !validCoordinates(latitude, longitude)) return null;
+  const result = { latitude, longitude, display_name: String(first.display_name ?? address).slice(0, 500), cached_at: new Date().toISOString() };
+  await bucket.put(cacheKey, JSON.stringify(result), { httpMetadata: { contentType: "application/json" } });
+  return result;
+}
+
 const json = (value: unknown, status = 200) => Response.json(value, {
   status,
   headers: { "cache-control": "no-store" },
@@ -128,6 +158,30 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     });
     return json({ ok: true, profile: { ...profile, street_address: profile.street_address } });
   }
+
+  if (url.pathname === "/api/marketplace/geocode") {
+    const accountId = url.searchParams.get("account_id") ?? "";
+    if (!await authenticate(request, env, accountId)) return json({ error: "unauthorized" }, 401);
+    if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+    const body = await request.json().catch(() => null) as { street_address?: unknown; city?: unknown; state?: unknown; postal_code?: unknown; country?: unknown } | null;
+    const parts = [body?.street_address, body?.city, body?.state, body?.postal_code, body?.country ?? "USA"];
+    if (!body || parts.slice(0, 4).some((part) => typeof part !== "string") ||
+        String(body.street_address).trim().length < 4 || String(body.street_address).length > 180 ||
+        String(body.city).trim().length < 2 || String(body.city).length > 80 ||
+        !/^[A-Z]{2}$/i.test(String(body.state).trim()) ||
+        String(body.postal_code).trim().length < 3 || String(body.postal_code).length > 12) {
+      return json({ error: "complete_store_address_required" }, 400);
+    }
+    const address = parts.map((part) => String(part ?? "").trim()).filter(Boolean).join(", ").slice(0, 400);
+    try {
+      const result = await geocodeStoreAddress(env.PROJECT_STORAGE, address);
+      if (!result) return json({ error: "address_not_found", message: "No matching map location was found. Check the street, city, state, and ZIP code." }, 404);
+      return json({ ok: true, latitude: result.latitude, longitude: result.longitude, display_name: result.display_name, provider: "OpenStreetMap Nominatim" });
+    } catch (error) {
+      return json({ error: "geocoding_unavailable", message: error instanceof Error ? error.message : "Address lookup failed." }, 502);
+    }
+  }
+
   if (url.pathname !== "/api/marketplace/products") return null;
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
