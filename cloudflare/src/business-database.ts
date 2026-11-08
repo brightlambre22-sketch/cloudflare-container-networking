@@ -380,6 +380,16 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   if (internalPath === "/sync/orders" && request.method === "POST") {
     return synchronizePendingOrders(env, accountId);
   }
+  // Merchant order history reads the durable per-account ledger, not only the
+  // local TinyCore database, so paid orders remain visible while TinyCore is offline.
+  if (internalPath === "/orders" && request.method === "GET") {
+    const sync = await synchronizePendingOrders(env, accountId).catch(() => new Response(null, { status: 503 }));
+    const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+    const response = await ledger.fetch("https://inventory-ledger.internal/orders/all");
+    if (!response.ok) return json({ error: "merchant_order_history_unavailable" }, 503);
+    const data = await response.json() as { orders?: unknown[] };
+    return json({ ok: true, orders: data.orders ?? [], tinycore_sync: sync.ok ? "synchronized" : "queued" });
+  }
   if (internalPath === "/offline-allowance" && request.method === "POST") {
     const body = await request.json().catch(() => null);
     const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
@@ -411,7 +421,7 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   return response;
 }
 
-async function synchronizePendingOrders(env: BusinessDatabaseEnv, accountId: string): Promise<Response> {
+export async function synchronizePendingOrders(env: BusinessDatabaseEnv, accountId: string): Promise<Response> {
   const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
   const pendingResponse = await ledger.fetch("https://inventory-ledger.internal/orders");
   if (!pendingResponse.ok) return json({ error: "order_queue_unavailable" }, 503);
