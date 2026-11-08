@@ -11,8 +11,7 @@ export interface GuestSnapshotManifest {
   sha256: string;
   chunkSha256: string[];
   savedAt: string;
-  adminReady: true;
-  checks: { guest_booted: true; shell_command_passed: true; dhcp_passed: true; dns_passed: true; https_passed: true; ca_certificates_passed: true };
+  checks: { guest_booted: true; shell_command_passed: true; dhcp_passed: true; dns_passed: true; https_passed: true };
 }
 export interface GuestCheckResults {
   guest_booted: boolean;
@@ -82,10 +81,7 @@ export async function commitGuestSnapshot(
   const manifest: GuestSnapshotManifest = {
     version: 1, identity, generation, chunks: chunks.length, byteLength: bytes.byteLength,
     sha256: digest, chunkSha256, savedAt: new Date().toISOString(),
-    // HTTPS success requires a trusted certificate chain, so this also records the
-    // CA-certificate acceptance check expected by AccountProvisioner.
-    adminReady: true,
-    checks: { guest_booted: true, shell_command_passed: true, dhcp_passed: true, dns_passed: true, https_passed: true, ca_certificates_passed: true },
+    checks: { guest_booted: true, shell_command_passed: true, dhcp_passed: true, dns_passed: true, https_passed: true },
   };
   await bucket.put(prefix + "manifest.json", JSON.stringify(manifest), {
     httpMetadata: { contentType: "application/json" },
