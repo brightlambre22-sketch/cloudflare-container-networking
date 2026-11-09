@@ -92,6 +92,62 @@ assert.equal(loginResponse.status, 200, "merchant login should succeed after pro
 const login = await loginResponse.json();
 const loginCookie = (loginResponse.headers.get("set-cookie") || "").split(";")[0];
 assert.match(loginCookie, /^vq_merchant_session=/);
+
+// Create a complete synthetic merchant storefront in the isolated preview:
+// project -> published site -> marketplace profile -> stockroom product.
+const projectId = "stg-store-" + Date.now().toString(36);
+const authHeaders = { "content-type": "application/json", authorization: "Bearer " + login.session_token };
+const projectResponse = await fetch(base + "/api/studio/projects/" + projectId + "?account_id=" + encodeURIComponent(login.account_id), {
+  method: "PUT",
+  headers: authHeaders,
+  body: JSON.stringify({ id: projectId, name: "Staging Sample Store", kind: "store" }),
+});
+assert.equal(projectResponse.status, 200, "merchant should be able to create a staging store project");
+
+const publishResponse = await fetch(base + "/api/studio/publish?account_id=" + encodeURIComponent(login.account_id), {
+  method: "POST",
+  headers: authHeaders,
+  body: JSON.stringify({ project_id: projectId, html: "<!doctype html><html><body><h1>Staging Sample Store</h1></body></html>" }),
+});
+assert.equal(publishResponse.status, 200, "merchant should be able to publish a staging storefront");
+const published = await publishResponse.json();
+const siteSlug = new URL(published.url).pathname.match(/^\\/sites\\/([a-f0-9]{32})\\//)?.[1];
+assert.ok(siteSlug, "published store should receive a public site ID");
+
+const profileResponse = await fetch(base + "/api/marketplace/profile?account_id=" + encodeURIComponent(login.account_id), {
+  method: "PUT",
+  headers: authHeaders,
+  body: JSON.stringify({
+    project_id: projectId,
+    street_address: "123 Main Street",
+    city: "Irving",
+    state: "TX",
+    postal_code: "75038",
+    latitude: locationData.latitude,
+    longitude: locationData.longitude,
+    active: true,
+  }),
+});
+assert.equal(profileResponse.status, 200, "merchant should be able to list a published store in the marketplace");
+
+const sku = "STG" + Date.now().toString(36).toUpperCase();
+const productResponse = await fetch(base + "/api/stockroom/products?account_id=" + encodeURIComponent(login.account_id), {
+  method: "POST",
+  headers: authHeaders,
+  body: JSON.stringify({ sku, name: "Staging Coffee Test", description: "Synthetic staging-only catalog fixture", category: "Coffee", price: 12.5, cost: 4, quantity: 5, status: "active" }),
+});
+assert.equal(productResponse.status, 201, "merchant should be able to add a stockroom product");
+const liveStoreSearchUrl = new URL(base + "/api/marketplace/products");
+liveStoreSearchUrl.searchParams.set("postal_code", "75038");
+liveStoreSearchUrl.searchParams.set("lat", String(locationData.latitude));
+liveStoreSearchUrl.searchParams.set("lng", String(locationData.longitude));
+liveStoreSearchUrl.searchParams.set("q", "coffee");
+const liveStoreSearch = await fetch(liveStoreSearchUrl);
+assert.equal(liveStoreSearch.status, 200, "marketplace should find the new store by ZIP");
+const liveStoreData = await liveStoreSearch.json();
+assert.ok(liveStoreData.products.some((product) => product.store?.name === "Staging Sample Store"), "published merchant should appear in marketplace ZIP search");
+assert.equal((await fetch(base + "/sites/" + siteSlug + "/")).status, 200, "published store should be publicly reachable before deletion");
+
 for (const path of ["/studio.html", "/workspace.html", "/merchant-orders.html", "/merchant-location.html"]) {
   const response = await fetch(base + path, { headers: { cookie: loginCookie }, redirect: "manual" });
   assert.equal(response.status, 200, path + " should open with a valid merchant session");
@@ -120,6 +176,11 @@ const deletionResponse = await fetch(base + "/api/account/delete", {
   body: JSON.stringify({ account_id: relogin.account_id, session_token: relogin.session_token }),
 });
 assert.equal(deletionResponse.status, 200, "merchant self-delete should complete all account cleanup");
+const afterDeleteSearch = await fetch(liveStoreSearchUrl);
+assert.equal(afterDeleteSearch.status, 200, "marketplace search should remain available after deletion");
+const afterDeleteData = await afterDeleteSearch.json();
+assert.equal(afterDeleteData.products.length, 0, "deleted merchant products must disappear from marketplace ZIP search");
+assert.equal((await fetch(base + "/sites/" + siteSlug + "/")).status, 404, "deleted merchant's published store must no longer resolve");
 const deletedLogin = await fetch(base + "/api/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
