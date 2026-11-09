@@ -137,14 +137,14 @@ const sku = "STG" + Date.now().toString(36).toUpperCase();
 const productResponse = await fetch(base + "/api/stockroom/products?account_id=" + encodeURIComponent(login.account_id), {
   method: "POST",
   headers: authHeaders,
-  body: JSON.stringify({ sku, name: "Staging Coffee Test", description: "Synthetic staging-only catalog fixture", category: "Coffee", price: 12.5, cost: 4, quantity: 5, status: "active" }),
+  body: JSON.stringify({ sku, name: "Staging Coffee Test " + username, description: "Synthetic staging-only catalog fixture", category: "Coffee", price: 12.5, cost: 4, quantity: 5, status: "active" }),
 });
 assert.equal(productResponse.status, 201, "merchant should be able to add a stockroom product");
 const liveStoreSearchUrl = new URL(base + "/api/marketplace/products");
 liveStoreSearchUrl.searchParams.set("postal_code", "75038");
 liveStoreSearchUrl.searchParams.set("lat", String(locationData.latitude));
 liveStoreSearchUrl.searchParams.set("lng", String(locationData.longitude));
-liveStoreSearchUrl.searchParams.set("q", "coffee");
+liveStoreSearchUrl.searchParams.set("q", username);
 const liveStoreSearch = await fetch(liveStoreSearchUrl);
 assert.equal(liveStoreSearch.status, 200, "marketplace should find the new store by ZIP");
 const liveStoreData = await liveStoreSearch.json();
@@ -175,7 +175,7 @@ try {
 
   await page.goto(base + "/marketplace", { waitUntil: "domcontentloaded" });
   await page.locator("#vq-location").fill("75038");
-  await page.locator("#q").fill("coffee");
+  await page.locator("#q").fill(username);
   await page.locator("#location-search button[type=submit]").click();
   await page.waitForSelector("[data-products] .pcard", { timeout: 20000 });
   await page.waitForSelector("#vq-store-list .vq-store-list-item", { timeout: 10000 });
@@ -185,22 +185,22 @@ try {
   assert.match(await page.locator("#vq-store-list").innerText(), /Staging Sample Store/);
   assert.equal(await page.locator("#vq-map-plot .leaflet-marker-icon").count(), 1, "the store should appear as a real map marker");
   assert.ok(await page.locator("#vq-map-plot .leaflet-tile-loaded").count() > 0, "real map tiles should load");
-  assert.match(await page.locator("[data-products]").innerText(), /Staging Coffee Test/);
+  assert.match(await page.locator("[data-products]").innerText(), new RegExp("Staging Coffee Test " + username));
 
   await page.locator("#q").fill("tea");
   await page.locator("#q").press("Enter");
   await page.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
   assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");
 
-  await page.locator("#q").fill("coffee");
+  await page.locator("#q").fill(username);
   await page.locator("#q").press("Enter");
   await page.waitForFunction(() =>
-    document.querySelector("[data-products]")?.textContent?.includes("Staging Coffee Test") &&
+    document.querySelector("[data-products]")?.textContent?.includes("Staging Coffee Test " + username) &&
     document.querySelectorAll("#vq-map-plot .leaflet-marker-icon").length > 0,
     null,
     { timeout: 15000 },
   );
-  assert.ok(productQueries.filter((query) => query === "coffee").length >= 2, "searching coffee again should reload the real store");
+  assert.ok(productQueries.filter((query) => query === username).length >= 2, "searching coffee again should reload the real store");
   assert.ok(locationQueries.includes("75038"), "ZIP search should call the real location endpoint");
 
   assert.deepEqual(pageErrors, [], "marketplace should not throw browser JavaScript errors");
