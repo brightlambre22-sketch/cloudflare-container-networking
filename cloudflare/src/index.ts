@@ -80,7 +80,7 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise<{ profile_deleted: boolean; index_objects_deleted: number; merchant_objects_deleted: number; inventory_ledger_purged: boolean }> {
+async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise<{ profile_deleted: boolean; index_objects_deleted: number; published_content_objects_deleted: number; merchant_objects_deleted: number; business_database_purged: boolean; wisp_relay_purged: boolean; inventory_ledger_purged: boolean }> {
   const profileKey = "marketplace/merchants/" + accountId + ".json";
   const syncKey = "marketplace/catalog-sync/" + accountId + ".json";
   const indexKeys: string[] = [];
