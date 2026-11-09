@@ -275,6 +275,17 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     return json({ error: "invalid_cursor" }, 400);
   }
 
+  // Marketplace metadata is not an authority for account existence. Read the
+  // shared auth registry once per search and fail closed if it cannot be checked.
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const activeResponse = await authRegistry.fetch("https://account-registry.internal/admin/list-accounts")
+    .catch(() => new Response(null, { status: 503 }));
+  if (!activeResponse.ok) return json({ error: "merchant_directory_unavailable" }, 503);
+  const activeData = await activeResponse.json() as { accounts?: Array<{ account_id?: unknown }> };
+  const activeAccounts = new Set((Array.isArray(activeData.accounts) ? activeData.accounts : [])
+    .map((entry) => entry.account_id)
+    .filter((id): id is string => typeof id === "string" && ACCOUNT_ID.test(id)));
+
   const matches: Array<Record<string, unknown>> = [];
   const categories = new Set<string>();
   let cursor: string | undefined;
@@ -290,7 +301,7 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       const storeLatitude = profile?.latitude;
       const storeLongitude = profile?.longitude;
       if (!profile || profile.active !== true || typeof profile.account_id !== "string" ||
-          !ACCOUNT_ID.test(profile.account_id) || typeof profile.site_id !== "string" ||
+          !ACCOUNT_ID.test(profile.account_id) || !activeAccounts.has(profile.account_id) || typeof profile.site_id !== "string" ||
           !SITE_ID.test(profile.site_id) || typeof storeLatitude !== "number" ||
           typeof storeLongitude !== "number" || !validCoordinates(storeLatitude, storeLongitude)) continue;
       const storeCity = String(profile.city ?? "");
