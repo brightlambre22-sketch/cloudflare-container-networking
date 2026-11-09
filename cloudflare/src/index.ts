@@ -1714,7 +1714,7 @@ export default {
       const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin";
             if (isAdmin && !env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (isAdmin && !adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (isAdmin && !await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       // Account snapshots accept either the one-time provisioning API key or a
       // short-lived login session bound to this exact account ID.
