@@ -177,13 +177,13 @@ export class InventoryLedger extends DurableObject {
       for (const x of allocations) combined.set(x.id,(combined.get(x.id)??0)+x.quantity);
       allocations.length=0;
       for (const [id,quantity] of combined) allocations.push({id,quantity});
-      const existing=sql.exec("SELECT status FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string}|undefined;
+      const existing=sql.exec("SELECT status,expires_at FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string;expires_at:string}|undefined;
       if (existing) {
         if (existing.status!=="active") return json({error:"offline_allocation_not_active",status:existing.status},409);
         const saved=sql.exec("SELECT product_id,allocated,remaining FROM offline_allocation_items WHERE allocation_id=? ORDER BY product_id",allocationId).toArray() as Array<{product_id:string;allocated:number;remaining:number}>;
         const same=saved.length===allocations.length&&saved.every(row=>allocations.some(item=>item.id===row.product_id&&item.quantity===Number(row.allocated)));
         if(!same)return json({error:"offline_allocation_id_conflict"},409);
-        return json({ok:true,already_allocated:true,allocation_id:allocationId,allocations:saved});
+        return json({ok:true,already_allocated:true,allocation_id:allocationId,expires_at:existing.expires_at,allocations:saved});
       }
       const ttlSeconds=Math.min(604800,Math.max(60,Number(body.ttl_seconds)||86400));
       const expiresAt=new Date(Date.parse(now)+ttlSeconds*1000).toISOString();
@@ -248,7 +248,7 @@ export class InventoryLedger extends DurableObject {
         if(!allowance||allowance.remaining<quantity||!row||row.offline_allocated<quantity||row.on_hand<quantity)return json({error:"offline_allowance_exceeded",product_id:productId},409);
         selected.push({product_id:productId,quantity,unit_price_cents:Number(row.price_cents),name:String(row.name)});
       }
-      const payload={order_id:orderId,items:selected,amount_cents:selected.reduce((sum,x)=>sum+x.unit_price_cents*x.quantity,0),payment_method:"offline_pos",status:"paid_offline",created_at:now};
+      const payload={order_id:orderId,allocation_id:allocationId,event_id:eventId,items:selected,amount_cents:selected.reduce((sum,x)=>sum+x.unit_price_cents*x.quantity,0),payment_method:"offline_pos",status:"paid_offline",created_at:now};
       let insufficient:string|null=null;
       try{
         this.ctx.storage.transactionSync(()=>{
