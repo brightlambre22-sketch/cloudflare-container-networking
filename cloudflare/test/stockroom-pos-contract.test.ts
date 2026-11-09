@@ -37,9 +37,9 @@ test("offline POS allocations are idempotent, releasable, and bound to remaining
   assert.match(source, /invalid_payment_method/);
   assert.match(source, /expires_at TEXT NOT NULL/);
   assert.match(source, /expireOfflineAllocations\(now\)/);
-  assert.match(source, /PRAGMA table_info\\(offline_allocations\\)/);
+  assert.ok(source.includes("PRAGMA table_info(offline_allocations)"));
   assert.match(source, /ALTER TABLE offline_allocations ADD COLUMN expires_at/);
-  assert.match(source, /strftime\\('%Y-%m-%dT%H:%M:%fZ',created_at,'\\+24 hours'\\)/);
+  assert.ok(source.includes("strftime('%Y-%m-%dT%H:%M:%fZ',created_at,'+24 hours')"));
   assert.match(source, /unit_price_cents INTEGER NOT NULL DEFAULT 0/);
   assert.match(source, /allocationDetails\.set\(x\.id/);
   assert.match(source, /unit_price_cents,name\) VALUES/);
