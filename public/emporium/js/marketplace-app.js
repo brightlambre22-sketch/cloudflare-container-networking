@@ -134,7 +134,9 @@
         var locationResponse = await fetch("/api/marketplace/location?postal_code=" + encodeURIComponent(search.get("postal_code")), { headers: { "accept": "application/json" } });
         var locationData = await locationResponse.json();
         if (!locationResponse.ok || !locationData.ok) throw new Error(locationData.message || locationData.error || "We couldn't locate that ZIP code.");
-        search.delete("postal_code"); search.delete("city"); search.delete("state");
+        // Keep the ZIP alongside its geocoded point. The backend uses it as a
+        // same-ZIP fallback when a merchant's saved street coordinates are off.
+        search.delete("city"); search.delete("state");
         search.set("lat", String(locationData.latitude)); search.set("lng", String(locationData.longitude));
       }
       if (append && nextCursor) search.set("cursor", nextCursor);
