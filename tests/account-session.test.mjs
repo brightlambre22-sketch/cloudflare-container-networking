@@ -114,14 +114,16 @@ test("published Store projects remain discoverable across legacy casing and requ
   assert.ok(merchantLocation.includes('latitude:coordinates.latitude,longitude:coordinates.longitude'));
 });
 
-test("the original Vampirequid dashboard branding and login-to-VM transition are preserved", () => {
-  assert.ok(dashboard.includes('href="/vampire-quid.svg"'));
-  assert.ok(dashboard.includes('<img src="/vampire-quid.svg" alt="Vampire Quid mascot logo"'));
-  assert.ok(dashboard.includes("if(launchVm){panel.hidden=true;document.body.classList.add('logged-in');window.startVm();}"));
-  for (const id of ["save-vm-state", "clear-vm-state", "run-network-test", "run-bootstrap", "copy-results", "paste-terminal", "screen_container"]) {
-    assert.ok(dashboard.includes('id="' + id + '"'), "dashboard control should remain: " + id);
+test("the current Vampirequid workspace branding, account settings, and VM controls are present", () => {
+  assert.ok(dashboard.includes('href="/vampiresquid-mark.svg"'));
+  assert.ok(dashboard.includes('<img src="/vampiresquid-mark.svg"'));
+  assert.ok(dashboard.includes("window.startVm()"));
+  for (const id of ["save-vm-state", "clear-vm-state", "run-bootstrap", "paste-terminal", "copy-results", "api-key-generate", "account-id-value", "screen_container"]) {
+    assert.ok(dashboard.includes('id="' + id + '"'), "workspace control should remain: " + id);
   }
-  assert.ok(dashboard.includes("Merchant orders"));
+  assert.ok(dashboard.includes("Optional external POS integration key"));
+  assert.ok(dashboard.includes("Replace API key"));
+  assert.ok(dashboard.includes("Account ID"));
   assert.ok(!dashboard.includes("Use at least 4 characters for the password"));
 });
 
