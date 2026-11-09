@@ -66,6 +66,21 @@ export class WispRelay extends DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/purge" && request.method === "POST") {
+      await this.ctx.storage.delete("active-ticket");
+      for (const client of this.clients) {
+        try { client.close(1008, "account deleted"); } catch { /* already closed */ }
+      }
+      this.clients.clear();
+      await Promise.all(Array.from(this.streams.keys(), (streamId) => this.closeStream(streamId)));
+      this.pendingStreams.clear();
+      this.pendingData.clear();
+      this.pendingDataBytes.clear();
+      this.closedStreams.clear();
+      this.loggedGuestData.clear();
+      return json({ ok: true, purged: true });
+    }
+
     if (url.pathname === "/ticket" && request.method === "POST") {
       const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
       const ticket = Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
