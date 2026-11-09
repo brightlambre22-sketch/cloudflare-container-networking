@@ -72,7 +72,7 @@ test("restored VMs automatically run the guest network health check and save onl
   assert.match(dashboard, /if\(!diagnostic\|\|!diagnostic\.complete\)/);
   assert.match(dashboard, /if\(shellPrompt\(screenText\(\)\)\)/);
   assert.match(dashboard, /const saved=await saveVmState\(false\)/);
-  assert.match(dashboard, /saved VM snapshot was left unchanged/);
+  assert.match(dashboard, /saved snapshot was left unchanged/);
 });
 test("each merchant receives a stable private network identity and authenticated WISP relay", () => {
   assert.ok(virtualNetwork.includes("first_allocatable_ordinal: 1"));
