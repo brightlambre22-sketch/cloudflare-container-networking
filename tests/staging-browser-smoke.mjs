@@ -245,6 +245,21 @@ assert.equal(afterDeleteSearch.status, 200, "marketplace search should remain av
 const afterDeleteData = await afterDeleteSearch.json();
 assert.equal(afterDeleteData.products.length, 0, "deleted merchant products must disappear from marketplace ZIP search");
 assert.equal((await fetch(base + "/sites/" + siteSlug + "/")).status, 404, "deleted merchant's published store must no longer resolve");
+
+const emptyBrowser = await chromium.launch({ headless: true });
+try {
+  const emptyPage = await emptyBrowser.newPage();
+  await emptyPage.goto(base + "/marketplace", { waitUntil: "domcontentloaded" });
+  await emptyPage.locator("#vq-location").fill("75038");
+  await emptyPage.locator("#q").fill("coffee");
+  await emptyPage.locator("#location-search button[type=submit]").click();
+  await emptyPage.waitForFunction(() => document.querySelectorAll("[data-products] .pcard").length === 0, null, { timeout: 15000 });
+  assert.equal(await emptyPage.locator("#vq-map-plot .leaflet-marker-icon").count(), 0, "deleted store must not leave a map marker");
+  assert.equal(await emptyPage.locator("#vq-store-list .vq-store-list-item").count(), 0, "deleted store must not remain in the map's store list");
+} finally {
+  await emptyBrowser.close();
+}
+
 const deletedLogin = await fetch(base + "/api/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
