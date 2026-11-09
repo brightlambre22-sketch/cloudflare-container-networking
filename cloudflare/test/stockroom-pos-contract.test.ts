@@ -37,6 +37,11 @@ test("offline POS allocations are idempotent, releasable, and bound to remaining
   assert.match(source, /invalid_payment_method/);
   assert.match(source, /expires_at TEXT NOT NULL/);
   assert.match(source, /expireOfflineAllocations\(now\)/);
+  assert.match(source, /unit_price_cents INTEGER NOT NULL DEFAULT 0/);
+  assert.match(source, /allocationDetails\.set\(x\.id/);
+  assert.match(source, /unit_price_cents,name\) VALUES/);
+  assert.match(source, /unit_price_cents: Number\(allowance\.unit_price_cents\)/);
+  assert.match(source, /ALTER TABLE offline_allocation_items ADD COLUMN unit_price_cents/);
   const consumeStart = source.indexOf('if (url.pathname === "/offline/consume"');
   const consumeEnd = source.indexOf('if (url.pathname === "/orders" && request.method === "GET")', consumeStart);
   assert.ok(consumeStart >= 0 && consumeEnd > consumeStart, "offline consume route should be isolated");
