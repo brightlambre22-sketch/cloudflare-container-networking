@@ -138,6 +138,9 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
     merchantCursor = page.truncated ? page.cursor : undefined;
   } while (merchantCursor);
 
+  const businessDatabasePurge = await businessDatabaseFetch(env, accountId, "purge", { method: "POST" });
+  if (!businessDatabasePurge.ok) throw new Error("business_database_purge_http_" + businessDatabasePurge.status);
+
   const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
   const ledgerPurge = await ledger.fetch("https://inventory-ledger.internal/purge", { method: "POST" });
   if (!ledgerPurge.ok) throw new Error("inventory_ledger_purge_http_" + ledgerPurge.status);
@@ -147,7 +150,9 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
   return {
     profile_deleted: profileDeleted,
     index_objects_deleted: indexKeys.length,
+    published_content_objects_deleted: publishedContentKeys.length,
     merchant_objects_deleted: merchantObjectsDeleted,
+    business_database_purged: true,
     inventory_ledger_purged: true,
   };
 }
@@ -1220,10 +1225,6 @@ export default {
         body: JSON.stringify({ account_id: accountId }),
       }).catch(() => new Response("account_data_purge_failed", { status: 500 }));
       if (!accountData.ok) failures.push("account_registry");
-
-      const businessDatabasePurge = await businessDatabaseFetch(env, accountId, "purge", { method: "POST" })
-        .catch(() => new Response("business_database_purge_failed", { status: 500 }));
-      if (!businessDatabasePurge.ok) failures.push("business_database");
 
       const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
       const provisionerData = await provisioner.fetch("https://account-provisioner.internal/purge", { method: "POST" })
