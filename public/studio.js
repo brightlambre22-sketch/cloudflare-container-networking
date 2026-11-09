@@ -397,7 +397,7 @@ async function disconnectPaypal(){
  catch(error){status.textContent=error.message}
 }
 function marketplaceAddressKey(){
- return ['marketplace-address','marketplace-city','marketplace-state','marketplace-postal'].map(id=>$('#'+id).value.trim().toLowerCase().replace(/\\s+/g,' ')).join('|');
+ return ['marketplace-address','marketplace-city','marketplace-state','marketplace-postal'].map(id=>$('#'+id).value.trim().toLowerCase().replace(/\s+/g,' ')).join('|');
 }
 function clearMarketplaceCoordinates(message='Address changed. Find the shop coordinates again before saving.'){
  $('#marketplace-latitude').value='';$('#marketplace-longitude').value='';
