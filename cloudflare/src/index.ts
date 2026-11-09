@@ -137,6 +137,42 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
   };
 }
 
+function cookieValue(request: Request, name: string): string | undefined {
+  const cookie = request.headers.get("cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); } catch { return undefined; }
+  }
+  return undefined;
+}
+
+function jsonWithCookie(data: unknown, status: number, cookie: string): Response {
+  const response = json(data, status);
+  const headers = new Headers(response.headers);
+  headers.append("set-cookie", cookie);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function merchantSessionCookie(accountId: string, token: string, maxAge = 604800): string {
+  return "vq_merchant_session=" + encodeURIComponent(accountId + "." + token) +
+    "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Lax";
+}
+
+function clearMerchantSessionCookie(): string {
+  return "vq_merchant_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
+}
+
+async function verifyMerchantSession(env: Env, accountId: string, token: string): Promise<boolean> {
+  if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(token)) return false;
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const response = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId, token }),
+  }).catch(() => new Response(null, { status: 503 }));
+  return response.ok;
+}
+
 function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
@@ -177,6 +213,22 @@ async function getOrAllocateAccountNetworkIdentity(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // These pages contain account-specific dashboards and controls. Enforce the
+    // session at the Worker edge so an unauthenticated visitor never receives
+    // the private page shell or its client-side application.
+    const protectedMerchantPages = new Set([
+      "/studio.html", "/workspace.html", "/merchant-orders.html", "/merchant-location.html",
+    ]);
+    if (request.method === "GET" && protectedMerchantPages.has(url.pathname)) {
+      const rawSession = cookieValue(request, "vq_merchant_session") ?? "";
+      const match = rawSession.match(/^(acct-[a-f0-9-]{36})\.([a-f0-9]{64})$/);
+      if (!match || !await verifyMerchantSession(env, match[1], match[2])) {
+        const redirect = Response.redirect(new URL("/vm.html?auth_required=1", request.url), 302);
+        redirect.headers.append("set-cookie", clearMerchantSessionCookie());
+        return redirect;
+      }
+    }
 
     // Read-only account ID inventory from the shared AccountRegistry Durable Object.
     // Uses the existing /api/admin/accounts path with GET; does not delete or modify accounts.
@@ -1005,10 +1057,11 @@ export default {
       }
 
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
-      return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+      return jsonWithCookie({ ...session, username, status: "provisioning", snapshot_identity: accountId,
         virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         snapshot_cloned: false, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
-        provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." }, 202);
+        provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." },
+        202, merchantSessionCookie(accountId, session.session_token));
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
@@ -1042,7 +1095,7 @@ export default {
       if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
       const identity = await getOrAllocateAccountNetworkIdentity(env, accountId);
       if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
-      return json({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac });
+      return jsonWithCookie({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac }, 200, merchantSessionCookie(accountId, String(login.session_token ?? "")));
     }
 
     if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
@@ -1173,7 +1226,7 @@ export default {
       if (!authPurge.ok) return json({ error: "account_auth_cleanup_failed" }, 502);
       const result = await authPurge.json().catch(() => ({})) as { verification?: { passed?: unknown } };
       if (result.verification?.passed !== true) return json({ error: "account_auth_cleanup_unverified" }, 502);
-      return json({ ok: true, deleted: true, account_id: accountId });
+      return jsonWithCookie({ ok: true, deleted: true, account_id: accountId }, 200, clearMerchantSessionCookie());
     }
 
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
@@ -1188,7 +1241,7 @@ export default {
         body: JSON.stringify({ account_id: accountId, token: sessionToken }),
       });
       if (!revoked.ok) return json({ error: "logout_failed" }, 502);
-      return json({ ok: true });
+      return jsonWithCookie({ ok: true }, 200, clearMerchantSessionCookie());
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "POST") {
@@ -1204,7 +1257,7 @@ export default {
       const verified = await response.json() as { username?: unknown };
       const identity = await getOrAllocateAccountNetworkIdentity(env, body.account_id);
       if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
-      return json({ ok: true, ...(typeof verified.username === "string" ? { username: verified.username } : {}), ...identity });
+      return jsonWithCookie({ ok: true, ...(typeof verified.username === "string" ? { username: verified.username } : {}), ...identity }, 200, merchantSessionCookie(body.account_id, body.session_token));
     }
 
     if (url.pathname === "/api/network/ticket" && request.method === "POST") {
