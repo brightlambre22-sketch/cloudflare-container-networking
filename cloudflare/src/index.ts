@@ -1531,10 +1531,11 @@ export default {
       const token = cookieValue(request, "vq_admin_session");
       if (token && /^[a-f0-9]{64}$/.test(token)) {
         const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-        await registry.fetch("https://account-registry.internal/admin/session/revoke", {
+        const revoked = await registry.fetch("https://account-registry.internal/admin/session/revoke", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ token }),
         }).catch(() => new Response(null, { status: 503 }));
+        if (!revoked.ok) return jsonWithCookie({ error: "admin_session_revoke_failed" }, 503, clearAdminSessionCookie());
       }
       return jsonWithCookie({ ok: true }, 200, clearAdminSessionCookie());
     }
