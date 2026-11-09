@@ -149,11 +149,11 @@ test("merchant marketplace settings can geocode the entered physical shop addres
 
 test("ordinary Studio saves preserve server-owned published Store metadata", async () => {
   const storage = await read("../src/project-storage.ts");
-  assert.match(storage, /const existingProjectObject = await env\\.PROJECT_STORAGE\\.get\\(key\\)/);
-  assert.match(storage, /existingProject\\?\\.publishSlug/);
-  assert.match(storage, /project\\.publishSlug = existingPublishSlug/);
-  assert.match(storage, /project\\.publishedUrl = existingProject\\.publishedUrl/);
-  assert.match(storage, /project\\.publishedAt = existingProject\\.publishedAt/);
-  assert.match(storage, /delete project\\.publishSlug/);
+  assert.match(storage, /const existingProjectObject = await env\.PROJECT_STORAGE\.get\(key\)/);
+  assert.match(storage, /existingProject\?\.publishSlug/);
+  assert.match(storage, /project\.publishSlug = existingPublishSlug/);
+  assert.match(storage, /project\.publishedUrl = existingProject\.publishedUrl/);
+  assert.match(storage, /project\.publishedAt = existingProject\.publishedAt/);
+  assert.match(storage, /delete project\.publishSlug/);
   assert.match(storage, /Publication metadata is owned by this Worker/);
 });
