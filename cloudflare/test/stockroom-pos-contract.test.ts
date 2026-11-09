@@ -16,13 +16,13 @@ test("Stockroom accepts shared merchant sessions and validates POS keys against 
 
 test("POS keys are restricted to catalog reads, inventory allocations, sales, and sync", async () => {
   const source = await read("../src/business-database.ts");
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/products" && request\.method === "GET"/);
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/movements" && request\.method === "GET"/);
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/offline-allowance" && request\.method === "POST"/);
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/offline-allowance\/release" && request\.method === "POST"/);
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/offline-sales" && request\.method === "POST"/);
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/sync\/orders" && request\.method === "POST"/);
-  assert.match(source, /internalPathPlaceholder\(request, url\) === "\/orders" && request\.method === "GET"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/products" && request\.method === "GET"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/movements" && request\.method === "GET"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/offline-allowance" && request\.method === "POST"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/offline-allowance\/release" && request\.method === "POST"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/offline-sales" && request\.method === "POST"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/sync\/orders" && request\.method === "POST"/);
+  assert.match(source, /internalPathPlaceholder\(url\) === "\/orders" && request\.method === "GET"/);
 });
 
 test("offline POS allocations are idempotent, releasable, and bound to remaining per-product quantities", async () => {
