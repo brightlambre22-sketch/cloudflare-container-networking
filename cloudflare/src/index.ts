@@ -1614,7 +1614,7 @@ export default {
     if (url.pathname === "/api/vm/agent-ticket") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
             if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       const requestedIdentity = request.headers.get("x-agent-identity") ?? "admin";
       if (requestedIdentity !== "admin" && requestedIdentity !== "oracle") {
         return json({ error: "unknown_agent_identity", supported_identities: ["admin", "oracle"] }, 400);
@@ -1674,7 +1674,7 @@ export default {
       const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin";
             if (isAdmin && !env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (isAdmin && !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      if (isAdmin && !adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       // Account snapshots accept either the one-time provisioning API key or a
       // short-lived login session bound to this exact account ID.
