@@ -7,6 +7,8 @@
     <title>Vampirequid Marketplace · Shop local</title>
     <meta name="description" content="Shop products from independent merchants near you. Search local inventory and check out directly with the shop.">
     <meta name="theme-color" content="#0c6b58">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2">
+    <link rel="alternate icon" href="/favicon.svg?v=2">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,6 +17,7 @@
     <link rel="stylesheet" href="emporium/css/vendor/bootstrap.min.css">
     <link rel="stylesheet" href="emporium/css/style.css">
     <link rel="stylesheet" href="emporium/css/vampirequid.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   </head>
   <body>
 
@@ -38,7 +41,7 @@
       <div class="container">
         <nav class="navbar navbar-expand-lg emp-nav" aria-label="Main navigation">
           <a class="navbar-brand emp-brand" href="/" aria-label="Vampirequid home">
-            <span class="emp-brand__mark" aria-hidden="true"><img src="/vampire-quid.svg" alt="" width="40" height="40" style="display:block;object-fit:contain;border-radius:8px;background:#fff"></span>
+            <span class="emp-brand__mark" aria-hidden="true"><img src="/vampire-quid.svg" alt="" width="56" height="56" class="emp-brand__logo"></span>
             <span class="emp-brand__name">Vampirequid</span>
           </a>
 
@@ -241,8 +244,8 @@
             <button class="filter is-active" data-filter="all" role="tab" aria-selected="true">All</button>
           </div>
           <section id="vq-store-map" class="vq-store-map" aria-labelledby="vq-store-map-title" hidden>
-            <div class="vq-store-map__head"><div><p class="eyebrow">Nearby merchants</p><h3 id="vq-store-map-title">Stores in your search</h3></div><p class="vq-store-map__hint">Select a shop to see its products.</p></div>
-            <div class="vq-store-map__body"><div class="vq-map-plot" id="vq-map-plot" role="img" aria-label="Relative locations of nearby stores"></div><ul class="vq-store-list" id="vq-store-list" aria-label="Nearby stores"></ul></div>
+            <div class="vq-store-map__head"><div><p class="eyebrow">Nearby merchants</p><h3 id="vq-store-map-title">Stores in your search</h3></div><p class="vq-store-map__hint">Explore real street maps, open a store page, or launch Street View.</p></div>
+            <div class="vq-store-map__body"><div class="vq-map-plot" id="vq-map-plot" role="region" aria-label="Interactive street map showing nearby stores"></div><ul class="vq-store-list" id="vq-store-list" aria-label="Nearby stores"></ul></div>
           </section>
 
           <div class="pgrid" data-products aria-live="polite"></div>
@@ -367,6 +370,7 @@
     <div class="toasts" data-toasts aria-live="polite" aria-atomic="false"></div>
 
     <script src="emporium/js/vendor/bootstrap.bundle.min.js"></script><script src="emporium/js/main.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="emporium/js/marketplace-app.js"></script>
   </body>
 </html>
