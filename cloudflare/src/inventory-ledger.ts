@@ -192,16 +192,20 @@ export class InventoryLedger extends DurableObject {
       const ttlSeconds=Math.min(604800,Math.max(60,Number(body.ttl_seconds)||86400));
       const expiresAt=new Date(Date.parse(now)+ttlSeconds*1000).toISOString();
       let insufficient:string|null=null;
+      const allocationDetails=new Map<string,{price_cents:number;name:string}>();
       this.ctx.storage.transactionSync(()=>{
         this.expireReservations(now);
         for(const x of allocations){
-          const row=sql.exec("SELECT on_hand,offline_allocated,price_cents,name,COALESCE((SELECT SUM(i.quantity) FROM inventory_reservation_items i JOIN inventory_reservations r ON r.checkout_id=i.checkout_id WHERE i.product_id=inventory_catalog.product_id AND r.status='active'),0) AS reserved FROM inventory_catalog WHERE product_id=? AND status='active'",x.id).toArray()[0] as Record<string,number|string>|undefined;
+          const row=sql.exec("SELECT on_hand,offline_allocated,price_cents,name,COALESCE((SELECT SUM(i.quantity) FROM inventory_reservation_items i JOIN inventory_reservations r ON r.checkout_id=i.checkout_id WHERE i.product_id=inventory_catalog.product_id AND r.status='active'),0) AS reserved FROM inventory_catalog WHERE product_id=? AND status='active'",x.id).toArray()[0] as {on_hand:number;offline_allocated:number;price_cents:number;name:string;reserved:number}|undefined;
           if(!row||row.on_hand-row.offline_allocated-row.reserved<x.quantity){insufficient=x.id;return;}
+          allocationDetails.set(x.id,{price_cents:Number(row.price_cents),name:String(row.name)});
         }
         sql.exec("INSERT INTO offline_allocations(allocation_id,status,created_at,expires_at) VALUES(?,'active',?,?)",allocationId,now,expiresAt);
         for(const x of allocations){
+          const detail=allocationDetails.get(x.id);
+          if(!detail)throw new Error("offline_allocation_detail_missing");
           sql.exec("UPDATE inventory_catalog SET offline_allocated=offline_allocated+? WHERE product_id=?",x.quantity,x.id);
-          sql.exec("INSERT INTO offline_allocation_items(allocation_id,product_id,allocated,remaining,unit_price_cents,name) VALUES(?,?,?,?,?,?)",allocationId,x.id,x.quantity,x.quantity,Number(row!.price_cents),String(row!.name));
+          sql.exec("INSERT INTO offline_allocation_items(allocation_id,product_id,allocated,remaining,unit_price_cents,name) VALUES(?,?,?,?,?,?)",allocationId,x.id,x.quantity,x.quantity,detail.price_cents,detail.name);
         }
       });
       if(insufficient)return json({error:"insufficient_unallocated_stock",product_id:insufficient},409);
