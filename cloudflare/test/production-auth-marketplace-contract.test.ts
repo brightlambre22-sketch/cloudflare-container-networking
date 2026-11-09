@@ -106,3 +106,22 @@ test("marketplace uses a real geographic tile map and ZIP-based search", async (
   assert.match(page, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
   assert.match(page, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
 });
+
+
+test("deleting a published Store project unpublishes its site and removes its marketplace listing", async () => {
+  const storage = await read("../src/project-storage.ts");
+  assert.match(storage, /if \(request\.method === "DELETE"\)[\s\S]*?existingProject/);
+  assert.match(storage, /published-sites\/index\//);
+  assert.match(storage, /published-sites\/" \+ publishedSlug \+ "\//);
+  assert.match(storage, /mapping\.account_id === accountId && mapping\.project_id === projectId/);
+  assert.match(storage, /marketplace\/merchants\/" \+ accountId \+ "\.json/);
+  assert.match(storage, /profile\.project_id === projectId/);
+  assert.match(storage, /marketplace_listing_removed: true/);
+});
+
+test("coordinate-based marketplace searches never include stores outside the selected radius", async () => {
+  const marketplace = await read("../src/marketplace-directory.ts");
+  assert.match(marketplace, /if \(distance !== null && distance > radius\) continue/);
+  assert.doesNotMatch(marketplace, /distance > radius && !postalMatch/);
+  assert.match(marketplace, /distance_miles: distance === null \? null : Number\(distance\.toFixed\(1\)\)/);
+});
