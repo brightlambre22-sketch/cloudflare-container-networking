@@ -246,7 +246,7 @@ export class InventoryLedger extends DurableObject {
       const paymentReference=typeof body.payment_reference==="string"?body.payment_reference.trim().slice(0,160):null;
       const prior=sql.exec("SELECT event_id,order_id FROM offline_sales WHERE event_id=?",eventId).toArray()[0] as {event_id:string;order_id:string}|undefined;
       if(prior)return prior.order_id===orderId?json({ok:true,duplicate:true,order_id:orderId}):json({error:"offline_event_id_conflict"},409);
-      if(sql.exec("SELECT order_id FROM offline_sales WHERE order_id=?",orderId).toArray()[0])return json({error:"offline_order_already_recorded"},409);
+      if(sql.exec("SELECT order_id FROM offline_sales WHERE order_id=?",orderId).toArray()[0]||sql.exec("SELECT order_id FROM inventory_orders WHERE order_id=?",orderId).toArray()[0])return json({error:"offline_order_already_recorded"},409);
       const requested=new Map<string,number>();
       for(const raw of body.items){
         if(!raw||typeof raw!=="object")return json({error:"invalid_inventory_item"},400);
