@@ -111,7 +111,7 @@ const publishResponse = await fetch(base + "/api/studio/publish?account_id=" + e
 });
 assert.equal(publishResponse.status, 200, "merchant should be able to publish a staging storefront");
 const published = await publishResponse.json();
-const siteSlug = new URL(published.url).pathname.match(/^\\/sites\\/([a-f0-9]{32})\\//)?.[1];
+const siteSlug = new URL(published.url).pathname.match(/^\/sites\/([a-f0-9]{32})\//)?.[1];
 assert.ok(siteSlug, "published store should receive a public site ID");
 
 const profileResponse = await fetch(base + "/api/marketplace/profile?account_id=" + encodeURIComponent(login.account_id), {
