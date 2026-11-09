@@ -64,6 +64,9 @@ const signupResponse = await fetch(base + "/api/auth/signup", {
 });
 assert.equal(signupResponse.status, 202, "merchant signup should create a staging account");
 const signup = await signupResponse.json();
+const signupCookie = (signupResponse.headers.get("set-cookie") || "").split(";")[0];
+let cleanupAccountId = signup.account_id;
+try {
 assert.match(String(signup.account_id || ""), /^acct-[a-f0-9-]{36}$/);
 assert.match(String(signup.session_token || ""), /^[a-f0-9]{64}$/);
 assert.match(signupResponse.headers.get("set-cookie") || "", /^vq_merchant_session=/);
@@ -83,9 +86,6 @@ while (Date.now() < provisionDeadline) {
 }
 assert.equal(provision?.complete, true, "merchant snapshot provisioning should finish in staging");
 
-const signupCookie = (signupResponse.headers.get("set-cookie") || "").split(";")[0];
-let cleanupAccountId = signup.account_id;
-try {
 const loginResponse = await fetch(base + "/api/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
