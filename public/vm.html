@@ -1061,14 +1061,15 @@ form.addEventListener('submit',async function(event){
       const response=await fetch('/api/admin/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:adminKeyValue}),cache:'no-store'});
       const result=await response.json().catch(()=>({}));
       if(!response.ok){
-        const reason=result.error==='admin_login_locked'?'Too many attempts. Try again in 15 minutes.':
-          result.error==='admin_login_rate_limit_unavailable'?'The login protection service is temporarily unavailable. Try again shortly.':
+        const reason=result.error==='too_many_attempts'?'Too many attempts. Try again in 15 minutes.':
+          result.error==='admin_login_throttle_unavailable'?'The login protection service is temporarily unavailable. Try again shortly.':
           result.error==='admin_access_key_not_configured'?'ADMIN_ACCESS_KEY is not available to the deployed Worker.':
-          result.error==='invalid_admin_key'?'The admin key is incorrect. '+String(result.attempts_remaining??0)+' attempts remaining.':
+          result.error==='unauthorized'?'The admin key is incorrect.':
           (result.error||('HTTP '+response.status));
         throw new Error('Admin login failed: '+reason);
       }
-      window.snapshotAdminKey=adminKeyValue;
+      adminKey.value='';
+      window.snapshotAdminKey=null;
       window.snapshotAdminSession=true;
       adminAccountsPanel.hidden=false;void loadAdminAccounts();
     }catch(error){message.textContent=error.message||'Admin access check failed.';return}
