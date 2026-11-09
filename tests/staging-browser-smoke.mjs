@@ -27,10 +27,12 @@ const marketplaceHtml = await marketplaceResponse.text();
 assert.match(marketplaceHtml, /id="vq-map-plot"/, "marketplace must include its map container");
 assert.match(marketplaceHtml, /leaflet@1\.9\.4\/dist\/leaflet\.js/, "marketplace must load Leaflet");
 
-for (const path of ["/studio.html", "/workspace.html", "/merchant-orders.html", "/merchant-location.html"]) {
+for (const path of ["/studio", "/studio.html", "/workspace", "/workspace.html", "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html"]) {
   const response = await fetch(base + path, { redirect: "manual" });
   assert.equal(response.status, 302, path + " must redirect without a session");
-  assert.match(response.headers.get("location") || "", /\/vm\.html\?auth_required=1/, path + " must redirect to sign-in");
+  assert.match(response.headers.get("location") || "", /\\/vm\\.html\\?auth_required=1/, path + " must redirect to sign-in");
+  const head = await fetch(base + path, { method: "HEAD", redirect: "manual" });
+  assert.equal(head.status, 302, path + " HEAD must also be protected");
 }
 
 const locationResponse = await fetch(base + "/api/marketplace/location?postal_code=75038");
