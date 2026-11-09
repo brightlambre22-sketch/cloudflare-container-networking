@@ -15,8 +15,11 @@
   function loadPaypal(clientId, mode) {
     return new Promise(function (resolve, reject) {
       var script = document.createElement("script");
-      script.src = "https://www.paypal.com/sdk/js?client-id=" + encodeURIComponent(clientId) + "&currency=USD&intent=capture" + (mode === "sandbox" ? "&buyer-country=US" : "");
-      script.async = true; script.onload = resolve; script.onerror = function () { reject(new Error("PayPal checkout could not load.")); };
+      script.src = "https://www.paypal.com/sdk/js?client-id=" + encodeURIComponent(clientId) + "&components=buttons&currency=USD&intent=capture" + (mode === "sandbox" ? "&buyer-country=US" : "");
+      script.async = true; script.onload = function () {
+        if (window.paypal && typeof window.paypal.Buttons === "function") resolve();
+        else reject(new Error("PayPal loaded without its Buttons component. Check that the connected Client ID is valid for the selected " + (mode === "sandbox" ? "Sandbox" : "Live") + " account."));
+      }; script.onerror = function () { reject(new Error("PayPal checkout could not load.")); };
       document.head.appendChild(script);
     });
   }
