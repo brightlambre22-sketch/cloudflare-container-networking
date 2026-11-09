@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="128 0 768 768">
+  <defs><clipPath id="circle"><circle cx="512" cy="384" r="380"/></clipPath></defs>
+  <circle cx="512" cy="384" r="384" fill="#ffffff"/>
+  <image href="/vampire-quid.svg" xlink:href="/vampire-quid.svg" x="0" y="0" width="1024" height="768" preserveAspectRatio="xMidYMid slice" clip-path="url(#circle)"/>
+</svg>
