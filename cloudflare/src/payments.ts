@@ -145,7 +145,79 @@ export async function handlePayments(request: Request, env: PaymentEnv): Promise
   const paypalCaptureMatch = url.pathname.match(/^\/api\/payments\/checkout\/([a-f0-9-]{36})\/paypal\/capture$/);
   const publicMatch = url.pathname.match(/^\/api\/payments\/checkout\/([a-f0-9-]{36})$/);
   const verifyMatch = url.pathname.match(/^\/api\/payments\/checkout\/([a-f0-9-]{36})\/verify$/);
-  if (!settingsMatch && !createMatch && !publicMatch && !verifyMatch && !paypalConnectMatch && !paypalStatusMatch && !paypalTestMatch && !paypalCreateMatch && !paypalCaptureMatch) return json({ error: "not_found" }, 404);
+  const webhookMatch = url.pathname.match(/^\/api\/payments\/paypal\/webhook\/(acct-[a-f0-9-]{36})\/(sandbox|live)$/);
+  const historyMatch = url.pathname === "/api/payments/history";
+  if (!settingsMatch && !createMatch && !publicMatch && !verifyMatch && !paypalConnectMatch && !paypalStatusMatch && !paypalTestMatch && !paypalCreateMatch && !paypalCaptureMatch && !webhookMatch && !historyMatch) return json({ error: "not_found" }, 404);
+  if (webhookMatch && request.method === "POST") {
+    const [, accountId, mode] = webhookMatch;
+    const saved = await readJson<any>(env.PROJECT_STORAGE, keyFor(accountId, "paypal-credentials-" + mode));
+    if (!saved?.webhook_id || !saved?.iv || !saved?.ciphertext) return json({ error: "paypal_webhook_not_configured" }, 503);
+    const credentials = await decryptCredentials(env.PAYMENTS_ENCRYPTION_KEY ?? "", saved);
+    const host = mode === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+    const access = await paypalAccessToken(host, credentials);
+    const rawBody = await request.text();
+    let event: any;
+    try { event = JSON.parse(rawBody); } catch { return json({ error: "invalid_webhook_json" }, 400); }
+    const header = (name: string) => request.headers.get(name) ?? "";
+    const verification = await fetch(host + "/v1/notifications/verify-webhook-signature", {
+      method: "POST", headers: { authorization: "Bearer " + access, "content-type": "application/json" },
+      body: JSON.stringify({ auth_algo: header("paypal-auth-algo"), cert_url: header("paypal-cert-url"),
+        transmission_id: header("paypal-transmission-id"), transmission_sig: header("paypal-transmission-sig"),
+        transmission_time: header("paypal-transmission-time"), webhook_id: saved.webhook_id, webhook_event: event }),
+    });
+    const verified = await verification.json() as { verification_status?: string };
+    if (!verification.ok || verified.verification_status !== "SUCCESS") return json({ error: "paypal_webhook_signature_invalid" }, 400);
+    const eventId = typeof event.id === "string" ? event.id : "";
+    const eventType = typeof event.event_type === "string" ? event.event_type : "";
+    if (!eventId || !eventType) return json({ error: "invalid_paypal_event" }, 400);
+    const eventKey = keyFor(accountId, "events/paypal-webhook-" + eventId);
+    if (await env.PROJECT_STORAGE.head(eventKey)) return json({ ok: true, duplicate: true });
+    const resource = event.resource ?? {};
+    const relatedIds = resource.supplementary_data?.related_ids ?? {};
+    const relatedOrderId = relatedIds.order_id ?? (eventType === "CHECKOUT.PAYMENT-APPROVAL.REVERSED" ? resource.id ?? null : null);
+    const captureId = relatedIds.capture_id ?? (eventType.startsWith("PAYMENT.CAPTURE.") && eventType !== "PAYMENT.CAPTURE.REFUNDED" ? resource.id : null);
+    const prefix = `accounts/${accountId}/payments/checkout-`;
+    let cursor: string | undefined, checkout: any = null;
+    do {
+      const page = await env.PROJECT_STORAGE.list({ prefix, limit: 1000, cursor });
+      for (const object of page.objects) {
+        const candidate = await readJson<any>(env.PROJECT_STORAGE, object.key);
+        if (candidate && ((relatedOrderId && candidate.paypal_order_id === relatedOrderId) ||
+          (captureId && candidate.paypal_capture_id === captureId))) { checkout = candidate; break; }
+      }
+      if (checkout) break;
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    if (!checkout) return json({ error: "paypal_webhook_checkout_not_found" }, 404);
+    const occurredAt = event.create_time ?? new Date().toISOString();
+    const next = { ...checkout };
+    if (eventType === "PAYMENT.CAPTURE.COMPLETED") {
+      next.status = "paid"; next.paid_at = next.paid_at ?? occurredAt;
+      next.paypal_capture_id = captureId ?? next.paypal_capture_id;
+      next.payment_method = "paypal";
+      // A webhook may be the first confirmation when the browser capture
+      // response is interrupted. Commit inventory idempotently in that case.
+      const committed = await commitInventory(env, checkout, relatedOrderId ?? captureId ?? eventId, "paypal");
+      next.inventory_status = committed.ok ? "queued_for_tinycore_sync" : "needs_review";
+      next.order_id = committed.order_id ?? next.order_id;
+    }
+    else if (eventType === "PAYMENT.CAPTURE.PENDING") next.payment_status = "pending";
+    else if (eventType === "PAYMENT.CAPTURE.DENIED") next.paypal_last_capture_failure = { issue: "PAYMENT.CAPTURE.DENIED", occurred_at: occurredAt };
+    else if (eventType === "PAYMENT.CAPTURE.REFUNDED") {
+      const refundAmount = Number(resource.amount?.value ?? 0);
+      const priorRefunded = Number(checkout.refunded_amount_usd ?? 0);
+      next.refunded_amount_usd = (priorRefunded + refundAmount).toFixed(2);
+      next.status = Number(next.refunded_amount_usd) >= Number(checkout.amount_usd) ? "refunded" : "partially_refunded";
+    } else if (eventType === "PAYMENT.CAPTURE.REVERSED" || eventType === "CHECKOUT.PAYMENT-APPROVAL.REVERSED") next.status = "reversed";
+    else if (eventType === "PAYMENT.CAPTURE.VOIDED") next.status = "voided";
+    else return json({ ok: true, ignored: true, event_type: eventType });
+    await env.PROJECT_STORAGE.put(keyFor(accountId, "checkout-" + checkout.id), JSON.stringify(next), { httpMetadata: { contentType: "application/json" } });
+    await env.PROJECT_STORAGE.put(eventKey, JSON.stringify({ account_id: accountId, checkout_id: checkout.id,
+      type: eventType.toLowerCase(), status: next.status ?? next.payment_status ?? "updated", paypal_event_id: eventId,
+      paypal_order_id: relatedOrderId, paypal_capture_id: captureId, amount: resource.amount ?? null, occurred_at: occurredAt }),
+      { httpMetadata: { contentType: "application/json" } });
+    return json({ ok: true, processed: true, status: next.status ?? next.payment_status });
+  }
   if (paypalConnectMatch || paypalStatusMatch || paypalTestMatch) {
     const accountId = url.searchParams.get("account_id") ?? "";
     if (!await authenticate(request, env, accountId)) return json({ error: "unauthorized" }, 401);
@@ -160,7 +232,7 @@ export async function handlePayments(request: Request, env: PaymentEnv): Promise
       const live = await readJson<{ client_id?: string; iv?: string; ciphertext?: string }>(env.PROJECT_STORAGE, modeKey("live"));
       return json({
         ok: true, connected: Boolean(saved?.iv && saved?.ciphertext && saved.client_id), mode: selectedMode,
-        client_id: saved?.iv && saved?.ciphertext ? saved.client_id : null,
+        client_id: saved?.iv && saved?.ciphertext ? saved.client_id : null, webhook_status: saved?.webhook_status ?? "not_registered",
         available_modes: {
           sandbox: Boolean(sandbox?.iv && sandbox?.ciphertext && sandbox.client_id),
           live: Boolean(live?.iv && live?.ciphertext && live.client_id),
@@ -213,13 +285,61 @@ export async function handlePayments(request: Request, env: PaymentEnv): Promise
       let encrypted: { iv: string; ciphertext: string };
       try { encrypted = await encryptCredentials(env.PAYMENTS_ENCRYPTION_KEY, credentials); }
       catch { return json({ error: "payments_encryption_key_invalid" }, 503); }
-      const savedCredential = { ...encrypted, mode: credentials.mode, client_id: credentials.client_id, connected_at: new Date().toISOString() };
+      const savedCredential: { iv: string; ciphertext: string; mode: string; client_id: string; connected_at: string; webhook_id?: string; webhook_status?: string } = { ...encrypted, mode: credentials.mode, client_id: credentials.client_id, connected_at: new Date().toISOString() };
+      const webhookUrl = new URL("/api/payments/paypal/webhook/" + accountId + "/" + credentials.mode, url.origin).toString();
+      let reusedWebhook = false;
+      const existingCredential = await readJson<any>(env.PROJECT_STORAGE, modeKey(credentials.mode));
+      if (existingCredential?.webhook_id && existingCredential.iv && existingCredential.ciphertext) {
+        try {
+          const existingPlain = await decryptCredentials(env.PAYMENTS_ENCRYPTION_KEY, existingCredential);
+          if (existingPlain.client_id === credentials.client_id && existingPlain.client_secret === credentials.client_secret &&
+              existingPlain.mode === credentials.mode && existingCredential.webhook_url === webhookUrl &&
+              existingCredential.webhook_status === "active") {
+            savedCredential.webhook_id = existingCredential.webhook_id;
+            savedCredential.webhook_url = webhookUrl;
+            savedCredential.webhook_status = "active";
+            reusedWebhook = true;
+          }
+        } catch { /* Replace unreadable or mismatched credentials and register a fresh webhook. */ }
+      }
+      if (!reusedWebhook) {
+        try {
+          const access = await paypalAccessToken(host, credentials);
+          // Reuse an already-registered subscription for this exact callback URL,
+          // including subscriptions created manually before Vampirequid managed them.
+          const requiredEvents = ["PAYMENT.CAPTURE.COMPLETED","PAYMENT.CAPTURE.PENDING","PAYMENT.CAPTURE.DENIED","PAYMENT.CAPTURE.REFUNDED","PAYMENT.CAPTURE.REVERSED","PAYMENT.CAPTURE.VOIDED","CHECKOUT.PAYMENT-APPROVAL.REVERSED"];
+          const listResponse = await fetch(host + "/v1/notifications/webhooks", {
+            headers: { authorization: "Bearer " + access },
+          });
+          if (listResponse.ok) {
+            const list = await listResponse.json() as { webhooks?: Array<{ id?: string; url?: string; event_types?: Array<{ name?: string }> }> };
+            const existing = list.webhooks?.find(item => item.url === webhookUrl && item.id &&
+              requiredEvents.every(name => item.event_types?.some(event => event.name === name)));
+            if (existing?.id) {
+              savedCredential.webhook_id = existing.id;
+              savedCredential.webhook_url = webhookUrl;
+              savedCredential.webhook_status = "active";
+              reusedWebhook = true;
+            }
+          }
+          if (!reusedWebhook) {
+            const webhookResponse = await fetch(host + "/v1/notifications/webhooks", {
+              method: "POST", headers: { authorization: "Bearer " + access, "content-type": "application/json" },
+              body: JSON.stringify({ url: webhookUrl, event_types: requiredEvents.map(name => ({ name })) }),
+            });
+            const webhook = await webhookResponse.json() as { id?: string };
+            savedCredential.webhook_url = webhookUrl;
+            if (webhookResponse.ok && webhook.id) { savedCredential.webhook_id = webhook.id; savedCredential.webhook_status = "active"; }
+            else savedCredential.webhook_status = "registration_failed";
+          }
+        } catch { savedCredential.webhook_url = webhookUrl; savedCredential.webhook_status = "registration_failed"; }
+      }
       await env.PROJECT_STORAGE.put(modeKey(credentials.mode), JSON.stringify(savedCredential), { httpMetadata: { contentType: "application/json" } });
       await env.PROJECT_STORAGE.put(key, JSON.stringify(savedCredential), { httpMetadata: { contentType: "application/json" } });
       const settings = await readJson<any>(env.PROJECT_STORAGE, keyFor(accountId, "settings")) ?? { wallet_address: "", crypto_enabled: false };
       settings.paypal_enabled = true;
       await env.PROJECT_STORAGE.put(keyFor(accountId, "settings"), JSON.stringify(settings), { httpMetadata: { contentType: "application/json" } });
-      return json({ ok: true, connected: true, mode: credentials.mode, client_id: credentials.client_id });
+      return json({ ok: true, connected: true, mode: credentials.mode, client_id: credentials.client_id, webhook_status: savedCredential.webhook_status ?? "not_registered" });
     }
     return json({ error: "method_not_allowed" }, 405);
   }
@@ -280,45 +400,172 @@ export async function handlePayments(request: Request, env: PaymentEnv): Promise
       });
       const result = await captured.json() as {
         name?: string; message?: string; debug_id?: string;
+        payer?: { payer_id?: string; email_address?: string; name?: { given_name?: string; surname?: string } };
         details?: Array<{ issue?: string; description?: string }>;
         status?: string;
         purchase_units?: Array<{ payments?: { captures?: Array<{ status?: string; amount?: { value?: string; currency_code?: string }; id?: string }> } }>;
       };
       if (!captured.ok) {
         const issue = result.details?.find(detail => typeof detail.issue === "string")?.issue ?? null;
-        // INSTRUMENT_DECLINED is a recoverable buyer funding-source failure.
-        // Return a stable machine-readable code so the PayPal JS SDK can restart
-        // the approval flow and let the buyer select another funding source.
-        if (issue === "INSTRUMENT_DECLINED") {
-          const failedAt = new Date().toISOString();
-          const event = {
-            type: "paypal.capture.declined", checkout_id: id, account_id: page.account_id,
-            paypal_order_id: saved.order_id, paypal_request_id: captureRequestId,
-            issue, debug_id: result.debug_id ?? null, http_status: captured.status,
-            message: result.message ?? null, occurred_at: failedAt,
-          };
-          // Persist the decline as a merchant-side payment event without storing
-          // card, payer, or other sensitive funding-source details.
-          await env.PROJECT_STORAGE.put(keyFor(page.account_id, "events/paypal-" + id + "-" + captureRequestId), JSON.stringify(event), { httpMetadata: { contentType: "application/json" } });
-          await env.PROJECT_STORAGE.put(keyFor(page.account_id, "checkout-" + id), JSON.stringify({
-            ...page, paypal_last_capture_failure: { issue, debug_id: result.debug_id ?? null, occurred_at: failedAt },
-          }), { httpMetadata: { contentType: "application/json" } });
+        const failureStatus = issue?.includes("DECLINED") ? "declined" : "failed";
+        const failedAt = new Date().toISOString();
+        let buyer = result.payer ? {
+          payer_id: result.payer.payer_id ?? null,
+          email: result.payer.email_address ?? null,
+          name: [result.payer.name?.given_name, result.payer.name?.surname].filter(Boolean).join(" ") || null,
+        } : page.buyer ?? null;
+        // PayPal may omit payer details from a failed capture response. Look up
+        // the approved order so declined attempts can still identify the buyer.
+        if (!buyer) {
+          try {
+            const orderLookup = await fetch(host + "/v2/checkout/orders/" + encodeURIComponent(saved.order_id), {
+              headers: { authorization: "Bearer " + access },
+            });
+            if (orderLookup.ok) {
+              const orderDetails = await orderLookup.json() as { payer?: typeof result.payer };
+              if (orderDetails.payer) buyer = {
+                payer_id: orderDetails.payer.payer_id ?? null,
+                email: orderDetails.payer.email_address ?? null,
+                name: [orderDetails.payer.name?.given_name, orderDetails.payer.name?.surname].filter(Boolean).join(" ") || null,
+              };
+            }
+          } catch { /* Keep the attempt even when the buyer lookup is unavailable. */ }
+        }
+        const event = {
+          type: failureStatus === "declined" ? "paypal.capture.declined" : "paypal.capture.failed",
+          status: failureStatus, checkout_id: id, account_id: page.account_id,
+          paypal_order_id: saved.order_id, paypal_request_id: captureRequestId,
+          issue, debug_id: result.debug_id ?? null, http_status: captured.status,
+          message: result.message ?? null, occurred_at: failedAt,
+        };
+        // Store payment outcomes and buyer identity, never card or funding details.
+        await env.PROJECT_STORAGE.put(keyFor(page.account_id, "events/paypal-" + id + "-" + captureRequestId), JSON.stringify(event), { httpMetadata: { contentType: "application/json" } });
+        await env.PROJECT_STORAGE.put(keyFor(page.account_id, "checkout-" + id), JSON.stringify({
+          ...page, buyer, paypal_last_capture_failure: { issue, debug_id: result.debug_id ?? null, status: failureStatus, occurred_at: failedAt },
+        }), { httpMetadata: { contentType: "application/json" } });
+        // Rotate only after definitive client-side failures. Preserve the request
+        // ID for 5xx responses where PayPal may have completed the capture.
+        if (captured.status >= 400 && captured.status < 500) {
           saved.capture_request_id = null;
           await env.PROJECT_STORAGE.put(orderKey, JSON.stringify(saved), { httpMetadata: { contentType: "application/json" } });
-          return json({ ok: false, error: "paypal_instrument_declined", paypal_issue: issue, paypal_debug_id: result.debug_id ?? null }, 409);
         }
-        return json({ ok: false, error: "paypal_capture_failed", paypal_issue: issue, paypal_debug_id: result.debug_id ?? null, paypal_status: captured.status }, 502);
+        return json({
+          ok: false,
+          error: failureStatus === "declined" ? "paypal_instrument_declined" : "paypal_capture_failed",
+          paypal_issue: issue, paypal_debug_id: result.debug_id ?? null, paypal_status: captured.status,
+        }, failureStatus === "declined" ? 409 : 502);
       }
       const capture = result.purchase_units?.[0]?.payments?.captures?.[0];
       if (result.status !== "COMPLETED" || capture?.status !== "COMPLETED" || capture.amount?.currency_code !== "USD" || Number(capture.amount.value) !== Number(page.amount_usd)) return json({ error: "paypal_payment_not_completed" }, 409);
       const committed = await commitInventory(env, page, saved.order_id, "paypal");
       const inventory_status = committed.ok ? "queued_for_tinycore_sync" : "needs_review";
-      const updated = { ...page, status: "paid", inventory_status, order_id: committed.order_id ?? null, payment_method: "paypal", paypal_order_id: saved.order_id, paypal_capture_id: capture.id ?? null, paid_at: new Date().toISOString() };
+      const paidAt = new Date().toISOString();
+      const updated = { ...page, status: "paid", inventory_status, order_id: committed.order_id ?? null, payment_method: "paypal", paypal_order_id: saved.order_id, paypal_capture_id: capture.id ?? null, paid_at: paidAt, buyer: result.payer ? { payer_id: result.payer.payer_id ?? null, email: result.payer.email_address ?? null, name: [result.payer.name?.given_name, result.payer.name?.surname].filter(Boolean).join(" ") || null } : page.buyer ?? null };
       await env.PROJECT_STORAGE.put(keyFor(page.account_id, "checkout-" + id), JSON.stringify(updated), { httpMetadata: { contentType: "application/json" } });
       const delivery = await acceptQuotedDelivery(env, id);
       return json({ ok: true, status: "paid", inventory_status, order_id: committed.order_id ?? null, capture_id: capture.id ?? null, delivery });
     }
     return json({ error: "method_not_allowed" }, 405);
+  }
+
+  if (historyMatch && request.method === "GET") {
+    const accountId = url.searchParams.get("account_id") ?? "";
+    if (!await authenticate(request, env, accountId)) return json({ error: "unauthorized" }, 401);
+    const prefix = `accounts/${accountId}/payments/`;
+    const checkouts: any[] = [];
+    const events: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await env.PROJECT_STORAGE.list({ prefix, limit: 1000, cursor });
+      for (const object of page.objects) {
+        if (!object.key.endsWith(".json")) continue;
+        const suffix = object.key.slice(prefix.length);
+        if (!suffix.startsWith("checkout-") && !suffix.startsWith("events/")) continue;
+        const record = await readJson<any>(env.PROJECT_STORAGE, object.key);
+        if (!record || record.account_id !== accountId) continue;
+        if (suffix.startsWith("checkout-")) checkouts.push(record);
+        else events.push(record);
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    // Backfill buyer identity for older PayPal checkouts created before the
+    // merchant ledger stored payer details. Limit lookups per request and cache
+    // one OAuth token per mode so dashboard refreshes stay bounded.
+    const buyerTokens = new Map<string, { host: string; access: string }>();
+    let buyerLookups = 0;
+    for (const checkout of checkouts) {
+      if (buyerLookups >= 10) break;
+      const mode = checkout.paypal_mode === "live" ? "live" : checkout.paypal_mode === "sandbox" ? "sandbox" : null;
+      if (checkout.buyer || checkout.buyer_lookup_at || !checkout.paypal_order_id || !mode) continue;
+      try {
+        let auth = buyerTokens.get(mode);
+        if (!auth) {
+          const credentials = await getPaypalCredentials(env, accountId, mode);
+          if (!credentials) continue;
+          const host = mode === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+          auth = { host, access: await paypalAccessToken(host, credentials) };
+          buyerTokens.set(mode, auth);
+        }
+        buyerLookups++;
+        const lookup = await fetch(auth.host + "/v2/checkout/orders/" + encodeURIComponent(checkout.paypal_order_id), {
+          headers: { authorization: "Bearer " + auth.access },
+        });
+        if (!lookup.ok) {
+          if (lookup.status === 404) {
+            checkout.buyer_lookup_at = new Date().toISOString();
+            await env.PROJECT_STORAGE.put(keyFor(accountId, "checkout-" + checkout.id), JSON.stringify(checkout), { httpMetadata: { contentType: "application/json" } });
+          }
+          continue;
+        }
+        const orderDetails = await lookup.json() as { status?: string; payer?: { payer_id?: string; email_address?: string; name?: { given_name?: string; surname?: string } } };
+        if (orderDetails.payer) {
+          checkout.buyer = {
+            payer_id: orderDetails.payer.payer_id ?? null,
+            email: orderDetails.payer.email_address ?? null,
+            name: [orderDetails.payer.name?.given_name, orderDetails.payer.name?.surname].filter(Boolean).join(" ") || null,
+          };
+          checkout.buyer_lookup_at = new Date().toISOString();
+        } else if (orderDetails.status === "APPROVED" || orderDetails.status === "COMPLETED") {
+          checkout.buyer_lookup_at = new Date().toISOString();
+        } else {
+          continue; // Buyer has not approved this order yet; retry on a later dashboard load.
+        }
+        await env.PROJECT_STORAGE.put(keyFor(accountId, "checkout-" + checkout.id), JSON.stringify(checkout), { httpMetadata: { contentType: "application/json" } });
+      } catch { /* Keep the history request available if PayPal enrichment is unavailable. */ }
+    }
+    const eventByCheckout = new Map<string, any[]>();
+    for (const event of events) {
+      const id = typeof event.checkout_id === "string" ? event.checkout_id : "";
+      if (!id) continue;
+      const list = eventByCheckout.get(id) ?? [];
+      list.push(event); eventByCheckout.set(id, list);
+    }
+    const payments = checkouts.map(checkout => {
+      const timeline = (eventByCheckout.get(checkout.id) ?? []).map(event => ({
+        type: event.type, status: event.status ?? (event.type === "paypal.capture.declined" ? "declined" : "event"),
+        occurred_at: event.occurred_at ?? event.created_at, message: event.message ?? null,
+        paypal_issue: event.issue ?? null, paypal_debug_id: event.debug_id ?? null, amount: event.amount ?? null,
+      })).sort((a,b) => String(a.occurred_at ?? "").localeCompare(String(b.occurred_at ?? "")));
+      if (checkout.paid_at && !timeline.some(event => event.status === "completed")) timeline.push({ type: "payment.completed", status: "completed", occurred_at: checkout.paid_at, message: null, paypal_issue: null, paypal_debug_id: null });
+      if (checkout.paypal_last_capture_failure && !timeline.some(event => event.status === "declined")) timeline.push({
+        type: "paypal.capture.declined", status: "declined", occurred_at: checkout.paypal_last_capture_failure.occurred_at,
+        message: "PayPal declined the buyer's funding source.", paypal_issue: checkout.paypal_last_capture_failure.issue ?? null,
+        paypal_debug_id: checkout.paypal_last_capture_failure.debug_id ?? null,
+      });
+      const status = checkout.status === "paid" ? "completed" : checkout.paypal_last_capture_failure ? (checkout.paypal_last_capture_failure.status ?? "declined") :
+        Date.parse(checkout.expires_at ?? "") < Date.now() && checkout.status === "pending" ? "expired" : checkout.status ?? "pending";
+      return {
+        checkout_id: checkout.id, status, amount: checkout.amount_usd, currency: "USD",
+        payment_method: checkout.payment_method ?? (checkout.paypal_mode ? "paypal" : "unknown"),
+        environment: checkout.paypal_mode ?? "not_applicable",
+        description: checkout.description ?? "", items: checkout.items ?? [],
+        buyer: checkout.buyer ?? null, created_at: checkout.created_at, paid_at: checkout.paid_at ?? null,
+        refunded_amount: checkout.refunded_amount_usd ?? "0.00",
+        paypal_order_id: checkout.paypal_order_id ?? null, paypal_capture_id: checkout.paypal_capture_id ?? null,
+        order_id: checkout.order_id ?? null, timeline,
+      };
+    }).sort((a,b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+    return json({ ok: true, payments, count: payments.length, supported_statuses: ["pending","completed","declined","failed","expired","refunded","partially_refunded","reversed","voided"] });
   }
   if (settingsMatch || createMatch) {
     const accountId = url.searchParams.get("account_id") ?? "";
@@ -417,9 +664,16 @@ async function decryptCredentials(secret: string, record: { iv: string; cipherte
 async function getPaypalCredentials(env: PaymentEnv, accountId: string, mode?: "sandbox" | "live") {
   if (!env.PAYMENTS_ENCRYPTION_KEY) return null;
   const suffix = mode ? "paypal-credentials-" + mode : "paypal-credentials";
-  const record = await readJson<{ iv: string; ciphertext: string }>(env.PROJECT_STORAGE, keyFor(accountId, suffix));
+  let record = await readJson<{ iv: string; ciphertext: string }>(env.PROJECT_STORAGE, keyFor(accountId, suffix));
+  if ((!record?.iv || !record.ciphertext) && mode) {
+    record = await readJson<{ iv: string; ciphertext: string }>(env.PROJECT_STORAGE, keyFor(accountId, "paypal-credentials"));
+  }
   if (!record?.iv || !record.ciphertext) return null;
-  try { return await decryptCredentials(env.PAYMENTS_ENCRYPTION_KEY, record); } catch { return null; }
+  try {
+    const credentials = await decryptCredentials(env.PAYMENTS_ENCRYPTION_KEY, record);
+    if (mode && credentials.mode !== mode) return null;
+    return credentials;
+  } catch { return null; }
 }
 async function paypalAccessToken(host: string, credentials: { client_id: string; client_secret: string }) {
   const response = await fetch(host + "/v1/oauth2/token", { method: "POST", headers: { authorization: "Basic " + btoa(credentials.client_id + ":" + credentials.client_secret), "content-type": "application/x-www-form-urlencoded" }, body: "grant_type=client_credentials" });

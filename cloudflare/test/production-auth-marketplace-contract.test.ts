@@ -7,7 +7,7 @@ const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 test("merchant workspace pages fail closed without a live server-verified session", async () => {
   const worker = await read("../src/index.ts");
   assert.match(worker, /protectedMerchantPages = new Set\(\[/);
-  for (const page of ["/studio", "/studio.html", "/workspace", "/workspace.html", "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html"]) {
+  for (const page of ["/studio", "/studio.html", "/workspace", "/workspace.html", "/merchant-orders", "/merchant-orders.html", "/merchant-payments", "/merchant-payments.html", "/merchant-location", "/merchant-location.html"]) {
     assert.ok(worker.includes('"' + page + '"'), "protected page missing: " + page);
   }
   assert.match(worker, /vq_merchant_session=/);
