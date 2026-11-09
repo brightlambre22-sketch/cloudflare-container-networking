@@ -208,6 +208,9 @@ export class InventoryLedger extends DurableObject {
       const body=await request.json().catch(()=>null) as {allocation_id?:unknown}|null;
       const allocationId=typeof body?.allocation_id==="string"?body.allocation_id:"";
       if(!UUID.test(allocationId))return json({error:"invalid_allocation_id"},400);
+      const paymentMethod=typeof body.payment_method==="string"?body.payment_method.trim().toLowerCase():"offline_pos";
+      if(!["offline_pos","cash","card","paypal","gift_card","other"].includes(paymentMethod))return json({error:"invalid_payment_method"},400);
+      const paymentReference=typeof body.payment_reference==="string"?body.payment_reference.trim().slice(0,160):null;
       const allocation=sql.exec("SELECT status FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string}|undefined;
       if(!allocation)return json({error:"offline_allocation_not_found"},404);
       if(allocation.status==="released")return json({ok:true,already_released:true});
@@ -224,7 +227,7 @@ export class InventoryLedger extends DurableObject {
     }
 
     if (url.pathname === "/offline/consume" && request.method === "POST") {
-      const body=await request.json().catch(()=>null) as {allocation_id?:unknown;event_id?:unknown;order_id?:unknown;items?:unknown}|null;
+      const body=await request.json().catch(()=>null) as {allocation_id?:unknown;event_id?:unknown;order_id?:unknown;items?:unknown;payment_method?:unknown;payment_reference?:unknown}|null;
       const allocationId=typeof body?.allocation_id==="string"?body.allocation_id:"";
       const eventId=typeof body?.event_id==="string"?body.event_id:"";
       const orderId=typeof body?.order_id==="string"?body.order_id:"";
@@ -248,7 +251,7 @@ export class InventoryLedger extends DurableObject {
         if(!allowance||allowance.remaining<quantity||!row||row.offline_allocated<quantity||row.on_hand<quantity)return json({error:"offline_allowance_exceeded",product_id:productId},409);
         selected.push({product_id:productId,quantity,unit_price_cents:Number(row.price_cents),name:String(row.name)});
       }
-      const payload={order_id:orderId,allocation_id:allocationId,event_id:eventId,items:selected,amount_cents:selected.reduce((sum,x)=>sum+x.unit_price_cents*x.quantity,0),payment_method:"offline_pos",status:"paid_offline",created_at:now};
+      const payload={order_id:orderId,allocation_id:allocationId,event_id:eventId,items:selected,amount_cents:selected.reduce((sum,x)=>sum+x.unit_price_cents*x.quantity,0),payment_method:paymentMethod,payment_reference:paymentReference,status:"paid_offline",created_at:now};
       let insufficient:string|null=null;
       try{
         this.ctx.storage.transactionSync(()=>{
