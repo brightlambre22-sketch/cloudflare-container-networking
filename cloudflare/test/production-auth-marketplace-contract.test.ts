@@ -125,3 +125,18 @@ test("coordinate-based marketplace searches never include stores outside the sel
   assert.doesNotMatch(marketplace, /distance > radius && !postalMatch/);
   assert.match(marketplace, /distance_miles: distance === null \? null : Number\(distance\.toFixed\(1\)\)/);
 });
+
+
+test("merchant marketplace settings can geocode the entered physical shop address", async () => {
+  const [page, app] = await Promise.all([
+    read("../../public/studio.html"),
+    read("../../public/studio.js"),
+  ]);
+  assert.match(page, /id="marketplace-geocode"/);
+  assert.match(page, /Find shop coordinates from address/);
+  assert.match(app, /async function geocodeMarketplaceAddress\(\)/);
+  assert.match(app, /api\/marketplace\/geocode\?account_id=/);
+  assert.match(app, /marketplace-latitude.*data\.latitude/);
+  assert.match(app, /marketplace-longitude.*data\.longitude/);
+  assert.match(app, /addEventListener\('click',geocodeMarketplaceAddress\)/);
+});
