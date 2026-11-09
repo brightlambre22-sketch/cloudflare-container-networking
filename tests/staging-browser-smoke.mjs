@@ -187,7 +187,7 @@ try {
   assert.ok(await page.locator("#vq-map-plot .leaflet-tile-loaded").count() > 0, "real map tiles should load");
   assert.match(await page.locator("[data-products]").innerText(), new RegExp("Staging Coffee Test " + username));
 
-  await page.locator("#q").fill("tea");
+  await page.locator("#q").fill("notfound-" + username);
   await page.locator("#q").press("Enter");
   await page.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
   assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");
