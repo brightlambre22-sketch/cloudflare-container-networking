@@ -66,12 +66,14 @@ test("public auth routes are rate-limited and browser credentials are not persis
   assert.match(dashboard, /mysterium-network-test-results:/);
 });
 
-test("restored VMs automatically test the network and save after the test returns to a prompt", () => {
-  assert.match(dashboard, /runDiagnostic\('AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE',true\)/);
-  assert.match(dashboard, /if\(saveAfter&&bootComplete\)/);
-  assert.match(dashboard, /const saved=await saveVmState\(false\)/);
+test("restored VMs automatically run the guest network health check and save only after the shell returns", () => {
+  assert.match(dashboard, /await runRestoredNetworkDiagnostic\\(\\)/);
+  assert.match(dashboard, /vampireSquidRunNetworkCheck\\('health'\\)/);
+  assert.match(dashboard, /if\\(!diagnostic\\|\\|!diagnostic\\.complete\\)/);
+  assert.match(dashboard, /if\\(shellPrompt\\(screenText\\(\\)\\)\\)/);
+  assert.match(dashboard, /const saved=await saveVmState\\(false\\)/);
+  assert.match(dashboard, /saved VM snapshot was left unchanged/);
 });
-
 test("each merchant receives a stable private network identity and authenticated WISP relay", () => {
   assert.ok(virtualNetwork.includes("first_allocatable_ordinal: 1"));
   assert.ok(virtualNetwork.includes("last_allocatable_ordinal: 64767"));
