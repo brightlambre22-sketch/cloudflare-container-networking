@@ -149,3 +149,15 @@ test("PayPal webhook lifecycle is signature-verified, idempotent, and merchant-s
   assert.match(payments, /partially_refunded/);
   assert.match(payments, /webhook_status = "active"/);
 });
+
+test("Studio view navigation uses querySelectorAll collections and cache-busted assets", async () => {
+  const [page, app] = await Promise.all([
+    read("../../public/studio.html"),
+    read("../../public/studio.js"),
+  ]);
+  assert.match(app, /querySelectorAll/);
+  assert.match(app, /function openView/);
+  assert.match(page, /rel="icon"/);
+  assert.match(page, /studio\.js\?v=20261109-studio-fixes/);
+  new Script(app, { filename: "studio.js" });
+});
