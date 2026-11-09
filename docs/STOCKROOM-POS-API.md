@@ -39,6 +39,8 @@ It cannot create, edit, archive products, upload merchant media, or change accou
 5. Release the allocation when the register session ends. Unused quantities return to available stock. A fully consumed allocation closes automatically.
 6. Call order sync (or read order history) so the outbox is applied to the merchant's TinyCore database. Order application is idempotent by `order_id`.
 
+**Payment boundary:** `payment_method` and `payment_reference` are recorded as sale metadata. This API does not authorize or capture card or PayPal payments. A register must complete payment through its payment provider (or record cash/gift-card tender) before submitting the sale as completed.
+
 ### Allocate stock
 
 ```http
