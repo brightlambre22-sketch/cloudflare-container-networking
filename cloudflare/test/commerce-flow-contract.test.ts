@@ -161,3 +161,15 @@ test("Studio view navigation uses querySelectorAll collections and cache-busted 
   assert.match(page, /studio\.js\?v=20261109-studio-fixes/);
   new Script(app, { filename: "studio.js" });
 });
+
+
+test("Stockroom initialization reports isolated backend failures and keeps committed writes successful when sync is unavailable", async () => {
+  const source = await read("../src/business-database.ts");
+  assert.match(source, /stockroom_auth_service_unavailable/);
+  assert.match(source, /stockroom_database_unavailable/);
+  assert.match(source, /pending order synchronization failed/);
+  assert.match(source, /inventory catalog synchronization failed/);
+  assert.match(source, /x-stockroom-order-sync/);
+  assert.match(source, /x-stockroom-catalog-sync/);
+  assert.match(source, /incident_id: incidentId/);
+});

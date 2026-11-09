@@ -157,3 +157,13 @@ class_name = "InventoryLedger"
 [[previews.durable_objects.bindings]]
 name = "WISP_RELAY"
 class_name = "WispRelay"
+
+
+# Keep request failures observable so Stockroom and payment incidents can be diagnosed
+# from Cloudflare Workers Logs without exposing stack traces to merchant browsers.
+[observability]
+enabled = true
+
+[observability.logs]
+invocation_logs = true
+head_sampling_rate = 1
