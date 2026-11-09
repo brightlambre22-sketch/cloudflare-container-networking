@@ -52,6 +52,7 @@
     var category = String(p.category || "Other");
     var image = safeImage(p.image_url, category);
     var storeName = p.store && p.store.name ? p.store.name : "Local merchant";
+    var storeHref = site && /^[a-f0-9]{32}$/.test(site) ? "/sites/" + encodeURIComponent(site) + "/" : "/marketplace";
     var qty = Math.max(0, Number(p.quantity) || 0);
     var productForDetail = { id: id, site_id: site, name: p.name, description: p.description || "", category: category, price: Number(p.price), quantity: qty, image_url: image, store: p.store || {} };
     var itemKey = site + "::" + id;
@@ -61,7 +62,7 @@
       "<div class=\"pcard__media\"><span class=\"badge-emp badge-emp--best\">In stock · " + qty + "</span>" +
       "<a href=\"" + detail + "\" class=\"pcard__imglink\"><img src=\"" + esc(image) + "\" width=\"300\" height=\"300\" loading=\"lazy\" alt=\"" + esc(p.name) + "\"></a>" +
       "<button class=\"pcard__quick\" type=\"button\" data-add-to-cart data-product-id=\"" + esc(id) + "\" data-cart-key=\"" + esc(site + "::" + id) + "\" data-site-id=\"" + esc(site) + "\" data-store-name=\"" + esc(storeName) + "\" data-stock=\"" + qty + "\" data-name=\"" + esc(p.name) + "\" data-price=\"" + esc(p.price) + "\" data-img=\"" + esc(image) + "\">Add to cart</button></div>" +
-      "<div class=\"pcard__body\"><span class=\"pcard__cat\">" + esc(category) + " · " + esc(storeName) + "</span>" +
+      "<div class=\"pcard__body\"><span class=\"pcard__cat\">" + esc(category) + " · <a class=\"vq-store-link\" href=\"" + storeHref + "\">" + esc(storeName) + "</a></span>" +
       "<h3 class=\"pcard__title\"><a href=\"" + detail + "\">" + esc(p.name) + "</a></h3>" +
       "<p class=\"vq-card-stock\">" + (qty === 1 ? "1 available" : qty + " available") + "</p>" +
       "<div class=\"pcard__price\"><span class=\"price-now\">" + money(p.price) + "</span></div></div></article>";
@@ -79,6 +80,15 @@
     var empty = document.querySelector("[data-empty]");
     if (empty) empty.hidden = document.querySelectorAll("[data-products] .pcard:not([hidden])").length > 0;
   }
+  var storeMap = null;
+  var storeMarkers = null;
+  function streetViewUrl(store) {
+    return "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" +
+      encodeURIComponent(store.lat + "," + store.lng);
+  }
+  function storePageUrl(store) {
+    return /^[a-f0-9]{32}$/.test(store.site) ? "/sites/" + encodeURIComponent(store.site) + "/" : "/marketplace";
+  }
   function renderStores(items) {
     var panel = document.getElementById("vq-store-map"), plot = document.getElementById("vq-map-plot"), list = document.getElementById("vq-store-list");
     if (!panel || !plot || !list) return;
@@ -86,23 +96,52 @@
     items.forEach(function (product) {
       var store = product.store || {}, site = String(product.site_id || "");
       if (!site || stores.some(function (item) { return item.site === site; })) return;
-      stores.push({ site: site, name: String(store.name || "Local merchant"), address: [store.city, store.state].filter(Boolean).join(", "), lat: Number(store.latitude), lng: Number(store.longitude), distance: Number.isFinite(Number(product.distance_miles)) ? Number(product.distance_miles) : null });
+      var lat = Number(store.latitude), lng = Number(store.longitude);
+      stores.push({
+        site: site, name: String(store.name || "Local merchant"),
+        address: [store.address, store.city, store.state, store.postal_code].filter(Boolean).join(", "),
+        lat: lat, lng: lng,
+        hasCoordinates: store.latitude != null && store.longitude != null && Number.isFinite(lat) && Number.isFinite(lng),
+        distance: product.distance_miles == null || !Number.isFinite(Number(product.distance_miles)) ? null : Number(product.distance_miles)
+      });
     });
     if (!stores.length) { panel.hidden = true; return; }
     panel.hidden = false;
-    var valid = stores.filter(function (s) { return Number.isFinite(s.lat) && Number.isFinite(s.lng); });
-    var lats = valid.map(function (s) { return s.lat; }), lngs = valid.map(function (s) { return s.lng; });
-    var minLat = Math.min.apply(Math, lats), maxLat = Math.max.apply(Math, lats), minLng = Math.min.apply(Math, lngs), maxLng = Math.max.apply(Math, lngs);
-    var latSpan = maxLat - minLat || 0.02, lngSpan = maxLng - minLng || 0.02;
-    var width = 760, height = 260, marks = valid.map(function (store, index) {
-      var x = 36 + ((store.lng - minLng) / lngSpan) * (width - 72);
-      var y = 30 + ((maxLat - store.lat) / latSpan) * (height - 60);
-      return "<g><title>" + esc(store.name) + (store.address ? " · " + esc(store.address) : "") + "</title><circle cx=\"" + x.toFixed(1) + "\" cy=\"" + y.toFixed(1) + "\" r=\"15\"/><text x=\"" + x.toFixed(1) + "\" y=\"" + (y + 5).toFixed(1) + "\">" + (index + 1) + "</text></g>";
-    }).join("");
-    plot.innerHTML = "<svg viewBox=\"0 0 760 260\" aria-hidden=\"true\"><path d=\"M0 65H760M0 130H760M0 195H760M190 0V260M380 0V260M570 0V260\" class=\"vq-map-grid\"/>" + marks + "</svg>";
     list.innerHTML = stores.map(function (store, index) {
-      return "<li><button type=\"button\" data-store-filter=\"" + esc(store.site) + "\" aria-pressed=\"false\" class=\"vq-store-filter\"><span class=\"vq-store-number\">" + (index + 1) + "</span><span><strong>" + esc(store.name) + "</strong><small>" + esc(store.address || "Local shop") + "</small></span>" + (store.distance === null ? "" : "<small>" + store.distance.toFixed(1) + " mi</small>") + "</button></li>";
+      var location = store.address || "Local shop";
+      var street = store.hasCoordinates ? "<a class=\"vq-store-streetview\" href=\"" + esc(streetViewUrl(store)) + "\" target=\"_blank\" rel=\"noopener noreferrer\">Street View ↗</a>" : "";
+      return "<li class=\"vq-store-list-item\"><a class=\"vq-store-filter\" href=\"" + esc(storePageUrl(store)) + "\" aria-label=\"Visit " + esc(store.name) + " store page\"><span class=\"vq-store-number\">" + (index + 1) + "</span><span><strong>" + esc(store.name) + "</strong><small>" + esc(location) + "</small></span><span class=\"vq-store-actions\">" + (store.distance === null ? "" : "<small>" + store.distance.toFixed(1) + " mi</small>") + "</span></a>" + street + "</li>";
     }).join("");
+    var valid = stores.filter(function (store) { return store.hasCoordinates; });
+    if (storeMap) { storeMap.remove(); storeMap = null; storeMarkers = null; }
+    if (!valid.length) {
+      plot.innerHTML = "<div class=\"vq-map-message\">Store addresses are listed, but no verified map coordinates are available yet.</div>";
+      return;
+    }
+    if (typeof window.L === "undefined") {
+      plot.innerHTML = "<div class=\"vq-map-message\">The interactive map could not load. Store links and Street View links are still available.</div>";
+      return;
+    }
+    plot.innerHTML = "";
+    storeMap = window.L.map(plot, { scrollWheelZoom: false, zoomControl: true }).setView([valid[0].lat, valid[0].lng], 15);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
+    }).addTo(storeMap);
+    storeMarkers = window.L.featureGroup().addTo(storeMap);
+    valid.forEach(function (store, index) {
+      var pageUrl = storePageUrl(store);
+      var popup = "<strong>" + esc(store.name) + "</strong><br>" + esc(store.address || "Local shop") +
+        '<br><a href="' + esc(pageUrl) + '">Visit store page</a>' +
+        '<br><a href="' + esc(streetViewUrl(store)) + '" target="_blank" rel="noopener noreferrer">Open Street View ↗</a>';
+      window.L.marker([store.lat, store.lng], { title: store.name, alt: store.name })
+        .bindPopup(popup).addTo(storeMarkers);
+    });
+    if (valid.length === 1) {
+      storeMap.setView([valid[0].lat, valid[0].lng], 15);
+    } else {
+      storeMap.fitBounds(storeMarkers.getBounds().pad(0.22), { maxZoom: 14 });
+    }
+    window.setTimeout(function () { if (storeMap) storeMap.invalidateSize(); }, 80);
   }
   function queryFor(location) {
     var search = new URLSearchParams();
@@ -189,14 +228,6 @@
       if (button) applyFilter(button.getAttribute("data-filter"));
     });
     document.addEventListener("click", function (event) {
-      var storeButton = event.target.closest("[data-store-filter]");
-      if (storeButton) {
-        activeStore = activeStore === storeButton.getAttribute("data-store-filter") ? "all" : storeButton.getAttribute("data-store-filter");
-        document.querySelectorAll("[data-store-filter]").forEach(function (button) { button.setAttribute("aria-pressed", button.getAttribute("data-store-filter") === activeStore ? "true" : "false"); });
-        var activeCategory = document.querySelector("#category-filters .is-active");
-        applyFilter(activeCategory ? activeCategory.getAttribute("data-filter") : "all");
-        return;
-      }
       var link = event.target.closest("[data-filter-link]");
       if (!link) return;
       var category = link.getAttribute("data-filter-link");
