@@ -563,7 +563,7 @@ if(window.snapshotIdentity!=='admin'||!(window.snapshotAdminKey||window.snapshot
 if(apiAgentSocket&&apiAgentSocket.readyState<=1)return;
 apiAgentConnecting=true;
 try{
-const ticketResponse=await fetch('/api/vm/agent-ticket',{method:'POST',headers:{'x-admin-key':window.snapshotAdminKey}});
+const ticketResponse=await fetch('/api/vm/agent-ticket',{method:'POST',headers:window.snapshotAdminKey?{'x-admin-key':window.snapshotAdminKey}:{}});
 if(!ticketResponse.ok)throw new Error('agent ticket HTTP '+ticketResponse.status);
 const ticket=await ticketResponse.json();
 const wsUrl=new URL('/api/vm/agent',window.location.href);
