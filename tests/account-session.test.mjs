@@ -67,11 +67,11 @@ test("public auth routes are rate-limited and browser credentials are not persis
 });
 
 test("restored VMs automatically run the guest network health check and save only after the shell returns", () => {
-  assert.match(dashboard, /await runRestoredNetworkDiagnostic\\(\\)/);
-  assert.match(dashboard, /vampireSquidRunNetworkCheck\\('health'\\)/);
-  assert.match(dashboard, /if\\(!diagnostic\\|\\|!diagnostic\\.complete\\)/);
-  assert.match(dashboard, /if\\(shellPrompt\\(screenText\\(\\)\\)\\)/);
-  assert.match(dashboard, /const saved=await saveVmState\\(false\\)/);
+  assert.match(dashboard, /await runRestoredNetworkDiagnostic\(\)/);
+  assert.match(dashboard, /vampireSquidRunNetworkCheck\('health'\)/);
+  assert.match(dashboard, /if\(!diagnostic\|\|!diagnostic\.complete\)/);
+  assert.match(dashboard, /if\(shellPrompt\(screenText\(\)\)\)/);
+  assert.match(dashboard, /const saved=await saveVmState\(false\)/);
   assert.match(dashboard, /saved VM snapshot was left unchanged/);
 });
 test("each merchant receives a stable private network identity and authenticated WISP relay", () => {
