@@ -83,7 +83,6 @@
   var storeMap = null;
   var storeMarkers = null;
   var storeTileLayer = null;
-  var storeTileFallbackUsed = false;
   var lastStoreRefreshAt = 0;
   function streetViewUrl(store) {
     return "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" +
@@ -131,24 +130,13 @@
     }
     plot.innerHTML = "";
     storeMap = window.L.map(plot, { scrollWheelZoom: false, zoomControl: true }).setView([valid[0].lat, valid[0].lng], 15);
-    // Use CARTO's Voyager raster tiles first; a transparent error tile prevents
-    // failed requests from painting opaque placeholder blocks over the map.
-    // If that provider is unavailable, fall back to OpenStreetMap tiles.
+    // Use OpenStreetMap directly, matching the merchant dashboard map.
+    // No API key or third-party map-provider account is required.
     var transparentTile = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-    storeTileFallbackUsed = false;
-    storeTileLayer = window.L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    storeTileLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19, errorTileUrl: transparentTile,
-      attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
     }).addTo(storeMap);
-    storeTileLayer.on("tileerror", function () {
-      if (!storeMap || storeTileFallbackUsed) return;
-      storeTileFallbackUsed = true;
-      if (storeTileLayer) storeMap.removeLayer(storeTileLayer);
-      storeTileLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19, errorTileUrl: transparentTile,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-      }).addTo(storeMap);
-    });
     storeMarkers = window.L.featureGroup().addTo(storeMap);
     valid.forEach(function (store, index) {
       var pageUrl = storePageUrl(store);
