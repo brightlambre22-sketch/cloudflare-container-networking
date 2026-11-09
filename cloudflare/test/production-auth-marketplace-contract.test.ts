@@ -97,6 +97,8 @@ test("marketplace uses a real geographic tile map and ZIP-based search", async (
   ]);
   assert.match(app, /L\.map\(plot/);
   assert.match(app, /tileLayer\("https:\/\/\{s\}\.tile\.openstreetmap\.org/);
+  assert.doesNotMatch(app, /basemaps\.cartocdn\.com|carto\.com\/attributions/i, "marketplace map must not request a third-party provider or API key");
+  assert.match(app, /Use OpenStreetMap directly, matching the merchant dashboard map/);
   assert.match(app, /api\/marketplace\/location\?postal_code=/);
   assert.match(app, /search\.set\("lat"/);
   assert.match(app, /search\.set\("lng"/);
