@@ -35,7 +35,7 @@ for (const path of ["/studio", "/studio.html", "/workspace", "/workspace.html", 
   assert.equal(head.status, 302, path + " HEAD must also be protected");
 }
 
-const locationResponse = await fetch(base + "/api/marketplace/location?postal_code=75038");
+const locationResponse = await fetch(base + "/api/marketplace/location?postal_code=75038", { signal: AbortSignal.timeout(20000) });
 assert.equal(locationResponse.status, 200, "ZIP lookup should succeed in staging");
 const locationData = await locationResponse.json();
 assert.equal(locationData.ok, true, "ZIP lookup should return ok");
@@ -46,7 +46,7 @@ productsUrl.searchParams.set("postal_code", "75038");
 productsUrl.searchParams.set("lat", String(locationData.latitude));
 productsUrl.searchParams.set("lng", String(locationData.longitude));
 productsUrl.searchParams.set("limit", "100");
-const productsResponse = await fetch(productsUrl);
+const productsResponse = await fetch(productsUrl, { signal: AbortSignal.timeout(15000) });
 assert.equal(productsResponse.status, 200, "ZIP product search should succeed");
 const productsData = await productsResponse.json();
 assert.equal(productsData.ok, true, "ZIP product search should return ok");
