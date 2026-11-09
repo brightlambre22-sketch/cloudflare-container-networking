@@ -244,7 +244,6 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
         latitude = location.latitude;
         longitude = location.longitude;
         hasCoordinates = true;
-        postal = "";
       }
     } catch {
       // The postal-code filter below still finds stores that serve this ZIP.
@@ -296,11 +295,17 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
           typeof storeLongitude !== "number" || !validCoordinates(storeLatitude, storeLongitude)) continue;
       const storeCity = String(profile.city ?? "");
       const storeState = String(profile.state ?? "").toUpperCase();
+      const storePostal = String(profile.postal_code ?? "").trim().toLowerCase();
+      const requestedPostal = postal.match(/^([0-9]{5})(?:-[0-9]{4})?$/)?.[1]?.toLowerCase() ?? postal.toLowerCase();
+      const postalMatch = Boolean(postal && storePostal.startsWith(requestedPostal));
       if (city && !storeCity.toLowerCase().includes(city)) continue;
       if (state && storeState !== state) continue;
-      if (postal && !String(profile.postal_code ?? "").toLowerCase().startsWith(postal.toLowerCase())) continue;
+      // Exact ZIP matches remain valid even when a merchant's street geocode
+      // is inaccurate. With coordinates, nearby stores in other ZIP codes are
+      // still included by the normal radius check.
+      if (postal && !hasCoordinates && !postalMatch) continue;
       const distance = hasCoordinates ? distanceMiles(latitude, longitude, storeLatitude, storeLongitude) : null;
-      if (distance !== null && distance > radius) continue;
+      if (distance !== null && distance > radius && !postalMatch) continue;
       const mapping = await readJson<{ account_id?: string; project_id?: string }>(
         env.PROJECT_STORAGE, "published-sites/index/" + profile.site_id + ".json",
       );
@@ -357,7 +362,8 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
             city: storeCity, state: storeState, postal_code: String(profile.postal_code ?? ""),
             latitude: storeLatitude, longitude: storeLongitude,
           },
-          distance_miles: distance === null ? null : Number(distance.toFixed(1)),
+          distance_miles: distance === null || (postalMatch && distance > radius) ? null : Number(distance.toFixed(1)),
+          postal_code_match: postalMatch,
         });
       }
     }
@@ -371,6 +377,7 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     if (sort === "price_asc") return Number(a.price) - Number(b.price) || stableTieBreak(a, b);
     if (sort === "price_desc") return Number(b.price) - Number(a.price) || stableTieBreak(a, b);
     if (sort === "name") return String(a.name).localeCompare(String(b.name)) || stableTieBreak(a, b);
+    if (a.postal_code_match !== b.postal_code_match) return a.postal_code_match ? -1 : 1;
     return Number(a.distance_miles ?? Number.MAX_SAFE_INTEGER) - Number(b.distance_miles ?? Number.MAX_SAFE_INTEGER) || stableTieBreak(a, b);
   });
   const products = matches.slice(offset, offset + pageSize);
