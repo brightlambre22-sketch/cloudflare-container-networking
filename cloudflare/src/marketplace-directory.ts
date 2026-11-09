@@ -282,7 +282,9 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     postal = cityZip[1];
     city = "";
     try {
-      const location = await geocodePostalCode(env.PROJECT_STORAGE, postal);
+      const location = /^\d{5}(?:-\d{4})?$/.test(postal)
+        ? await geocodePostalCode(env.PROJECT_STORAGE, postal)
+        : await geocodeStoreAddress(env.PROJECT_STORAGE, postal + ", USA");
       if (location) {
         latitude = location.latitude;
         longitude = location.longitude;
