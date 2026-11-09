@@ -43,6 +43,30 @@ function safeUrl(value: unknown): string {
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
   } catch { return ""; }
 }
+/** Authenticate either the shared merchant session or the optional POS integration key. */
+async function authenticateStockroomCredential(
+  env: BusinessDatabaseEnv, accountId: string, token: string,
+): Promise<"merchant_session" | "pos_api_key" | null> {
+  if (/^[a-f0-9]{64}$/.test(token)) {
+    const auth = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+    const verified = await auth.fetch("https://account-registry.internal/auth/verify", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ account_id: accountId, token }),
+    });
+    return verified.ok ? "merchant_session" : null;
+  }
+  if (/^acct_[a-f0-9]{64}$/.test(token)) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const keyHash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+    const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+    const verified = await registry.fetch("https://account-registry.internal/account/" + encodeURIComponent(accountId), {
+      method: "GET", headers: { "x-account-key-sha256": keyHash },
+    });
+    return verified.ok ? "pos_api_key" : null;
+  }
+  return null;
+}
+
 function mapProduct(row: ProductRow) {
   let variations: unknown[] = [];
   try { const parsed = JSON.parse(row.variations_json); if (Array.isArray(parsed)) variations = parsed; } catch {}
@@ -284,6 +308,10 @@ export async function businessDatabaseFetch(env: BusinessDatabaseEnv, accountId:
   return database.fetch(new Request(internalUrl, stockroomRequestInit(init)));
 }
 
+function internalPathPlaceholder(request: Request, url: URL): string {
+  return url.pathname.replace(/^\/api\/stockroom/, "") || "/";
+}
+
 /** Authenticates account requests before routing to that account's private SQL database. */
 export async function handleBusinessDatabaseRequest(request: Request, env: BusinessDatabaseEnv): Promise<Response | null> {
   const url = new URL(request.url);
@@ -338,12 +366,9 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     const accountId = url.searchParams.get("account_id") ?? "";
     const token = request.headers.get("authorization")?.startsWith("Bearer ") ? request.headers.get("authorization")!.slice(7) : "";
-    if (!ACCOUNT_ID.test(accountId) || !/^[a-f0-9]{64}$/.test(token)) return json({ error: "unauthorized" }, 401);
-    const auth = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-    const verified = await auth.fetch("https://account-registry.internal/auth/verify", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account_id: accountId, token }),
-    });
-    if (!verified.ok) return json({ error: "unauthorized" }, 401);
+    if (!ACCOUNT_ID.test(accountId) || await authenticateStockroomCredential(env, accountId, token) !== "merchant_session") {
+      return json({ error: "unauthorized" }, 401);
+    }
     const form = await request.formData().catch(() => null);
     const file = form?.get("image");
     if (!(file instanceof File) || file.size < 1 || file.size > 5 * 1024 * 1024) return json({ error: "image_must_be_under_5mb" }, 413);
@@ -369,14 +394,23 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   if (!["GET", "POST", "PUT", "DELETE"].includes(request.method)) return json({ error: "method_not_allowed" }, 405);
   const accountId = url.searchParams.get("account_id") ?? "";
   const token = request.headers.get("authorization")?.startsWith("Bearer ") ? request.headers.get("authorization")!.slice(7) : "";
-  if (!ACCOUNT_ID.test(accountId) || !/^[a-f0-9]{64}$/.test(token)) return json({ error: "unauthorized" }, 401);
-  const auth = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-  const verified = await auth.fetch("https://account-registry.internal/auth/verify", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account_id: accountId, token }),
-  });
-  if (!verified.ok) return json({ error: "unauthorized" }, 401);
+  if (!ACCOUNT_ID.test(accountId)) return json({ error: "unauthorized" }, 401);
+  const credentialType = await authenticateStockroomCredential(env, accountId, token);
+  if (!credentialType) return json({ error: "unauthorized" }, 401);
+  // POS keys are deliberately restricted to register workflows. Product
+  // authoring, media uploads, and account settings remain merchant-session only.
+  if (credentialType === "pos_api_key") {
+    const posRouteAllowed =
+      (internalPathPlaceholder(request, url) === "/products" && request.method === "GET") ||
+      (internalPathPlaceholder(request, url) === "/movements" && request.method === "GET") ||
+      (internalPathPlaceholder(request, url) === "/offline-allowance" && request.method === "POST") ||
+      (internalPathPlaceholder(request, url) === "/offline-sales" && request.method === "POST") ||
+      (internalPathPlaceholder(request, url) === "/sync/orders" && request.method === "POST") ||
+      (internalPathPlaceholder(request, url) === "/orders" && request.method === "GET");
+    if (!posRouteAllowed) return json({ error: "pos_key_scope_forbidden" }, 403);
+  }
   url.searchParams.delete("account_id");
-  const internalPath = url.pathname.replace(/^\/api\/stockroom/, "") || "/";
+  const internalPath = internalPathPlaceholder(request, url);
   if (internalPath === "/sync/orders" && request.method === "POST") {
     return synchronizePendingOrders(env, accountId);
   }
