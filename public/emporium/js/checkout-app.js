@@ -9,7 +9,13 @@
   async function post(path, body) {
     var response = await fetch(path, { method: "POST", headers: { "content-type": "application/json", "accept": "application/json" }, body: JSON.stringify(body || {}) });
     var data = await response.json().catch(function () { return {}; });
-    if (!response.ok || !data.ok) throw new Error(data.message || data.error || "Payment request failed.");
+    if (!response.ok || !data.ok) {
+      var error = new Error(data.message || data.error || "Payment request failed.");
+      error.code = data.error || "";
+      error.paypalIssue = data.paypal_issue || "";
+      error.debugId = data.paypal_debug_id || "";
+      throw error;
+    }
     return data;
   }
   function loadPaypal(clientId, mode) {
@@ -48,14 +54,32 @@
               var created = await post(endpoint + "/paypal/create-order");
               return created.order_id;
             },
-            onApprove: async function (details) {
+            onApprove: async function (details, actions) {
               setMessage(paymentStatus, "Confirming your payment…");
-              var captured = await post(endpoint + "/paypal/capture", { order_id: details.orderID });
-              setMessage(paymentStatus, captured.status === "paid" ? "Payment received. Your merchant's order is confirmed." : "Payment status: " + captured.status);
-              document.getElementById("vq-paypal-buttons").hidden = true;
-              document.getElementById("vq-crypto-wrap").hidden = true;
+              try {
+                var captured = await post(endpoint + "/paypal/capture", { order_id: details.orderID });
+                setMessage(paymentStatus, captured.status === "paid" ? "Payment received. Your merchant's order is confirmed." : "Payment status: " + captured.status);
+                document.getElementById("vq-paypal-buttons").hidden = true;
+                document.getElementById("vq-crypto-wrap").hidden = true;
+              } catch (error) {
+                if (error.paypalIssue === "INSTRUMENT_DECLINED" && actions && typeof actions.restart === "function") {
+                  setMessage(paymentStatus, "PayPal declined that payment method. Choose another card or funding source to try again.", true);
+                  // PayPal requires restarting the approval flow for this recoverable
+                  // decline; do not create a new merchant checkout or duplicate order.
+                  return actions.restart();
+                }
+                var message = error.code === "paypal_capture_failed"
+                  ? "PayPal could not capture this payment. Please try another funding source or contact the merchant."
+                  : "Payment could not be completed: " + (error.message || "Please try again.");
+                if (error.debugId) message += " (PayPal reference: " + error.debugId + ")";
+                setMessage(paymentStatus, message, true);
+                throw error;
+              }
             },
-            onError: function () { setMessage(paymentStatus, "PayPal could not complete the payment. Try again or contact the merchant.", true); }
+            onError: function (error) {
+              console.error("Vampirequid PayPal checkout error", error);
+              setMessage(paymentStatus, "PayPal could not complete the payment. Please try another funding source or contact the merchant.", true);
+            }
           }).render("#vq-paypal-buttons");
         } catch (error) { setMessage(paymentStatus, error.message, true); }
       }
