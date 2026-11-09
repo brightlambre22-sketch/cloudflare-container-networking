@@ -194,10 +194,10 @@ try {
 
   await page.locator("#q").fill(username);
   await page.locator("#q").press("Enter");
-  await page.waitForFunction(() =>
-    document.querySelector("[data-products]")?.textContent?.includes("Staging Coffee Test " + username) &&
+  await page.waitForFunction((productName) =>
+    document.querySelector("[data-products]")?.textContent?.includes(productName) &&
     document.querySelectorAll("#vq-map-plot .leaflet-marker-icon").length > 0,
-    null,
+    "Staging Coffee Test " + username,
     { timeout: 15000 },
   );
   assert.ok(productQueries.filter((query) => query === username).length >= 2, "searching the unique merchant term again should reload the real store");
