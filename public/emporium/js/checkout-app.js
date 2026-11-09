@@ -73,7 +73,7 @@
                   : "Payment could not be completed: " + (error.message || "Please try again.");
                 if (error.debugId) message += " (PayPal reference: " + error.debugId + ")";
                 setMessage(paymentStatus, message, true);
-                throw error;
+                return;
               }
             },
             onError: function (error) {
