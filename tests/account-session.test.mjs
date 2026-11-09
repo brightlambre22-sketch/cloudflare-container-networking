@@ -20,6 +20,10 @@ test("signup stores server-side PBKDF2 credentials and enforces eight-character 
   assert.match(registry, /username_unavailable/);
   assert.match(worker, /url\.pathname === "\/api\/auth\/signup"/);
   assert.match(worker, /url\.pathname === "\/api\/auth\/login"/);
+  assert.match(worker, /authentication_service_unavailable/);
+  assert.match(worker, /invalid_credentials_or_account_not_ready/);
+  assert.match(dashboard, /Your credentials were accepted, but your account network identity could not be loaded/);
+  assert.match(dashboard, /Sign-in failed \(/);
   assert.match(worker, /password\.length < 8/);
   assert.match(registry, /password\.length < 8/);
   assert.match(dashboard, /pass\.length<8/);
