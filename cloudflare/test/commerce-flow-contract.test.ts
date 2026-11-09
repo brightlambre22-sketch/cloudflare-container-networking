@@ -122,6 +122,20 @@ test("merchant payment history is account-scoped and includes checkout attempts,
   for (const source of inline) new Script(source, { filename: "merchant-payments.html" });
 });
 
+test("main merchant Studio dashboard exposes and renders authenticated payment history", async () => {
+  const page = await read("../../public/studio.html");
+  const app = await read("../../public/studio.js");
+  assert.match(page, /data-view="payments"/);
+  assert.match(page, /id="view-payments"/);
+  assert.match(page, /merchant-payment-count/);
+  assert.match(app, /api\/payments\/history\?account_id=/);
+  assert.match(app, /function loadMerchantPayments/);
+  assert.match(app, /function renderMerchantPayments/);
+  assert.match(app, /if\(name==='payments'\)void loadMerchantPayments\(\)/);
+  assert.match(app, /merchant-payments-refresh/);
+  new Script(app, { filename: "studio.js" });
+});
+
 test("PayPal webhook lifecycle is signature-verified, idempotent, and merchant-scoped", async () => {
   const payments = await read("../src/payments.ts");
   assert.match(payments, /verify-webhook-signature/);
