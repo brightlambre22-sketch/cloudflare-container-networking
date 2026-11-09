@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+<title id="title">Vampire holding a quid coin</title><desc id="desc">A friendly gothic vampire with a red cape holding a gold pound coin.</desc>
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#281044"/><stop offset="1" stop-color="#071b35"/></linearGradient><linearGradient id="gold" x2="0" y2="1"><stop stop-color="#fff0a3"/><stop offset=".5" stop-color="#ffc43d"/><stop offset="1" stop-color="#bd7413"/></linearGradient><linearGradient id="cape" x2="1" y2="1"><stop stop-color="#ff477d"/><stop offset="1" stop-color="#76134f"/></linearGradient></defs>
+<circle cx="64" cy="64" r="62" fill="url(#bg)" stroke="#9d54e8" stroke-width="3"/>
+<path d="M22 112 13 72 34 82 35 46 54 62 64 78 76 62 94 46 94 82 115 72 106 112 83 100 64 119 45 100Z" fill="url(#cape)" stroke="#f15c9c" stroke-width="2"/>
+<path d="M42 43 29 24 48 32 64 22 80 32 99 24 86 48 84 75Q64 94 44 75Z" fill="#e8e9f4" stroke="#171329" stroke-width="3"/>
+<path d="M43 51Q53 42 61 52L54 59Z M67 52Q76 42 85 51L74 59Z" fill="#171329"/><circle cx="53" cy="53" r="3" fill="#ff355f"/><circle cx="75" cy="53" r="3" fill="#ff355f"/>
+<path d="M51 69Q64 81 78 68L75 81Q64 89 54 80Z" fill="#300d25"/><path d="m57 70 5 9 5-9 5 8 4-9" fill="#fff"/>
+<path d="M47 90 64 104 81 90 77 116 64 122 51 116Z" fill="#f2f3fa" stroke="#171329" stroke-width="2"/>
+<path d="M42 88 64 103 86 88" fill="none" stroke="#f4c6df" stroke-width="4"/>
+<circle cx="99" cy="83" r="22" fill="url(#gold)" stroke="#7d4a0c" stroke-width="3"/><circle cx="99" cy="83" r="17" fill="none" stroke="#fff0a3" stroke-width="1.5"/><text x="99" y="92" text-anchor="middle" font-family="Georgia,serif" font-size="27" font-weight="bold" fill="#75420a">£</text>
+<path d="M79 97Q84 88 91 94" fill="none" stroke="#e8e9f4" stroke-width="7" stroke-linecap="round"/><path d="M85 94Q90 88 95 94" fill="none" stroke="#171329" stroke-width="2" stroke-linecap="round"/>
+</svg>
