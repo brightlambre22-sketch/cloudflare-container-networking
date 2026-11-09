@@ -20,7 +20,11 @@ export class InventoryLedger extends DurableObject {
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_orders (order_id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, acknowledged_at TEXT)");
     sql.exec("CREATE TABLE IF NOT EXISTS offline_sales (event_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS offline_allocations (allocation_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','consumed','released')), created_at TEXT NOT NULL, expires_at TEXT NOT NULL)");
-    sql.exec("CREATE TABLE IF NOT EXISTS offline_allocation_items (allocation_id TEXT NOT NULL, product_id TEXT NOT NULL, allocated INTEGER NOT NULL CHECK(allocated > 0), remaining INTEGER NOT NULL CHECK(remaining >= 0), PRIMARY KEY(allocation_id, product_id))");
+    sql.exec("CREATE TABLE IF NOT EXISTS offline_allocation_items (allocation_id TEXT NOT NULL, product_id TEXT NOT NULL, allocated INTEGER NOT NULL CHECK(allocated > 0), remaining INTEGER NOT NULL CHECK(remaining >= 0), unit_price_cents INTEGER NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT '', PRIMARY KEY(allocation_id, product_id))");
+    const allocationColumns = sql.exec("PRAGMA table_info(offline_allocation_items)").toArray() as Array<{name:string}>;
+    if (!allocationColumns.some(column => column.name === "unit_price_cents")) sql.exec("ALTER TABLE offline_allocation_items ADD COLUMN unit_price_cents INTEGER NOT NULL DEFAULT 0");
+    if (!allocationColumns.some(column => column.name === "name")) sql.exec("ALTER TABLE offline_allocation_items ADD COLUMN name TEXT NOT NULL DEFAULT ''");
+    sql.exec("UPDATE offline_allocation_items SET unit_price_cents=(SELECT price_cents FROM inventory_catalog WHERE product_id=offline_allocation_items.product_id), name=(SELECT name FROM inventory_catalog WHERE product_id=offline_allocation_items.product_id) WHERE unit_price_cents=0 AND name=''");
     sql.exec("CREATE INDEX IF NOT EXISTS reservations_expiry ON inventory_reservations(status, expires_at)");
     sql.exec("CREATE INDEX IF NOT EXISTS orders_pending ON inventory_orders(status, created_at)");
   }
@@ -180,7 +184,7 @@ export class InventoryLedger extends DurableObject {
       const existing=sql.exec("SELECT status,expires_at FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string;expires_at:string}|undefined;
       if (existing) {
         if (existing.status!=="active") return json({error:"offline_allocation_not_active",status:existing.status},409);
-        const saved=sql.exec("SELECT product_id,allocated,remaining FROM offline_allocation_items WHERE allocation_id=? ORDER BY product_id",allocationId).toArray() as Array<{product_id:string;allocated:number;remaining:number}>;
+        const saved=sql.exec("SELECT product_id,allocated,remaining,unit_price_cents,name FROM offline_allocation_items WHERE allocation_id=? ORDER BY product_id",allocationId).toArray() as Array<{product_id:string;allocated:number;remaining:number;unit_price_cents:number;name:string}>;
         const same=saved.length===allocations.length&&saved.every(row=>allocations.some(item=>item.id===row.product_id&&item.quantity===Number(row.allocated)));
         if(!same)return json({error:"offline_allocation_id_conflict"},409);
         return json({ok:true,already_allocated:true,allocation_id:allocationId,expires_at:existing.expires_at,allocations:saved});
@@ -191,17 +195,18 @@ export class InventoryLedger extends DurableObject {
       this.ctx.storage.transactionSync(()=>{
         this.expireReservations(now);
         for(const x of allocations){
-          const row=sql.exec("SELECT on_hand,offline_allocated,COALESCE((SELECT SUM(i.quantity) FROM inventory_reservation_items i JOIN inventory_reservations r ON r.checkout_id=i.checkout_id WHERE i.product_id=inventory_catalog.product_id AND r.status='active'),0) AS reserved FROM inventory_catalog WHERE product_id=? AND status='active'",x.id).toArray()[0] as Record<string,number>|undefined;
+          const row=sql.exec("SELECT on_hand,offline_allocated,price_cents,name,COALESCE((SELECT SUM(i.quantity) FROM inventory_reservation_items i JOIN inventory_reservations r ON r.checkout_id=i.checkout_id WHERE i.product_id=inventory_catalog.product_id AND r.status='active'),0) AS reserved FROM inventory_catalog WHERE product_id=? AND status='active'",x.id).toArray()[0] as Record<string,number|string>|undefined;
           if(!row||row.on_hand-row.offline_allocated-row.reserved<x.quantity){insufficient=x.id;return;}
         }
         sql.exec("INSERT INTO offline_allocations(allocation_id,status,created_at,expires_at) VALUES(?,'active',?,?)",allocationId,now,expiresAt);
         for(const x of allocations){
           sql.exec("UPDATE inventory_catalog SET offline_allocated=offline_allocated+? WHERE product_id=?",x.quantity,x.id);
-          sql.exec("INSERT INTO offline_allocation_items(allocation_id,product_id,allocated,remaining) VALUES(?,?,?,?)",allocationId,x.id,x.quantity,x.quantity);
+          sql.exec("INSERT INTO offline_allocation_items(allocation_id,product_id,allocated,remaining,unit_price_cents,name) VALUES(?,?,?,?,?,?)",allocationId,x.id,x.quantity,x.quantity,Number(row!.price_cents),String(row!.name));
         }
       });
       if(insufficient)return json({error:"insufficient_unallocated_stock",product_id:insufficient},409);
-      return json({ok:true,allocation_id:allocationId,expires_at:expiresAt,allocations:allocations.map(x=>({product_id:x.id,allocated:x.quantity,remaining:x.quantity}))});
+      const allocatedRows=sql.exec("SELECT product_id,allocated,remaining,unit_price_cents,name FROM offline_allocation_items WHERE allocation_id=? ORDER BY product_id",allocationId).toArray();
+      return json({ok:true,allocation_id:allocationId,expires_at:expiresAt,allocations:allocatedRows});
     }
 
     if (url.pathname === "/offline/release" && request.method === "POST") {
@@ -249,10 +254,10 @@ export class InventoryLedger extends DurableObject {
       if(!allocation||allocation.status!=="active")return json({error:"offline_allocation_not_active"},409);
       const selected:Array<{product_id:string;quantity:number;unit_price_cents:number;name:string}>=[];
       for(const [productId,quantity] of requested){
-        const allowance=sql.exec("SELECT remaining FROM offline_allocation_items WHERE allocation_id=? AND product_id=?",allocationId,productId).toArray()[0] as {remaining:number}|undefined;
-        const row=sql.exec("SELECT offline_allocated,on_hand,price_cents,name FROM inventory_catalog WHERE product_id=? AND status='active'",productId).toArray()[0] as {offline_allocated:number;on_hand:number;price_cents:number;name:string}|undefined;
+        const allowance=sql.exec("SELECT remaining,unit_price_cents,name FROM offline_allocation_items WHERE allocation_id=? AND product_id=?",allocationId,productId).toArray()[0] as {remaining:number;unit_price_cents:number;name:string}|undefined;
+        const row=sql.exec("SELECT offline_allocated,on_hand FROM inventory_catalog WHERE product_id=? AND status='active'",productId).toArray()[0] as {offline_allocated:number;on_hand:number}|undefined;
         if(!allowance||allowance.remaining<quantity||!row||row.offline_allocated<quantity||row.on_hand<quantity)return json({error:"offline_allowance_exceeded",product_id:productId},409);
-        selected.push({product_id:productId,quantity,unit_price_cents:Number(row.price_cents),name:String(row.name)});
+        selected.push({product_id:productId,quantity,unit_price_cents:Number(allowance.unit_price_cents),name:String(allowance.name)});
       }
       const payload={order_id:orderId,allocation_id:allocationId,event_id:eventId,items:selected,amount_cents:selected.reduce((sum,x)=>sum+x.unit_price_cents*x.quantity,0),payment_method:paymentMethod,payment_reference:paymentReference,status:"paid_offline",created_at:now};
       let insufficient:string|null=null;
@@ -261,7 +266,7 @@ export class InventoryLedger extends DurableObject {
           const current=sql.exec("SELECT status FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string}|undefined;
           if(!current||current.status!=="active")throw new Error("offline_allocation_not_active");
           for(const item of selected){
-            const allowance=sql.exec("SELECT remaining FROM offline_allocation_items WHERE allocation_id=? AND product_id=?",allocationId,item.product_id).toArray()[0] as {remaining:number}|undefined;
+            const allowance=sql.exec("SELECT remaining,unit_price_cents,name FROM offline_allocation_items WHERE allocation_id=? AND product_id=?",allocationId,item.product_id).toArray()[0] as {remaining:number;unit_price_cents:number;name:string}|undefined;
             const row=sql.exec("SELECT offline_allocated,on_hand FROM inventory_catalog WHERE product_id=?",item.product_id).toArray()[0] as {offline_allocated:number;on_hand:number}|undefined;
             if(!allowance||allowance.remaining<item.quantity||!row||row.offline_allocated<item.quantity||row.on_hand<item.quantity){insufficient=item.product_id;throw new Error("offline_allowance_conflict");}
           }
