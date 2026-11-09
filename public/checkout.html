@@ -1,76 +1,23 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Secure checkout · Vampirequid</title>
-<style>
-:root{color-scheme:light;--ink:#18231d;--muted:#66736b;--line:#dce4dd;--green:#176044;--wash:#f5f7f4}
-*{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-main{width:min(560px,calc(100% - 32px));margin:7vh auto;background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 12px 40px #152a1b0d}
-.brand{font-weight:850;font-size:20px;letter-spacing:-.04em}.brand span{color:var(--green)}
-h1{font-size:25px;letter-spacing:-.04em;margin:24px 0 4px}.muted{color:var(--muted)}.summary{border:1px solid var(--line);border-radius:12px;padding:16px;margin:22px 0}.line{display:flex;justify-content:space-between;gap:12px;padding:5px 0}.total{border-top:1px solid var(--line);margin-top:10px;padding-top:14px;font-weight:800;font-size:20px}
-#paypal-button-container{min-height:48px}#status{margin-top:16px;font-size:13px;color:var(--muted)}#status.error{color:#a12626}#status.good{color:#176044}
-</style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Complete a secure merchant-direct checkout on Vampirequid Marketplace.">
+  <title>Checkout · Vampirequid Marketplace</title>
+  <link rel="stylesheet" href="emporium/css/vendor/bootstrap.min.css"><link rel="stylesheet" href="emporium/css/style.css"><link rel="stylesheet" href="emporium/css/vampirequid.css">
 </head>
 <body>
-<main>
-  <div class="brand">VAMPIRE<span>QUID</span></div>
-  <h1>Secure checkout</h1>
-  <p class="muted">Your payment is processed directly through the merchant's connected PayPal account.</p>
-  <section class="summary" aria-label="Order summary">
-    <div id="description" class="muted">Loading order…</div>
-    <div class="line total"><span>Total</span><span id="amount">—</span></div>
-  </section>
-  <div id="paypal-button-container"></div>
-  <div id="status" role="status" aria-live="polite">Preparing secure payment…</div>
-</main>
-<script>
-(async function(){
-  const status=document.getElementById("status"),amount=document.getElementById("amount"),description=document.getElementById("description"),buttonHost=document.getElementById("paypal-button-container");
-  const id=new URLSearchParams(location.search).get("id");
-  const say=(message,kind="")=>{status.textContent=message;status.className=kind};
-  const money=value=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(value));
-  if(!id||!/^[a-f0-9-]{36}$/i.test(id)){say("This checkout link is invalid or incomplete.","error");return}
-  try{
-    const response=await fetch("/api/payments/checkout/"+encodeURIComponent(id),{headers:{accept:"application/json"},cache:"no-store"});
-    const data=await response.json();
-    if(!response.ok||!data.ok)throw new Error(data.error||"Unable to load this checkout.");
-    const checkout=data.checkout||{};
-    description.textContent=checkout.description||"Your order";
-    amount.textContent=money(checkout.amount_usd);
-    if(checkout.status==="paid"){say("This order has already been paid.","good");return}
-    if(Date.now()>Date.parse(checkout.expires_at)){say("This checkout has expired. Return to the store to start again.","error");return}
-    if(!data.methods?.paypal||!data.paypal?.client_id){say("The merchant has not completed PayPal checkout setup. Please contact the store.","error");return}
-    const sdk=document.createElement("script");
-    sdk.src="https://www.paypal.com/sdk/js?client-id="+encodeURIComponent(data.paypal.client_id)+"&currency=USD&intent=capture";
-    sdk.onload=()=>{
-      if(!window.paypal?.Buttons){say("PayPal could not initialize. Please try again.","error");return}
-      window.paypal.Buttons({
-        createOrder:async()=>{
-          say("Creating secure payment…");
-          const created=await fetch("/api/payments/checkout/"+encodeURIComponent(id)+"/paypal/create-order",{method:"POST",headers:{accept:"application/json"}});
-          const result=await created.json();
-          if(!created.ok||!result.order_id)throw new Error(result.error||"PayPal could not create the order.");
-          return result.order_id;
-        },
-        onApprove:async data=>{
-          say("Confirming payment…");
-          const captured=await fetch("/api/payments/checkout/"+encodeURIComponent(id)+"/paypal/capture",{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({order_id:data.orderID})});
-          const result=await captured.json();
-          if(!captured.ok||result.status!=="paid")throw new Error(result.error||"Payment confirmation failed.");
-          buttonHost.replaceChildren();
-          say("Payment successful. Your order has been sent to the merchant.","good");
-        },
-        onCancel:()=>say("Payment was cancelled. Your checkout is still available until it expires."),
-        onError:error=>say(error?.message||"PayPal payment could not be completed. Please try again.","error")
-      }).render("#paypal-button-container").catch(error=>say(error?.message||"PayPal button could not be displayed.","error"));
-    };
-    sdk.onerror=()=>say("PayPal could not be loaded. Check your connection and try again.","error");
-    document.head.appendChild(sdk);
-    say("Order ready. Choose PayPal to continue.","good");
-  }catch(error){say(error?.message||"Checkout could not be loaded.","error")}
-})();
-</script>
+  <header class="site-header"><div class="container"><nav class="navbar emp-nav" aria-label="Checkout navigation"><a class="emp-brand" href="/marketplace"><span class="emp-brand__name">Vampirequid</span></a><span class="vq-secure-label">Secure checkout · Pay the merchant directly</span></nav></div></header>
+  <main class="container vq-checkout-main">
+    <p class="eyebrow">Merchant-direct checkout</p><h1>Review your order</h1>
+    <p class="vq-checkout-note">Your payment goes directly to the independent merchant. Vampirequid does not hold merchant funds.</p>
+    <div id="vq-checkout-status" role="status" aria-live="polite">Loading order details…</div>
+    <div class="vq-checkout-grid" id="vq-checkout-root" hidden>
+      <section class="vq-checkout-panel" aria-labelledby="order-title"><h2 id="order-title">Order summary</h2><ul id="vq-order-items" class="vq-order-items"></ul><div class="vq-order-total"><span>Total (USD)</span><strong id="vq-order-total"></strong></div><p id="vq-order-expiry" class="vq-status"></p></section>
+      <section class="vq-checkout-panel" aria-labelledby="payment-title"><h2 id="payment-title">Choose a payment method</h2><div id="vq-paypal-wrap" hidden><div id="vq-paypal-buttons"></div></div><div id="vq-crypto-wrap" hidden><h3>USDC on Base</h3><p>Send the exact amount to the merchant wallet below. The transaction is verified on-chain before inventory is committed.</p><p class="vq-wallet"><code id="vq-wallet"></code><button type="button" class="btn-emp btn-emp--ghost" id="vq-copy-wallet">Copy address</button></p><label for="vq-tx">Transaction hash</label><input id="vq-tx" class="vq-transaction-input" type="text" inputmode="text" placeholder="0x…" autocomplete="off"><button type="button" class="btn-emp btn-emp--primary" id="vq-verify-tx">Verify payment</button></div><p id="vq-payment-status" role="status" aria-live="polite"></p></section>
+    </div>
+    <p><a href="/marketplace">← Return to marketplace</a></p>
+  </main>
+  <script src="emporium/js/checkout-app.js"></script>
 </body>
 </html>

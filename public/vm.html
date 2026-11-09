@@ -3,49 +3,87 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#14243a">
 <link rel="icon" type="image/svg+xml" href="/vampire-quid.svg">
-<title>Mysterium Browser VM</title>
+<link rel="stylesheet" href="/azia-dashboard/css/azia.min.css">
+<title>Workspace · Vampirequid</title>
 <style>
-body{margin:0;background:#111;color:#ddd;font-family:monospace}#login-panel{padding:12px;background:#181818;border-bottom:1px solid #333}#login-panel h2{font-size:16px;margin:0 0 8px}#login-panel p{font-size:12px;line-height:1.5}#login-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}#login-form input,#login-form select{font:inherit;padding:7px;max-width:100%}#login-message{color:#ffc66d}body:not(.logged-in) #status,body:not(.logged-in) #toolbar,body:not(.logged-in) #results,body:not(.logged-in) #myst-log,body:not(.logged-in) #screen_container{display:none}
-#status{padding:8px}
-#toolbar{padding:8px;background:#181818;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-button{font:inherit;padding:6px 10px;cursor:pointer}
-#copy-status{color:#8f8}
-#myst-log{margin:0;padding:8px;height:220px;overflow:auto;white-space:pre-wrap;user-select:text;background:#000;color:#ddd;border-top:1px solid #333}
-#results{box-sizing:border-box;width:100%;min-height:300px;background:#000;color:#ddd;border:1px solid #444;padding:8px;font:14px monospace;resize:vertical}
-#screen_container{width:100%;min-height:480px}
+:root{--vq-ink:#17263d;--vq-muted:#65748b;--vq-teal:#0c6b62;--vq-line:#e1e7ef;--vq-bg:#f4f7fb}
+html{scroll-behavior:smooth;scroll-padding-top:5rem}body{margin:0;background:var(--vq-bg);color:var(--vq-ink);font-family:Roboto,Arial,sans-serif}body:not(.logged-in) #dashboard-shell{display:none}body.logged-in #login-panel{display:none}
+.vq-brand{display:inline-flex;align-items:center;gap:.7rem;color:#fff!important;font-size:1.25rem;font-weight:800;letter-spacing:-.035em}.vq-brand-mark{width:2.1rem;height:2.1rem;border-radius:.7rem;display:grid;place-items:center;background:#13a493;color:#fff}.vq-header{background:#14243a!important;box-shadow:0 2px 14px #17263d18}.vq-header__inner{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:68px}.vq-nav{display:flex;align-items:center;gap:.35rem}.vq-nav a,.vq-header-link{padding:.6rem .75rem;color:#d9e4f2;border-radius:.5rem;font-size:.9rem;font-weight:600}.vq-nav a:hover,.vq-header-link:hover{background:#ffffff18;color:#fff;text-decoration:none}.vq-header-actions{display:flex;align-items:center;gap:.8rem}.vq-user{color:#edf4fc;font-size:.85rem;font-weight:650}.vq-nav-toggle{display:none;border:1px solid #ffffff44;border-radius:.5rem;padding:.45rem .7rem;background:transparent;color:#fff}
+.vq-login{min-height:100vh;display:grid;place-items:center;padding:2rem 1rem;background:radial-gradient(circle at 82% 14%,#d6f3ef 0,transparent 30%),linear-gradient(135deg,#f6f8fc,#eaf1f8)}.vq-login-card{width:min(100%,580px);border:1px solid var(--vq-line);border-radius:1rem;background:#fff;box-shadow:0 24px 70px #18284118;overflow:hidden}.vq-login-head{padding:2rem 2rem 1.25rem;background:#14243a;color:#fff}.vq-login-head .vq-brand{margin-bottom:1.2rem}.vq-login-head h1{margin:0 0 .45rem;font-size:1.65rem;font-weight:750}.vq-login-head p{margin:0;color:#d2deec;line-height:1.55}.vq-login-body{padding:1.5rem 2rem 2rem}.vq-login-form{display:grid;grid-template-columns:1fr 1fr;gap:.85rem}.vq-login-form .form-control{min-height:44px}.vq-login-form #access-type,.vq-login-form #username,.vq-login-form #user-password,.vq-login-form #admin-code,.vq-login-form #login-message{grid-column:1/-1}.vq-login-actions{grid-column:1/-1;display:flex;gap:.7rem;flex-wrap:wrap}.vq-login-message{grid-column:1/-1;color:#a34826;min-height:1.25rem}.vq-login-note{color:var(--vq-muted);font-size:.82rem;line-height:1.55;margin:1rem 0 0}
+.vq-main{padding:1.6rem 0 3rem}.vq-title{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;margin:0 0 1.25rem}.vq-title h1{margin:0;font-size:1.75rem;font-weight:750;letter-spacing:-.035em}.vq-title p{margin:.3rem 0 0;color:var(--vq-muted)}.vq-card{height:100%;border:1px solid var(--vq-line);border-radius:.8rem;background:#fff;box-shadow:0 5px 20px #17263d08}.vq-card .card-header{background:#fff;border-bottom:1px solid var(--vq-line);font-weight:700}.vq-card .card-body{padding:1.2rem}.vq-overview{min-height:145px}.vq-metric-label{margin:0 0 .55rem;color:var(--vq-muted);font-size:.83rem;font-weight:650}.vq-metric-value{margin:0;color:var(--vq-ink);font-size:1.15rem;font-weight:750;overflow-wrap:anywhere}.vq-metric-note{margin:.4rem 0 0;color:var(--vq-muted);font-size:.8rem;line-height:1.45}.vq-section{scroll-margin-top:90px;margin-top:1.2rem}.vq-section-heading{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:0 0 .8rem}.vq-section-heading h2{margin:0;font-size:1.12rem;font-weight:750}.vq-status{margin:0!important;padding:.85rem 1rem;border:1px solid #d9eee9;border-radius:.6rem;background:#f2fbf9;color:#215b54;font-size:.9rem;line-height:1.5}.vq-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;padding:1rem;border-bottom:1px solid var(--vq-line)}.vq-toolbar .btn{white-space:nowrap}.vq-toolbar-meta{margin-left:auto;color:var(--vq-muted);font-size:.82rem}.vq-screen-wrap{padding:1rem;background:#eef2f7}.vq-screen{width:100%;min-height:460px;overflow:hidden;border-radius:.65rem;background:#08101d;color:#e6f0fb}.vq-screen>div{white-space:pre;font:14px/14px monospace}#screen_container canvas{display:block;max-width:100%;height:auto}.vq-output{box-sizing:border-box;width:100%;min-height:235px;resize:vertical;border:1px solid #ccd7e5;border-radius:.55rem;background:#101a2b;color:#edf3fb;padding:.8rem;font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.vq-terminal{min-height:155px;max-height:260px;overflow:auto;white-space:pre-wrap;user-select:text;border-radius:.55rem;background:#101a2b;color:#d8f1e7;padding:.85rem;font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}.vq-tool-link{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.8rem 0;color:var(--vq-ink);border-bottom:1px solid var(--vq-line)}.vq-tool-link:last-child{border-bottom:0}.vq-tool-link:hover{color:var(--vq-teal);text-decoration:none}.vq-tool-link small{display:block;color:var(--vq-muted)}.vq-footer{padding:1.2rem 0;color:var(--vq-muted);font-size:.82rem}
+@media(max-width:991px){.vq-nav-toggle{display:inline-block}.vq-nav{display:none;position:absolute;top:68px;left:0;right:0;padding:.6rem 1rem 1rem;background:#14243a;box-shadow:0 12px 16px #17263d24;align-items:stretch;flex-direction:column}.vq-nav.is-open{display:flex}.vq-header-actions{margin-left:auto}.vq-toolbar-meta{width:100%;margin-left:0}.vq-login-form{grid-template-columns:1fr}}
+@media(max-width:575px){.vq-main{padding-top:1rem}.vq-title{align-items:flex-start;flex-direction:column}.vq-title h1{font-size:1.45rem}.vq-login-head,.vq-login-body{padding-left:1.25rem;padding-right:1.25rem}.vq-toolbar .btn{flex:1 1 45%}.vq-screen{min-height:340px}}
 </style>
 </head>
 <body>
-<section id="login-panel">
-  <img src="/vampire-quid.svg" alt="Vampire Quid mascot logo" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:contain;margin:0 0 8px;border-radius:12px">
-  <h2>Open your VM</h2>
-  <p>Regular accounts are stored server-side and each account gets its own persistent VM snapshot. Passwords are never stored in browser localStorage. Admin access still uses the five-digit admin code. <a href="/signup.html">Use the signup page with snapshot progress</a>.</p>
-  <form id="login-form">
-    <label for="access-type">Account</label>
-    <select id="access-type"><option value="regular">Regular user</option><option value="admin">Admin</option></select>
-    <input id="username" type="text" maxlength="32" autocomplete="username" placeholder="Username" required>
-    <input id="user-password" type="password" autocomplete="current-password" placeholder="Password" required>
-    <input id="admin-code" type="password" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="off" placeholder="5-digit admin code" hidden>
-    <button id="open-vm" type="submit">Log in</button><button id="create-account" type="button">Create regular account</button><span id="login-message" role="status" aria-live="polite"></span>
-  </form>
+<section id="login-panel" class="vq-login">
+  <div class="vq-login-card">
+    <div class="vq-login-head">
+      <a class="vq-brand" href="/" aria-label="Vampirequid home"><span class="vq-brand-mark" aria-hidden="true">V</span><span>Vampirequid</span></a>
+      <h1>Sign in to your workspace</h1>
+      <p>Sign in to your Vampirequid account workspace. Ambassadors have a separate sign-in.</p>
+    </div>
+    <div class="vq-login-body">
+      <form id="login-form" class="vq-login-form">
+        <label class="sr-only" for="access-type">Account type</label>
+        <select id="access-type" class="form-control"><option value="regular">Regular user</option><option value="admin">Admin</option></select>
+        <label class="sr-only" for="username">Username</label>
+        <input id="username" class="form-control" type="text" maxlength="32" autocomplete="username" placeholder="Username" required>
+        <label class="sr-only" for="user-password">Password</label>
+        <input id="user-password" class="form-control" type="password" autocomplete="current-password" placeholder="Password" required>
+        <label class="sr-only" for="admin-code">Admin access code</label>
+        <input id="admin-code" class="form-control" type="password" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="off" placeholder="5-digit admin code" hidden>
+        <div class="vq-login-actions"><button id="open-vm" class="btn btn-primary" type="submit">Log in</button><button id="create-account" class="btn btn-outline-primary" type="button">Create regular account</button><a class="btn btn-link" href="/signup.html">Sign up</a><a class="btn btn-link" href="/ambassador.html">Ambassador sign in</a></div>
+        <span id="login-message" class="vq-login-message" role="status" aria-live="polite"></span>
+      </form>
+      <p class="vq-login-note">Regular account passwords are checked by the server and are not stored in browser localStorage. Each account receives its own VM snapshot. Admin access continues to use the configured five-digit code.</p>
+    </div>
+  </div>
 </section>
-<div id="status">Starting Linux VM...</div>
-<div id="toolbar">
-<button id="save-vm-state" type="button">Save VM state</button>
-<button id="clear-vm-state" type="button">Delete saved state</button>
-<button id="run-network-test" type="button">Run network test</button>
-<button id="run-bootstrap" type="button">Wake shell / run bootstrap</button>
-<button id="copy-results" type="button">Copy test results</button>
-<button id="paste-terminal" type="button">Paste into VM</button>
-<button id="clear-results" type="button">Clear results</button>
-<a href="/merchant-orders.html" style="color:#9fe0bd;padding:6px 10px">Merchant orders</a>
-<span id="copy-status"></span>
-<span id="state-status" aria-live="polite">Saved state: checkingâ¦</span>
+
+<div id="dashboard-shell">
+  <header class="az-header vq-header">
+    <div class="container-fluid vq-header__inner">
+      <div class="az-header-left"><a class="vq-brand" href="/" aria-label="Vampirequid home"><span class="vq-brand-mark" aria-hidden="true">V</span><span>Vampirequid</span></a></div>
+      <button id="dashboard-nav-toggle" class="vq-nav-toggle" type="button" aria-expanded="false" aria-controls="dashboard-nav">Menu</button>
+      <nav id="dashboard-nav" class="vq-nav" aria-label="Workspace navigation"><a href="#overview">Overview</a><a href="#vm-console">VM console</a><a href="#diagnostics">Diagnostics</a><a href="/merchant-orders.html">Orders</a><a href="/merchant-location.html">Store location</a><a href="/ambassador.html">Ambassador portal</a></nav>
+      <div class="vq-header-actions"><span id="dashboard-user" class="vq-user">Workspace</span><a class="vq-header-link" href="/marketplace">Marketplace</a></div>
+    </div>
+  </header>
+
+  <main class="az-content az-content-dashboard vq-main" id="overview">
+    <div class="container-fluid"><div class="az-content-body">
+      <div class="vq-title"><div><h1>Your workspace</h1><p>Manage your persistent VM and reach your merchant tools.</p></div><a class="btn btn-outline-primary" href="/marketplace">Open marketplace</a></div>
+      <div class="row">
+        <div class="col-sm-6 col-xl-4 mg-b-20"><section class="card vq-card vq-overview"><div class="card-body"><p class="vq-metric-label">VM status</p><div id="status" class="vq-status" role="status" aria-live="polite">Starting Linux VM...</div></div></section></div>
+        <div class="col-sm-6 col-xl-4 mg-b-20"><section class="card vq-card vq-overview"><div class="card-body"><p class="vq-metric-label">Snapshot</p><p id="state-status" class="vq-metric-value" aria-live="polite">Saved state: checking…</p><p class="vq-metric-note">Snapshot writes remain paused until the VM health checks pass.</p></div></section></div>
+        <div class="col-sm-12 col-xl-4 mg-b-20"><section class="card vq-card vq-overview"><div class="card-body"><p class="vq-metric-label">Merchant tools</p><p class="vq-metric-value">Orders &amp; store location</p><p class="vq-metric-note">Open order management or update the location used in marketplace search.</p><a href="/merchant-orders.html" class="btn btn-sm btn-outline-primary mg-t-10">Manage orders</a> <a href="/merchant-location.html" class="btn btn-sm btn-outline-primary mg-t-10">Store location</a></div></section></div>
+      </div>
+
+      <section id="vm-console" class="vq-section" aria-labelledby="vm-console-heading">
+        <div class="vq-section-heading"><h2 id="vm-console-heading">Persistent VM console</h2><span id="copy-status" class="text-muted" role="status" aria-live="polite"></span></div>
+        <div class="card vq-card">
+          <div id="toolbar" class="vq-toolbar" aria-label="VM controls">
+            <button id="save-vm-state" class="btn btn-sm btn-primary" type="button">Save VM state</button><button id="clear-vm-state" class="btn btn-sm btn-outline-danger" type="button">Delete saved state</button><button id="run-network-test" class="btn btn-sm btn-outline-primary" type="button">Run network test</button><button id="run-bootstrap" class="btn btn-sm btn-outline-primary" type="button">Wake shell / run bootstrap</button><button id="copy-results" class="btn btn-sm btn-outline-secondary" type="button">Copy test results</button><button id="paste-terminal" class="btn btn-sm btn-outline-secondary" type="button">Paste into VM</button><button id="clear-results" class="btn btn-sm btn-outline-secondary" type="button">Clear results</button>
+            <span class="vq-toolbar-meta">Save controls stay protected by the VM health checks.</span>
+          </div>
+          <div class="vq-screen-wrap"><div id="screen_container" class="vq-screen"><div></div><canvas></canvas></div></div>
+        </div>
+      </section>
+
+      <section id="diagnostics" class="vq-section" aria-labelledby="diagnostics-heading">
+        <div class="vq-section-heading"><h2 id="diagnostics-heading">Diagnostics and terminal output</h2><span class="text-muted">Report data is stored in this browser.</span></div>
+        <div class="row">
+          <div class="col-xl-7 mg-b-20"><section class="card vq-card"><div class="card-header">Startup and network report</div><div class="card-body"><textarea id="results" class="vq-output" spellcheck="false" aria-label="Full startup and network report" placeholder="Full startup/network report. It is saved locally so you can copy it in sections."></textarea></div></section></div>
+          <div class="col-xl-5 mg-b-20"><section class="card vq-card"><div class="card-header">Tiny Core terminal mirror</div><div class="card-body"><pre id="myst-log" class="vq-terminal">Waiting for Tiny Core...</pre></div></section></div>
+        </div>
+      </section>
+      <footer class="vq-footer">Vampirequid workspace · VM and snapshot status are reported from the active session.</footer>
+    </div></div>
+  </main>
 </div>
-<textarea id="results" spellcheck="false" placeholder="Full startup/network report. It is saved locally so you can copy it in sections."></textarea>
-<pre id="myst-log">Waiting for Tiny Core...</pre>
-<div id="screen_container"><div></div><canvas></canvas></div>
 <script src="/v86/libv86.js"></script>
 <script>
 window.startVm=async function(){
@@ -628,5 +666,6 @@ updateFields();
 })();
 };
 </script>
+<script>(function(){var button=document.getElementById("dashboard-nav-toggle"),nav=document.getElementById("dashboard-nav"),user=document.getElementById("dashboard-user");if(button&&nav){button.addEventListener("click",function(){var open=nav.classList.toggle("is-open");button.setAttribute("aria-expanded",open?"true":"false")});nav.addEventListener("click",function(event){if(event.target.closest("a")&&window.innerWidth<992){nav.classList.remove("is-open");button.setAttribute("aria-expanded","false")}})}function updateUser(){if(!user)return;var name="Workspace";try{name=sessionStorage.getItem("vm-username")||name}catch(e){}user.textContent=name}updateUser();new MutationObserver(updateUser).observe(document.body,{attributes:true,attributeFilter:["class"]})})();</script>
 </body>
 </html>

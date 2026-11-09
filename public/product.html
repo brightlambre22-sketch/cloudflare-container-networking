@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Product details from independent merchants on Vampirequid Marketplace.">
+  <title>Product · Vampirequid Marketplace</title>
+  <link rel="stylesheet" href="emporium/css/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="emporium/css/style.css">
+  <link rel="stylesheet" href="emporium/css/vampirequid.css">
+</head>
+<body>
+  <header class="site-header" id="site-header">
+    <div class="container">
+      <nav class="navbar navbar-expand-lg emp-nav" aria-label="Main navigation">
+        <a class="navbar-brand emp-brand" href="/marketplace" aria-label="Vampirequid Marketplace home">
+          <span class="emp-brand__mark" aria-hidden="true">V</span><span class="emp-brand__name">Vampirequid</span>
+        </a>
+        <form class="emp-search" role="search" aria-label="Search local products" action="/marketplace">
+          <label class="visually-hidden" for="q">Search products</label><input id="q" name="q" class="emp-search__input" type="search" placeholder="Search products near you" autocomplete="off">
+          <button class="emp-search__btn" type="submit" aria-label="Search">⌕</button>
+        </form>
+        <div class="emp-nav__actions">
+          <a class="emp-iconlink" href="/vm.html" aria-label="Merchant sign in">Merchant sign in</a>
+          <a class="emp-iconlink" href="/ambassador.html" aria-label="Ambassador portal">Ambassador portal</a>
+          <button type="button" class="emp-cartpill" data-cart-open aria-label="Open cart"><span class="emp-cartpill__label">Cart</span><span class="emp-cartpill__count" data-cart-count>0</span></button>
+        </div>
+      </nav>
+    </div>
+  </header>
+  <main id="main">
+    <nav class="container crumb" aria-label="Breadcrumb"><a href="/marketplace">Marketplace</a><span aria-hidden="true"> / </span><span>Product</span></nav>
+    <section class="vq-pdp" id="vq-product-detail" aria-live="polite"><p>Loading product details…</p></section>
+    <section class="container section"><a class="btn-emp btn-emp--ghost" href="/marketplace">← Back to marketplace</a></section>
+  </main>
+  <div class="cart-overlay" data-cart-overlay hidden></div>
+  <aside class="cart" id="cartDrawer" aria-label="Shopping cart" aria-modal="true" role="dialog" aria-hidden="true" tabindex="-1">
+    <div class="cart__head"><h2 class="cart__title">Your cart <span data-cart-count-text>(0)</span></h2><button type="button" class="cart__close" data-cart-close aria-label="Close cart">×</button></div>
+    <div class="cart__ship"><p class="cart__shipmsg" data-ship-msg>One store per order. Payment goes directly to the merchant.</p><div class="cart__shipbar"><span data-ship-bar style="width:0%"></span></div></div>
+    <ul class="cart__items" data-cart-items></ul>
+    <div class="cart__empty" data-cart-empty><p>Your cart is empty.</p><button type="button" class="btn-emp btn-emp--ghost" data-cart-close>Keep shopping</button></div>
+    <div class="cart__foot" data-cart-foot hidden><div class="cart__subtotal"><span>Subtotal</span><strong data-cart-subtotal>$0.00</strong></div><p class="cart__note">Shipping and taxes are not included. Confirm any extra charges with the merchant.</p><button type="button" id="vq-checkout" class="btn-emp btn-emp--primary btn-emp--block">Continue to checkout</button><p id="vq-cart-status" class="vq-status" role="status" aria-live="polite"></p><button type="button" class="cart__continue" data-cart-close>Continue shopping</button></div>
+  </aside>
+  <div class="toasts" data-toasts aria-live="polite" aria-atomic="false"></div>
+  <script src="emporium/js/vendor/bootstrap.bundle.min.js"></script>
+  <script src="emporium/js/main.js"></script>
+  <script src="emporium/js/marketplace-app.js"></script>
+</body>
+</html>

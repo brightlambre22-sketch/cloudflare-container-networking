@@ -1,92 +1,377 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#f7f8f5">
-<title>Local Marketplace · Vampirequid</title>
-<style>
-:root{color-scheme:light;--ink:#17211c;--muted:#66736b;--line:#dfe5df;--paper:#fff;--wash:#f7f8f5;--green:#1c6548;--green-dark:#124b35;--soft:#eaf2ec}
-*{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-header{background:#fff;border-bottom:1px solid var(--line)}.top{max-width:1160px;margin:auto;padding:18px 24px;display:flex;align-items:center;gap:24px}.brand{font-weight:850;letter-spacing:-.04em;font-size:21px;white-space:nowrap}.brand span{color:var(--green)}
-.search{display:flex;gap:10px;align-items:center;flex:1;min-width:0}.search input{height:48px;border:1px solid var(--line);border-radius:12px;padding:0 15px;background:#fff;font:inherit;outline:none;min-width:0}.search input:focus{border-color:var(--green);box-shadow:0 0 0 3px #1c65481a}.search .query{flex:1}.search .zip{width:142px}.search button{height:48px;border:0;border-radius:12px;padding:0 24px;background:var(--green);color:white;font:700 14px inherit;cursor:pointer}.search button:hover{background:var(--green-dark)}
-main{max-width:1160px;margin:0 auto;padding:22px 24px 64px}.intro{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:4px 0 22px;padding:0 2px}.intro-copy{min-width:0}.eyebrow{font-size:10px;letter-spacing:.16em;font-weight:800;color:var(--green);margin:0 0 3px}.intro h1{font-size:clamp(19px,2vw,24px);line-height:1.2;letter-spacing:-.035em;margin:0 0 4px}.intro p{margin:0;color:var(--muted);font-size:13px}.intro-note{font-size:12px;color:var(--muted);white-space:nowrap}
-.results-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 13px}.results-head h2{font-size:16px;margin:0;letter-spacing:-.02em}.status{font-size:12px;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}.product{background:#fff;border:1px solid var(--line);border-radius:15px;overflow:hidden;min-width:0}.photo{height:170px;background:#eef1ed;display:grid;place-items:center;color:#8a968d;font-size:12px;overflow:hidden}.photo img{width:100%;height:100%;object-fit:cover}.details{padding:14px}.category{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-weight:800}.name{font-weight:700;margin:4px 0 3px;line-height:1.3}.description{font-size:12px;color:var(--muted);min-height:34px;margin:0 0 10px}.price-row{display:flex;justify-content:space-between;align-items:center;gap:8px}.price{font-size:18px;font-weight:800;letter-spacing:-.03em}.store{font-size:11px;color:var(--muted);margin-top:9px}.buy{width:100%;margin-top:12px;border:0;border-radius:9px;padding:11px 14px;background:var(--green);color:#fff;font:700 13px/1.2 Inter,system-ui,sans-serif;cursor:pointer}.buy:disabled{opacity:.6;cursor:wait}.buy:hover:not(:disabled){background:var(--green-dark)}.empty{border:1px dashed #cbd5cc;border-radius:14px;padding:28px;text-align:center;color:var(--muted);background:#fff;grid-column:1/-1}.empty strong{display:block;color:var(--ink);margin-bottom:4px}
-@media(max-width:680px){.top{padding:14px 16px;display:block}.brand{margin-bottom:12px}.search{display:grid;grid-template-columns:1fr 104px}.search .query{grid-column:1/-1}.search .zip{width:100%}.search button{width:100%;padding:0 12px}main{padding:18px 16px 48px}.intro{align-items:flex-start;display:block}.intro-note{display:block;margin-top:8px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.photo{height:130px}.details{padding:11px}.description{min-height:0}}
-</style>
-</head>
-<body>
-<header><div class="top">
-  <div class="brand">vampire<span>quid</span></div>
-  <a href="/merchant-location.html" style="color:#176044;font-size:13px;font-weight:700;white-space:nowrap">List your store</a>
-  <form class="search" id="searchForm" role="search" aria-label="Search local products">
-    <input class="query" id="query" type="search" maxlength="100" placeholder="Search products, brands, or local shops" aria-label="What are you looking for?">
-    <input class="zip" id="postal" inputmode="numeric" maxlength="12" placeholder="ZIP code" aria-label="ZIP code" required>
-    <button type="submit">Search</button>
-  </form>
-</div></header>
-<main>
-  <section class="intro" aria-label="About the local marketplace">
-    <div class="intro-copy">
-      <p class="eyebrow">THE LOCAL EDIT</p>
-      <h1>Find something good. Close to home.</h1>
-      <p>Discover in-stock finds from independent shops near you.</p>
+  <head>
+    <script>document.documentElement.classList.add('js')</script>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vampirequid Marketplace · Shop local</title>
+    <meta name="description" content="Shop products from independent merchants near you. Search local inventory and check out directly with the shop.">
+    <meta name="theme-color" content="#0c6b58">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="emporium/css/vendor/bootstrap.min.css">
+    <link rel="stylesheet" href="emporium/css/style.css">
+    <link rel="stylesheet" href="emporium/css/vampirequid.css">
+  </head>
+  <body>
+
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Announcement bar -->
+    <div class="announce" role="region" aria-label="Store announcements">
+      <div class="container announce__inner">
+        <p class="announce__msg"><span aria-hidden="true">✦</span> Discover independent shops and live inventory near you.</p>
+        <div class="announce__links">
+          <a href="/vm.html">Merchant sign in</a>
+          <a href="/ambassador.html">Ambassador portal</a>
+          <a href="#products">Shop local</a>
+          <span class="announce__cc" aria-label="Currency">USD $</span>
+        </div>
+      </div>
     </div>
-    <div class="intro-note">Shop local · Within 10 miles · Checkout with the store</div>
-  </section>
-  <section aria-live="polite">
-    <div class="results-head"><h2>Local finds</h2><span class="status" id="status">Enter a ZIP code to explore nearby shops.</span></div>
-    <div class="grid" id="results"><div class="empty"><strong>Your neighborhood, your next find.</strong>Search by product and ZIP code to see what's in stock nearby.</div></div>
-  </section>
-</main>
-<script>
-const form=document.getElementById("searchForm"),query=document.getElementById("query"),postal=document.getElementById("postal"),results=document.getElementById("results"),status=document.getElementById("status");
-function node(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el}
-function money(value){return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(value)||0)}
-function render(items){
-  results.replaceChildren();
-  if(!items.length){const empty=node("div","empty");empty.append(node("strong","","No matching products yet."),document.createTextNode("Try a different search or ZIP code. Local inventory appears as participating shops publish their products."));results.append(empty);return}
-  for(const item of items){
-    const card=node("article","product"),photo=node("div","photo");
-    let imageUrl="";try{const u=new URL(item.image_url||"",location.origin);if(u.protocol==="https:")imageUrl=u.href}catch{}
-    if(imageUrl){const img=document.createElement("img");img.src=imageUrl;img.alt=item.name||"Product";img.loading="lazy";img.onerror=()=>{photo.textContent="Product image unavailable"};photo.append(img)}else photo.textContent="Local shop find";
-    const details=node("div","details");details.append(node("div","category",item.category||"Local find"),node("div","name",item.name||"Product"),node("p","description",item.description||"Available from a nearby independent shop."));
-    const row=node("div","price-row");row.append(node("div","price",money(item.price)),node("span","status",(item.quantity||0)+" in stock"));details.append(row);
-    const store=item.store||{};details.append(node("div","store",[store.name,store.city,store.state].filter(Boolean).join(" · ")));
-    const buy=node("button","buy","Buy now");
-    buy.type="button";
-    buy.addEventListener("click",async()=>{
-      if(!/^[a-f0-9]{32}$/.test(String(item.site_id||""))||!/^[a-f0-9-]{36}$/.test(String(item.product_id||item.id||""))){status.textContent="This product is not ready for checkout.";return}
-      buy.disabled=true;buy.textContent="Preparing checkout…";
-      try{
-        const response=await fetch("/api/payments/public/checkout/"+encodeURIComponent(item.site_id),{
-          method:"POST",headers:{"content-type":"application/json",accept:"application/json"},
-          body:JSON.stringify({items:[{product_id:item.product_id||item.id,quantity:1}]})
-        });
-        const data=await response.json();
-        if(!response.ok||!data.url)throw new Error(data.error||"Checkout could not be created.");
-        location.assign(data.url);
-      }catch(error){status.textContent=error.message||"Checkout could not be created.";buy.disabled=false;buy.textContent="Try again"}
-    });
-    details.append(buy);
-    card.append(photo,details);results.append(card);
-  }
-}
-form.addEventListener("submit",async event=>{
-  event.preventDefault();const zip=postal.value.trim();if(!zip)return;
-  status.textContent="Finding your area…";results.replaceChildren(node("div","empty","Locating ZIP "+zip+"…"));
-  try{
-    const locationResponse=await fetch("/api/marketplace/location?postal_code="+encodeURIComponent(zip),{headers:{accept:"application/json"}});
-    const location=await locationResponse.json();if(!locationResponse.ok)throw new Error(location.message||"We couldn't locate that ZIP code.");
-    status.textContent="Searching stores within 10 miles…";results.replaceChildren(node("div","empty","Looking for in-stock products within 10 miles of "+zip+"…"));
-    const params=new URLSearchParams({lat:String(location.latitude),lng:String(location.longitude),radius:"10",limit:"60",sort:"distance"});
-    if(query.value.trim())params.set("q",query.value.trim());
-    const response=await fetch("/api/marketplace/products?"+params.toString(),{headers:{accept:"application/json"}});
-    const data=await response.json();if(!response.ok)throw new Error(data.message||data.error||"Search failed");
-    render(data.products||[]);
-    status.textContent=(data.total_count||0)+" in-stock result"+((data.total_count||0)===1?"":"s")+" within 10 miles of "+zip;
-  }catch(error){results.replaceChildren();const empty=node("div","empty");empty.append(node("strong","","We couldn't load local inventory."),document.createTextNode(error.message||"Please try again."));results.append(empty);status.textContent="Search unavailable"}
-});
-const savedZip=new URLSearchParams(location.search).get("postal_code");if(savedZip){postal.value=savedZip;form.requestSubmit()}
-</script>
-</body></html>
+
+    <!-- Header / Navbar -->
+    <header class="site-header" id="site-header">
+      <div class="container">
+        <nav class="navbar navbar-expand-lg emp-nav" aria-label="Main navigation">
+          <a class="navbar-brand emp-brand" href="/" aria-label="Vampirequid home">
+            <span class="emp-brand__mark" aria-hidden="true">
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 8h18l-1.6 9.2a2 2 0 0 1-2 1.6H7.6a2 2 0 0 1-2-1.6L4 8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M9 8V6.5a4 4 0 0 1 8 0V8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <span class="emp-brand__name">Vampirequid</span>
+          </a>
+
+          <!-- Search (desktop) -->
+          <form class="emp-search" role="search" aria-label="Search products">
+            <label for="q" class="visually-hidden">Search products</label>
+            <input id="q" type="search" class="emp-search__input" placeholder="Search for products, brands and more…" autocomplete="off">
+            <button type="submit" class="emp-search__btn" aria-label="Search">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m20 20-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </form>
+
+          <div class="emp-nav__actions">
+            <a href="/ambassador.html" class="emp-iconlink" aria-label="Ambassador portal">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 19c.3-3.1 2.5-5 5.5-5 1.4 0 2.6.4 3.6 1.2M16 8v8m-4-4h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <span class="visually-hidden">Ambassador portal</span>
+            </a>
+            <a href="/vm.html" class="emp-iconlink" aria-label="Merchant sign in">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <span class="visually-hidden">Merchant sign in</span>
+            </a>
+            <button type="button" class="emp-cartpill" data-cart-open aria-label="Open cart">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16l-1.4 8.1a2 2 0 0 1-2 1.7H7.4a2 2 0 0 1-2-1.7L4 6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="9" cy="20" r="1.4" fill="currentColor"/><circle cx="17" cy="20" r="1.4" fill="currentColor"/></svg>
+              <span class="emp-cartpill__label">Cart</span>
+              <span class="emp-cartpill__count" data-cart-count>0</span>
+            </button>
+            <button class="emp-burger" type="button" aria-expanded="false" aria-controls="mobileMenu" aria-label="Open menu" data-menu-toggle>
+              <span></span><span></span><span></span>
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      <!-- Categories row (desktop) -->
+      <div class="emp-catbar">
+        <div class="container">
+          <ul class="emp-catbar__list" aria-label="Shop categories">
+            <li><a href="#categories" class="is-current"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> All Categories</a></li>
+            <li><a href="#products" data-filter-link="electronics">Electronics</a></li>
+            <li><a href="#products" data-filter-link="home">Home &amp; Living</a></li>
+            <li><a href="#products" data-filter-link="fashion">Fashion</a></li>
+            <li><a href="#products" data-filter-link="sports">Sports</a></li>
+            <li><a href="#products" data-filter-link="beauty">Beauty</a></li>
+            <li><a href="#deals" class="emp-catbar__deal">Deals</a></li>
+          </ul>
+        </div>
+      </div>
+    </header>
+
+    <!-- Mobile menu -->
+    <div class="emp-mobile" id="mobileMenu" hidden>
+      <form class="emp-search emp-search--mobile" role="search" aria-label="Search products">
+        <label for="qm" class="visually-hidden">Search products</label>
+        <input id="qm" type="search" class="emp-search__input" placeholder="Search products…" autocomplete="off">
+        <button type="submit" class="emp-search__btn" aria-label="Search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m20 20-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </form>
+      <nav aria-label="Mobile categories">
+        <ul class="emp-mobile__list">
+          <li><a href="#categories">All Categories</a></li>
+          <li><a href="#products" data-filter-link="electronics">Electronics</a></li>
+          <li><a href="#products" data-filter-link="home">Home &amp; Living</a></li>
+          <li><a href="#products" data-filter-link="fashion">Fashion</a></li>
+          <li><a href="#products" data-filter-link="sports">Sports</a></li>
+          <li><a href="#products" data-filter-link="beauty">Beauty</a></li>
+          <li><a href="#deals">Deals</a></li>
+        </ul>
+      </nav>
+      <div class="emp-mobile__foot">
+        <a href="/vm.html" class="btn-line">Merchant sign in</a>
+        <a href="/ambassador.html" class="btn-line">Ambassador portal</a>
+        <a href="/signup.html" class="btn-line">Create account</a>
+      </div>
+    </div>
+
+    <main id="main">
+
+      <!-- Hero -->
+      <section class="hero" aria-label="Marketplace introduction">
+        <div class="container">
+          <div class="hero__grid">
+            <div class="hero__main">
+              <p class="hero__eyebrow reveal">THE LOCAL EDIT</p>
+              <h1 class="hero__title reveal">Great finds, <em>closer to home.</em></h1>
+              <p class="hero__lead reveal">Search live inventory from independent shops nearby. Compare products and check out directly with the merchant.</p>
+              <div class="hero__cta reveal">
+                <a href="#products" class="btn-emp btn-emp--primary">Find local products</a>
+                <a href="#categories" class="btn-emp btn-emp--ghost">Browse categories</a>
+              </div>
+              <ul class="hero__meta reveal">
+                <li><strong>Live</strong> merchant inventory</li>
+                <li><strong>Direct</strong> merchant payments</li>
+                <li><strong>Local</strong> independent shops</li>
+              </ul>
+            </div>
+            <div class="hero__media">
+              <img src="emporium/img/hero-product.jpg" width="640" height="720" alt="A curated flat-lay of headphones, a smart watch, sneakers and home goods on a bright surface" fetchpriority="high" class="hero__img">
+              <div class="hero__badge" aria-hidden="true">
+                <span class="hero__badge-off">Shop</span>
+                <span class="hero__badge-txt">Local<br>Finds</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Secondary promo cards -->
+          <div class="hero__promos">
+            <a href="#products" class="promo promo--a reveal" data-filter-link="electronics">
+              <img src="emporium/img/promo-electronics.jpg" width="360" height="220" loading="lazy" alt="Wireless earbuds and a smart speaker on a teal backdrop">
+              <div class="promo__body">
+                <span class="promo__kicker">From local merchants</span>
+                <span class="promo__title">Explore electronics</span>
+                <span class="promo__link">Shop now →</span>
+              </div>
+            </a>
+            <a href="#products" class="promo promo--b reveal" data-filter-link="home">
+              <img src="emporium/img/promo-home.jpg" width="360" height="220" loading="lazy" alt="A styled shelf with a ceramic lamp, mugs and folded linens">
+              <div class="promo__body">
+                <span class="promo__kicker">Refresh your space</span>
+                <span class="promo__title">Explore home &amp; living</span>
+                <span class="promo__link">Shop now →</span>
+              </div>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Shop by category -->
+      <section class="section" id="categories" aria-labelledby="cat-h">
+        <div class="container">
+          <div class="section__head">
+            <div>
+              <p class="eyebrow">Browse the store</p>
+              <h2 class="section__title" id="cat-h">Shop by category</h2>
+            </div>
+            <a href="#products" class="section__link">View all products →</a>
+          </div>
+          <div class="cats">
+            <a href="#products" class="cat reveal" data-filter-link="electronics">
+              <span class="cat__img"><img src="emporium/img/cat-electronics.jpg" width="200" height="200" loading="lazy" alt="Over-ear headphones"></span>
+              <span class="cat__name">Electronics</span>
+              <span class="cat__count">Explore local products</span>
+            </a>
+            <a href="#products" class="cat reveal" data-filter-link="home">
+              <span class="cat__img"><img src="emporium/img/cat-home.jpg" width="200" height="200" loading="lazy" alt="A ceramic table lamp"></span>
+              <span class="cat__name">Home &amp; Living</span>
+              <span class="cat__count">Explore local products</span>
+            </a>
+            <a href="#products" class="cat reveal" data-filter-link="fashion">
+              <span class="cat__img"><img src="emporium/img/cat-fashion.jpg" width="200" height="200" loading="lazy" alt="A folded leather wallet"></span>
+              <span class="cat__name">Fashion</span>
+              <span class="cat__count">Explore local products</span>
+            </a>
+            <a href="#products" class="cat reveal" data-filter-link="sports">
+              <span class="cat__img"><img src="emporium/img/cat-sports.jpg" width="200" height="200" loading="lazy" alt="A pair of running shoes"></span>
+              <span class="cat__name">Sports</span>
+              <span class="cat__count">Explore local products</span>
+            </a>
+            <a href="#products" class="cat reveal" data-filter-link="beauty">
+              <span class="cat__img"><img src="emporium/img/cat-beauty.jpg" width="200" height="200" loading="lazy" alt="A glass serum dropper bottle"></span>
+              <span class="cat__name">Beauty</span>
+              <span class="cat__count">Explore local products</span>
+            </a>
+            <a href="#deals" class="cat cat--deal reveal">
+              <span class="cat__img"><img src="emporium/img/cat-deals.jpg" width="200" height="200" loading="lazy" alt="A gift box with a sale tag"></span>
+              <span class="cat__name">Deals</span>
+              <span class="cat__count">Merchant-listed deals</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Products near you -->
+      <section class="section" id="products" aria-labelledby="prod-h">
+        <div class="container">
+          <div class="section__head">
+            <div>
+              <p class="eyebrow">Shop independent merchants</p>
+              <h2 class="section__title" id="prod-h">Products near you</h2>
+            </div>
+          </div>
+
+          <form class="vq-location-form" id="location-search" role="search" aria-label="Choose local marketplace location">
+            <label for="vq-location">Search local inventory</label>
+            <div class="vq-location-controls">
+              <input id="vq-location" name="location" type="text" autocomplete="postal-code" placeholder="Enter city or ZIP code" required>
+              <button class="btn-emp btn-emp--primary" type="submit">Find products</button>
+              <button class="btn-emp btn-emp--ghost" id="vq-use-location" type="button">Use my location</button>
+            </div>
+            <div class="vq-filter-controls">
+              <label>State <input id="vq-state" type="text" maxlength="2" autocomplete="address-level1" placeholder="Optional"></label>
+              <label>Within <select id="vq-radius"><option value="5">5 miles</option><option value="10" selected>10 miles</option><option value="25">25 miles</option><option value="50">50 miles</option></select></label>
+              <label>Sort <select id="vq-sort"><option value="distance">Nearest</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option><option value="name">Product name</option></select></label>
+              <label>Min price <input id="vq-min-price" type="number" min="0" step="0.01" placeholder="$0"></label>
+              <label>Max price <input id="vq-max-price" type="number" min="0" step="0.01" placeholder="Any"></label>
+            </div>
+            <p id="vq-status" class="vq-status" role="status" aria-live="polite">Choose a city or ZIP to see live products and stock from nearby merchants.</p>
+          </form>
+          <div class="filters" id="category-filters" role="tablist" aria-label="Filter products by category">
+            <button class="filter is-active" data-filter="all" role="tab" aria-selected="true">All</button>
+          </div>
+          <section id="vq-store-map" class="vq-store-map" aria-labelledby="vq-store-map-title" hidden>
+            <div class="vq-store-map__head"><div><p class="eyebrow">Nearby merchants</p><h3 id="vq-store-map-title">Stores in your search</h3></div><p class="vq-store-map__hint">Select a shop to see its products.</p></div>
+            <div class="vq-store-map__body"><div class="vq-map-plot" id="vq-map-plot" role="img" aria-label="Relative locations of nearby stores"></div><ul class="vq-store-list" id="vq-store-list" aria-label="Nearby stores"></ul></div>
+          </section>
+
+          <div class="pgrid" data-products aria-live="polite"></div>
+          <p class="pgrid__empty" data-empty hidden>No products in this category yet — check back soon.</p>
+          <div class="vq-load-wrap"><button class="btn-emp btn-emp--ghost" id="vq-load-more" type="button" hidden>Load more products</button></div>
+        </div>
+      </section>
+
+      <!-- Brand trust bar -->
+      <section class="trust" aria-label="Why shop with Vampirequid">
+        <div class="container">
+          <ul class="trust__list">
+            <li class="trust__item reveal">
+              <span class="trust__icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M2 7h11v9H2zM13 10h5l3 3v3h-8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6" cy="18" r="1.8" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="18" r="1.8" stroke="currentColor" stroke-width="1.8"/></svg></span>
+              <span class="trust__txt"><strong>Local discovery</strong>Find stores and products near you</span>
+            </li>
+            <li class="trust__item reveal">
+              <span class="trust__icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v5c0 4.4-3 7.8-7 9-4-1.2-7-4.6-7-9V6l7-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="trust__txt"><strong>Merchant direct</strong>Payments go to the shop</span>
+            </li>
+            <li class="trust__item reveal">
+              <span class="trust__icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.3-5.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 4v4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="trust__txt"><strong>Live stock</strong>Inventory synced from merchants</span>
+            </li>
+            <li class="trust__item reveal">
+              <span class="trust__icon" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 3a7 7 0 0 0-7 7v3a3 3 0 0 0 3 3h1v-6H7v-.5a5 5 0 0 1 10 0V13h-2v6h1a3 3 0 0 0 3-3v-3a7 7 0 0 0-7-7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></span>
+              <span class="trust__txt"><strong>Independent shops</strong>Discover neighborhood merchants</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      </main>
+
+    <!-- Footer -->
+    <footer class="foot">
+      <div class="container">
+        <div class="foot__top">
+          <div class="foot__brandcol">
+            <a class="emp-brand emp-brand--foot" href="/" aria-label="Vampirequid home">
+              <span class="emp-brand__mark" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 26 26" fill="none"><path d="M4 8h18l-1.6 9.2a2 2 0 0 1-2 1.6H7.6a2 2 0 0 1-2-1.6L4 8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8V6.5a4 4 0 0 1 8 0V8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </span>
+              <span class="emp-brand__name">Vampirequid</span>
+            </a>
+            <p class="foot__blurb">Discover independent merchants, browse live inventory, and check out directly with each shop.</p>
+            <ul class="foot__social" aria-label="Social media">
+              <li><a href="#" aria-label="Vampirequid on X"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.9 2H22l-7.3 8.4L23 22h-6.8l-5.3-6.9L4.8 22H2l7.8-9L1.5 2h6.9l4.8 6.3L18.9 2Zm-2.4 18h1.9L7.6 4H5.6l10.9 16Z"/></svg></a></li>
+              <li><a href="#" aria-label="Vampirequid on Instagram"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg></a></li>
+              <li><a href="#" aria-label="Vampirequid on Facebook"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 9h3V5.5h-3c-2.2 0-4 1.8-4 4V12H7v3.5h3V22h3.5v-6.5H16l.5-3.5h-3v-1.7c0-.7.5-1.3 1.3-1.3Z"/></svg></a></li>
+              <li><a href="#" aria-label="Vampirequid on YouTube"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M11 9.5v5l4-2.5-4-2.5Z" fill="currentColor"/></svg></a></li>
+            </ul>
+          </div>
+          <div class="foot__links">
+            <div class="foot__col">
+              <h3>Shop</h3>
+              <ul>
+                <li><a href="#products" data-filter-link="electronics">Electronics</a></li>
+                <li><a href="#products" data-filter-link="home">Home &amp; Living</a></li>
+                <li><a href="#products" data-filter-link="fashion">Fashion</a></li>
+                <li><a href="#products" data-filter-link="sports">Sports</a></li>
+                <li><a href="#deals">Today's deals</a></li>
+              </ul>
+            </div>
+            <div class="foot__col">
+              <h3>Help</h3>
+              <ul>
+                <li><a href="/vm.html">Merchant sign in</a></li>
+                <li><a href="/merchant-orders.html">Merchant orders</a></li>
+                <li><a href="/merchant-location.html">Store location settings</a></li>
+                <li><a href="/ambassador.html">Ambassador portal</a></li>
+              </ul>
+            </div>
+            <div class="foot__col">
+              <h3>Company</h3>
+              <ul>
+                <li><a href="/">About Vampirequid</a></li>
+                <li><a href="/signup.html">Create merchant account</a></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="foot__bottom">
+          <p>&copy; 2026 Vampirequid. Shop independent merchants near you.</p>
+          <ul class="foot__pay" aria-label="Payment methods available at participating stores">
+            <li>PayPal</li><li>USDC on Base</li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Cart drawer -->
+    <div class="cart-overlay" data-cart-overlay hidden></div>
+    <aside class="cart" id="cartDrawer" aria-label="Shopping cart" aria-modal="true" role="dialog" aria-hidden="true" tabindex="-1">
+      <div class="cart__head">
+        <h2 class="cart__title">Your cart <span data-cart-count-text>(0)</span></h2>
+        <button type="button" class="cart__close" data-cart-close aria-label="Close cart">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="cart__ship" data-ship-wrap>
+        <p class="cart__shipmsg" data-ship-msg>One store per order. Payment goes directly to the merchant.</p>
+        <div class="cart__shipbar"><span data-ship-bar style="width:0%"></span></div>
+      </div>
+      <ul class="cart__items" data-cart-items></ul>
+      <div class="cart__empty" data-cart-empty>
+        <p>Your cart is empty.</p>
+        <button type="button" class="btn-emp btn-emp--ghost" data-cart-close>Start shopping</button>
+      </div>
+      <div class="cart__foot" data-cart-foot hidden>
+        <div class="cart__subtotal">
+          <span>Subtotal</span>
+          <strong data-cart-subtotal>$0.00</strong>
+        </div>
+        <p class="cart__note">Shipping and taxes are not included. Confirm any extra charges with the merchant.</p>
+        <button type="button" id="vq-checkout" class="btn-emp btn-emp--primary btn-emp--block">Continue to checkout</button><p id="vq-cart-status" class="vq-status" role="status" aria-live="polite"></p>
+        <button type="button" class="cart__continue" data-cart-close>Continue shopping</button>
+      </div>
+    </aside>
+
+    <!-- Toasts -->
+    <div class="toasts" data-toasts aria-live="polite" aria-atomic="false"></div>
+
+    <script src="emporium/js/vendor/bootstrap.bundle.min.js"></script><script src="emporium/js/main.js"></script>
+    <script src="emporium/js/marketplace-app.js"></script>
+  </body>
+</html>

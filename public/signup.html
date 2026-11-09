@@ -14,16 +14,16 @@ main{width:min(100%,800px);background:rgba(18,26,43,.96);border:1px solid var(--
 </head>
 <body>
 <main>
-  <img src="/vampire-quid.svg" alt="Vampire Quid mascot logo" width="180" height="180" style="display:block;width:min(180px,55%);height:auto;margin:0 auto 14px;border-radius:18px">
+  <img src="/vampire-quid.svg" alt="Vampirequid logo" width="180" height="180" style="display:block;width:min(180px,55%);height:auto;margin:0 auto 14px;border-radius:18px">
   <div class="eyebrow">Workerd · Guest snapshot</div>
-  <h1>Create your account</h1>
-  <p>We’ll copy the verified Admin snapshot into your account, verify the copied chunks, and open your dashboard with your saved account state. Linux will not boot during signup.</p>
+  <h1 id="page-title">Create your account</h1>
+  <p id="page-description">We’ll prepare your Vampirequid workspace, verify its saved state, and open your dashboard.</p>
   <form id="signup-form">
     <label for="username">Username</label>
     <input id="username" name="username" autocomplete="username" minlength="2" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,31}" required placeholder="e.g. sample_user">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required placeholder="At least 8 characters">
-    <button id="submit" type="submit">Create account and clone snapshot</button>
+    <button id="submit" type="submit">Create account</button>
   </form>
   <section id="status" class="status" role="status" aria-live="polite" hidden>
     <strong id="status-title">Preparing your guest…</strong>
@@ -49,6 +49,8 @@ main{width:min(100%,800px);background:rgba(18,26,43,.96);border:1px solid var(--
 (function(){
 const form=document.getElementById('signup-form'),submit=document.getElementById('submit');
 const status=document.getElementById('status'),title=document.getElementById('status-title'),detail=document.getElementById('status-text'),fill=document.getElementById('meter-fill'),steps=document.getElementById('steps'),vmScreen=document.getElementById('vm-screen'),vmMeta=document.getElementById('vm-meta'),vmDot=document.getElementById('vm-dot');
+const inviteToken=new URLSearchParams(location.search).get('invite')||'';
+if(inviteToken){document.getElementById('page-title').textContent='Claim your merchant invitation';document.getElementById('page-description').textContent='Create your own merchant login to claim this Vampirequid business invitation. Your credentials remain private to you.';submit.textContent='Claim invitation and create login';document.querySelector('.eyebrow').textContent='Vampirequid merchant account';}
 const labels={
  queued:'Checking the Admin baseline…',snapshot_cloning:'Copying the Admin snapshot into your account…',
  snapshot_verified:'Snapshot chunks copied and checked. Opening your dashboard…',
@@ -103,9 +105,9 @@ event.preventDefault();if(submit.disabled)return;
 const username=document.getElementById('username').value.trim().toLowerCase();
 const password=document.getElementById('password').value;
 submit.disabled=true;document.getElementById('password').value='';
-status.hidden=false;status.className='status';title.textContent='Creating your account…';detail.textContent='Sending the signup request to Workerd.';fill.style.width='8%';
+status.hidden=false;status.className='status';title.textContent=inviteToken?'Claiming your merchant invitation…':'Creating your account…';detail.textContent=inviteToken?'Checking the private invitation and creating your merchant login.':'Sending the signup request to Workerd.';fill.style.width='8%';
 try{
-const response=await fetch('/api/auth/signup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username,password})});
+const response=await fetch(inviteToken?'/api/auth/claim-invitation':'/api/auth/signup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(inviteToken?{username,password,invite_token:inviteToken}:{username,password})});
 const data=await response.json().catch(()=>({}));
 if(!response.ok){const retry=Number(data.retry_after_seconds);const retryText=Number.isFinite(retry)&&retry>0?' Try again in about '+Math.ceil(retry/60)+' minute(s).':'';throw new Error((data.error||'Signup failed (HTTP '+response.status+').')+retryText);}
 const session={...data,username,login_time:new Date().toISOString()};
@@ -114,7 +116,7 @@ sessionStorage.setItem('vm-account-id',session.account_id);
 sessionStorage.setItem('vm-session-token',session.session_token);
 sessionStorage.setItem('vm-username',username);
 sessionStorage.setItem('vm-login-time',session.login_time);
-sessionStorage.setItem('vm-initial-snapshot-pending',session.account_id);
+if(inviteToken)sessionStorage.removeItem('vm-initial-snapshot-pending');else sessionStorage.setItem('vm-initial-snapshot-pending',session.account_id);
 await waitForSnapshot(session);
 }catch(error){status.className='status bad';title.textContent='Signup could not finish';detail.textContent=error instanceof Error?error.message:String(error);submit.disabled=false;}
 });
