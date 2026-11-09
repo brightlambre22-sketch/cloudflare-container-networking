@@ -33,7 +33,7 @@ It cannot create, edit, archive products, upload merchant media, or change accou
 ## Offline register workflow
 
 1. Generate a UUID `allocation_id` and request an allowance before disconnecting.
-2. Store the allocation response on the POS device. The same `allocation_id` and same allocation body are idempotent; reusing it with different quantities returns a conflict.
+2. Store the allocation response on the POS device. Allocations default to a 24-hour expiry (configurable from 60 seconds up to 7 days). The same `allocation_id` and same allocation body are idempotent; reusing it with different quantities returns a conflict. Expired allocations release their unused stock on the next ledger request.
 3. While offline, persist each sale locally with a stable UUID `event_id` and `order_id`. Do not discard the local sale until the server acknowledges it.
 4. When connectivity returns, submit each sale using the original IDs. Repeating the same event/order is safe; reusing an event ID for a different order is rejected.
 5. Release the allocation when the register session ends. Unused quantities return to available stock. A fully consumed allocation closes automatically.
@@ -48,6 +48,7 @@ Content-Type: application/json
 
 {
   "allocation_id": "b18e2e73-4e14-4c93-9c7b-bc50a9e8b2c1",
+  "ttl_seconds": 86400,
   "allocations": [
     { "product_id": "4d0f4b7d-a7bc-4a42-92d1-aad9d0b7b6f1", "quantity": 8 }
   ]
@@ -101,4 +102,4 @@ Product images are uploaded with `POST /api/stockroom/media/<product_id>?account
 - `409 offline_event_id_conflict`: an event ID was reused for a different order.
 - `503 tinycore_stockroom_unavailable` or sync errors: retain the local queue and retry; do not mark the order synchronized until acknowledged.
 
-The POS client should use HTTPS, store credentials in a secure secret store, keep a durable local sales queue, and retry with the same event and order IDs.
+POS catalog responses omit merchant cost fields. The POS key is intended for server-side or trusted local POS software; do not embed it in a public browser application. The POS client should use HTTPS, store credentials in a secure secret store, keep a durable local sales queue, and retry with the same event and order IDs.
