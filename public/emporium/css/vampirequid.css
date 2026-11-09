@@ -54,7 +54,7 @@
 @media(max-width:700px){.vq-store-map__head{display:block}.vq-store-map__hint{margin-top:.35rem}.vq-store-map__body{grid-template-columns:1fr}.vq-store-list{max-height:220px}}
 
 /* Marketplace map, store navigation, and brand visibility */
-.emp-brand__logo{display:block;width:56px;height:56px;flex:0 0 56px;object-fit:cover;object-position:center;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(12,107,88,.14);transform:scale(1.04)}
+.emp-brand__logo{display:block;width:56px;height:56px;flex:0 0 56px;object-fit:contain;object-position:center;border-radius:0;background:transparent;box-shadow:none;transform:none}
 .emp-brand{gap:.8rem}
 .vq-store-link{color:inherit;text-decoration:underline;text-decoration-color:#a9b4c8;text-underline-offset:3px}
 .vq-store-link:hover{color:#176044;text-decoration-color:currentColor}
