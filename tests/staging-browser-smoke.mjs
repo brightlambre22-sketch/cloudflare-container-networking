@@ -30,7 +30,7 @@ assert.match(marketplaceHtml, /leaflet@1\.9\.4\/dist\/leaflet\.js/, "marketplace
 for (const path of ["/studio", "/studio.html", "/workspace", "/workspace.html", "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html"]) {
   const response = await fetch(base + path, { redirect: "manual" });
   assert.equal(response.status, 302, path + " must redirect without a session");
-  assert.match(response.headers.get("location") || "", /\\/vm\\.html\\?auth_required=1/, path + " must redirect to sign-in");
+  assert.match(response.headers.get("location") || "", /\/vm\.html\?auth_required=1/, path + " must redirect to sign-in");
   const head = await fetch(base + path, { method: "HEAD", redirect: "manual" });
   assert.equal(head.status, 302, path + " HEAD must also be protected");
 }
