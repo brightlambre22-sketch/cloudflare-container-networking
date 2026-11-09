@@ -79,7 +79,8 @@ test("startup completion markers match the sequential command controller", () =>
   }
   assert.ok(html.includes("const markers=['DHCP_DONE'"));
   assert.ok(html.includes("markerCount(t,marker)>markerCountBefore"));
-  assert.ok(html.includes("shellPrompt(t.slice(markerAt+marker.length))"));
+  assert.ok(html.includes("markerResult(t,marker)"));
+  assert.ok(html.includes("marker==='DHCP_DONE'&&!terminal().includes('DHCP_OK')"));
 });
 
 test("TLS and CA certificate packages install in the foreground before HTTPS validation", () => {
@@ -100,15 +101,17 @@ test("startup saves a snapshot only after DHCP, TLS, DNS, HTTP, and HTTPS checks
   assert.ok(html.includes("Automatic snapshot save failed after 3 attempts."));
 });
 
-test("the active diagnostic scripts are served from same-origin Worker assets", () => {
-  assert.ok(html.includes("${apiUrl}/health"));
-  assert.ok(html.includes("${apiUrl}/runner/tinycore/network-test.sh"));
-  assert.ok(html.includes("${apiUrl}/runner/tinycore/fineproxy-test.sh"));
+test("restored-guest diagnostics run the six low-impact network checks and require completion before saving", () => {
+  assert.ok(html.includes("window.vampireSquidRunNetworkCheck=async function(checkId)"));
+  for (const check of ["ip", "routes", "dns", "ping", "https", "health"]) assert.ok(html.includes(check + ":["));
+  assert.ok(html.includes("await window.vampireSquidRunNetworkCheck('health')"));
+  assert.ok(html.includes("diagnostic.complete"));
+  assert.ok(html.includes("const promptDeadline=Date.now()+15000"));
+  assert.ok(html.includes("const saved=await saveVmState(false)"));
   assert.ok(bootstrap.includes("Mysterium bootstrap is temporarily disabled."));
   assert.ok(!bootstrap.includes("wget "));
   assert.ok(!bootstrap.includes("/opt/mysterium/myst"));
 });
-
 test("the account terminal is enabled only after the restored or freshly booted shell is verified", () => {
   assert.ok(html.includes("checkAccountExecution()"));
   assert.ok(html.includes("connectApiAgent()"));
