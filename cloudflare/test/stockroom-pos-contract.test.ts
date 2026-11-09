@@ -37,6 +37,15 @@ test("offline POS allocations are idempotent, releasable, and bound to remaining
   assert.match(source, /invalid_payment_method/);
   assert.match(source, /expires_at TEXT NOT NULL/);
   assert.match(source, /expireOfflineAllocations\(now\)/);
+  const consumeStart = source.indexOf('if (url.pathname === "/offline/consume"');
+  const consumeEnd = source.indexOf('if (url.pathname === "/orders" && request.method === "GET")', consumeStart);
+  assert.ok(consumeStart >= 0 && consumeEnd > consumeStart, "offline consume route should be isolated");
+  const consume = source.slice(consumeStart, consumeEnd);
+  assert.match(consume, /const paymentMethod=/);
+  assert.match(consume, /const paymentReference=/);
+  assert.match(consume, /invalid_payment_method/);
+  assert.match(consume, /payment_method:paymentMethod/);
+  assert.match(consume, /payment_reference:paymentReference/);
 });
 
 test("offline POS sales enter the same durable outbox as paid online orders", async () => {
