@@ -90,8 +90,49 @@ export async function handleProjectStorageRequest(request: Request, env: Project
   if (!projectId) return json({ error: "project_id_required" }, 400);
   const key = prefix + projectId + ".json";
   if (request.method === "DELETE") {
+    const existingObject = await env.PROJECT_STORAGE.get(key);
+    let existingProject: Record<string, unknown> | null = null;
+    if (existingObject) {
+      try { existingProject = await existingObject.json() as Record<string, unknown>; } catch { /* still remove the project record */ }
+    }
+    const publishedSlug = typeof existingProject?.publishSlug === "string" && /^[a-f0-9]{32}$/.test(existingProject.publishSlug)
+      ? existingProject.publishSlug : "";
+    if (publishedSlug) {
+      const indexKey = "published-sites/index/" + publishedSlug + ".json";
+      const mappingObject = await env.PROJECT_STORAGE.get(indexKey);
+      if (mappingObject) {
+        try {
+          const mapping = await mappingObject.json() as { account_id?: unknown; project_id?: unknown };
+          // Only remove a published URL when it belongs to this account and project.
+          if (mapping.account_id === accountId && mapping.project_id === projectId) {
+            await env.PROJECT_STORAGE.delete(indexKey);
+            let cursor: string | undefined;
+            do {
+              const page = await env.PROJECT_STORAGE.list({
+                prefix: "published-sites/" + publishedSlug + "/",
+                limit: 1000,
+                ...(cursor ? { cursor } : {}),
+              });
+              if (page.objects.length) await env.PROJECT_STORAGE.delete(page.objects.map((item) => item.key));
+              cursor = page.truncated ? page.cursor : undefined;
+            } while (cursor);
+          }
+        } catch { return json({ error: "published_site_cleanup_failed" }, 502); }
+      }
+    }
+    const profileKey = "marketplace/merchants/" + accountId + ".json";
+    const profileObject = await env.PROJECT_STORAGE.get(profileKey);
+    if (profileObject) {
+      try {
+        const profile = await profileObject.json() as { project_id?: unknown };
+        if (profile.project_id === projectId) {
+          await env.PROJECT_STORAGE.delete(profileKey);
+          await env.PROJECT_STORAGE.delete("marketplace/catalog-sync/" + accountId + ".json");
+        }
+      } catch { return json({ error: "marketplace_listing_cleanup_failed" }, 502); }
+    }
     await env.PROJECT_STORAGE.delete(key);
-    return json({ ok: true, deleted: projectId });
+    return json({ ok: true, deleted: projectId, unpublished: Boolean(publishedSlug), marketplace_listing_removed: true });
   }
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (contentLength > 1024 * 1024) return json({ error: "project_too_large", max_bytes: 1024 * 1024 }, 413);
