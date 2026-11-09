@@ -43,6 +43,30 @@ function safeUrl(value: unknown): string {
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
   } catch { return ""; }
 }
+/** Authenticate either the shared merchant session or the optional POS integration key. */
+async function authenticateStockroomCredential(
+  env: BusinessDatabaseEnv, accountId: string, token: string,
+): Promise<"merchant_session" | "pos_api_key" | null> {
+  if (/^[a-f0-9]{64}$/.test(token)) {
+    const auth = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+    const verified = await auth.fetch("https://account-registry.internal/auth/verify", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ account_id: accountId, token }),
+    });
+    return verified.ok ? "merchant_session" : null;
+  }
+  if (/^acct_[a-f0-9]{64}$/.test(token)) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const keyHash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+    const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
+    const verified = await registry.fetch("https://account-registry.internal/account/" + encodeURIComponent(accountId), {
+      method: "GET", headers: { "x-account-key-sha256": keyHash },
+    });
+    return verified.ok ? "pos_api_key" : null;
+  }
+  return null;
+}
+
 function mapProduct(row: ProductRow) {
   let variations: unknown[] = [];
   try { const parsed = JSON.parse(row.variations_json); if (Array.isArray(parsed)) variations = parsed; } catch {}
@@ -284,6 +308,10 @@ export async function businessDatabaseFetch(env: BusinessDatabaseEnv, accountId:
   return database.fetch(new Request(internalUrl, stockroomRequestInit(init)));
 }
 
+function internalPathPlaceholder(url: URL): string {
+  return url.pathname.replace(/^\/api\/stockroom/, "") || "/";
+}
+
 /** Authenticates account requests before routing to that account's private SQL database. */
 export async function handleBusinessDatabaseRequest(request: Request, env: BusinessDatabaseEnv): Promise<Response | null> {
   const url = new URL(request.url);
@@ -338,12 +366,9 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     const accountId = url.searchParams.get("account_id") ?? "";
     const token = request.headers.get("authorization")?.startsWith("Bearer ") ? request.headers.get("authorization")!.slice(7) : "";
-    if (!ACCOUNT_ID.test(accountId) || !/^[a-f0-9]{64}$/.test(token)) return json({ error: "unauthorized" }, 401);
-    const auth = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-    const verified = await auth.fetch("https://account-registry.internal/auth/verify", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account_id: accountId, token }),
-    });
-    if (!verified.ok) return json({ error: "unauthorized" }, 401);
+    if (!ACCOUNT_ID.test(accountId) || await authenticateStockroomCredential(env, accountId, token) !== "merchant_session") {
+      return json({ error: "unauthorized" }, 401);
+    }
     const form = await request.formData().catch(() => null);
     const file = form?.get("image");
     if (!(file instanceof File) || file.size < 1 || file.size > 5 * 1024 * 1024) return json({ error: "image_must_be_under_5mb" }, 413);
@@ -369,14 +394,24 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   if (!["GET", "POST", "PUT", "DELETE"].includes(request.method)) return json({ error: "method_not_allowed" }, 405);
   const accountId = url.searchParams.get("account_id") ?? "";
   const token = request.headers.get("authorization")?.startsWith("Bearer ") ? request.headers.get("authorization")!.slice(7) : "";
-  if (!ACCOUNT_ID.test(accountId) || !/^[a-f0-9]{64}$/.test(token)) return json({ error: "unauthorized" }, 401);
-  const auth = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-  const verified = await auth.fetch("https://account-registry.internal/auth/verify", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account_id: accountId, token }),
-  });
-  if (!verified.ok) return json({ error: "unauthorized" }, 401);
+  if (!ACCOUNT_ID.test(accountId)) return json({ error: "unauthorized" }, 401);
+  const credentialType = await authenticateStockroomCredential(env, accountId, token);
+  if (!credentialType) return json({ error: "unauthorized" }, 401);
+  // POS keys are deliberately restricted to register workflows. Product
+  // authoring, media uploads, and account settings remain merchant-session only.
+  if (credentialType === "pos_api_key") {
+    const posRouteAllowed =
+      (internalPathPlaceholder(url) === "/products" && request.method === "GET") ||
+      (internalPathPlaceholder(url) === "/movements" && request.method === "GET") ||
+      (internalPathPlaceholder(url) === "/offline-allowance" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/offline-allowance/release" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/offline-sales" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/sync/orders" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/orders" && request.method === "GET");
+    if (!posRouteAllowed) return json({ error: "pos_key_scope_forbidden" }, 403);
+  }
   url.searchParams.delete("account_id");
-  const internalPath = url.pathname.replace(/^\/api\/stockroom/, "") || "/";
+  const internalPath = internalPathPlaceholder(url);
   if (internalPath === "/sync/orders" && request.method === "POST") {
     return synchronizePendingOrders(env, accountId);
   }
@@ -388,12 +423,24 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
     const response = await ledger.fetch("https://inventory-ledger.internal/orders/all");
     if (!response.ok) return json({ error: "merchant_order_history_unavailable" }, 503);
     const data = await response.json() as { orders?: unknown[] };
-    return json({ ok: true, orders: data.orders ?? [], tinycore_sync: sync.ok ? "synchronized" : "queued" });
+    const tinycoreConfigured = Boolean(env.STOCKROOM_ORIGIN && env.STOCKROOM_GATEWAY_TOKEN);
+    return json({
+      ok: true, orders: data.orders ?? [],
+      stockroom_backend: tinycoreConfigured ? "tinycore" : "cloudflare_durable_object",
+      tinycore_sync: tinycoreConfigured ? (sync.ok ? "synchronized" : "queued") : "not_configured",
+    });
   }
   if (internalPath === "/offline-allowance" && request.method === "POST") {
     const body = await request.json().catch(() => null);
     const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
     return ledger.fetch("https://inventory-ledger.internal/offline/allocate", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}),
+    });
+  }
+  if (internalPath === "/offline-allowance/release" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+    return ledger.fetch("https://inventory-ledger.internal/offline/release", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}),
     });
   }
@@ -418,16 +465,23 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
       try { await syncInventoryCatalog(env, accountId); } catch { /* Keep the central catalog unchanged until sync succeeds. */ }
     }
   }
+  if (credentialType === "pos_api_key" && internalPath === "/products" && request.method === "GET" && response.ok) {
+    const data = await response.json().catch(() => null) as { products?: Array<Record<string, unknown>>; [key: string]: unknown } | null;
+    if (!data || !Array.isArray(data.products)) return json({ error: "pos_catalog_response_invalid" }, 502);
+    // Merchant cost is private accounting data and is never returned to external POS keys.
+    return json({ ...data, products: data.products.map(({ cost: _cost, cost_cents: _costCents, ...product }) => product) }, response.status);
+  }
   return response;
 }
 
 export async function synchronizePendingOrders(env: BusinessDatabaseEnv, accountId: string): Promise<Response> {
   const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+  const stockroomBackend = env.STOCKROOM_ORIGIN && env.STOCKROOM_GATEWAY_TOKEN ? "tinycore" : "cloudflare_durable_object";
   const pendingResponse = await ledger.fetch("https://inventory-ledger.internal/orders");
   if (!pendingResponse.ok) return json({ error: "order_queue_unavailable" }, 503);
   const pending = await pendingResponse.json() as { orders?: Array<{ order_id: string }> };
   const orders = pending.orders ?? [];
-  if (!orders.length) return json({ ok: true, synchronized: 0, pending: 0 });
+  if (!orders.length) return json({ ok: true, synchronized: 0, pending: 0, stockroom_backend: stockroomBackend });
   const applied = await businessDatabaseFetch(env, accountId, "apply-orders", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orders }),
   });
@@ -438,7 +492,7 @@ export async function synchronizePendingOrders(env: BusinessDatabaseEnv, account
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ order_ids: orderIds }),
   });
   if (!ack.ok) return json({ error: "order_acknowledgement_failed", synchronized: orderIds.length }, 503);
-  return json({ ok: true, synchronized: orderIds.length, pending: Math.max(0, orders.length - orderIds.length) });
+  return json({ ok: true, synchronized: orderIds.length, pending: Math.max(0, orders.length - orderIds.length), stockroom_backend: stockroomBackend });
 }
 
 /** Publish a versioned catalog snapshot to the always-online inventory authority. */

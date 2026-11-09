@@ -12,7 +12,7 @@ main{max-width:1050px;margin:38px auto;padding:0 22px}h1{font-size:30px;letter-s
 </style>
 </head>
 <body>
-<header><nav><strong>Vampirequid · Merchant</strong><a href="/">Home</a><a href="/vm.html">Dashboard</a><a href="/merchant-location.html">Store location</a><a href="/marketplace">Marketplace</a><a href="/ambassador.html">Ambassador portal</a></nav></header>
+<header><nav><a href="/" aria-label="Vampirequid home" style="display:flex;align-items:center;gap:10px;margin-right:auto;color:inherit;text-decoration:none"><img src="/vampire-quid.svg" alt="" width="42" height="42" style="object-fit:contain;border-radius:8px;background:#fff"><strong>Vampirequid · Merchant</strong></a><a href="/">Home</a><a href="/vm.html">Dashboard</a><a href="/merchant-location.html">Store location</a><a href="/marketplace">Marketplace</a><a href="/ambassador.html">Ambassador portal</a></nav></header>
 <main>
 <h1>Orders</h1><p>Customer payments and orders assigned to this merchant account.</p>
 <div class="toolbar"><button id="refresh" type="button">Refresh orders</button><span id="status" role="status" aria-live="polite">Checking your merchant session…</span></div>
@@ -38,7 +38,8 @@ async function load(){
    const totalCents=Number.isFinite(Number(order.amount_cents))?Number(order.amount_cents):(Array.isArray(order.items)?order.items.reduce((sum,item)=>sum+Number(item.unit_price_cents||0)*Number(item.quantity||0),0):0);
    const amount=el("div","amount",money(totalCents));head.append(left,amount);card.append(head);
    const payment=String(order.payment_method||"payment").toUpperCase();
-   const sync=order.sync_status==="synced"?"Synced to Stockroom":"Saved; Stockroom sync pending";
+   const backend=data.stockroom_backend==="tinycore"?"TinyCore":"Cloudflare";
+   const sync=order.sync_status==="synced"?"Synced to "+backend+" Stockroom":"Saved; Stockroom sync pending";
    card.append(el("div","meta",payment+" · Paid · "+sync));
    const items=el("ul","items");
    for(const item of (Array.isArray(order.items)?order.items:[])){
@@ -47,7 +48,8 @@ async function load(){
    }
    card.append(items);list.append(card);
   }
-  status.textContent=orders.length+" order"+(orders.length===1?"":"s")+" · "+(data.tinycore_sync==="synchronized"?"Stockroom synchronized":"Orders retained online; Stockroom sync pending");
+  const syncSummary=data.tinycore_sync==="synchronized"?"TinyCore Stockroom synchronized":data.tinycore_sync==="not_configured"?"Cloudflare Stockroom active; TinyCore bridge not configured":"Orders retained online; TinyCore sync pending";
+  status.textContent=orders.length+" order"+(orders.length===1?"":"s")+" · "+syncSummary;
  }catch(error){status.textContent=error.message||"Order history unavailable";status.style.color="#a12626"}
 }
 try{accountId=sessionStorage.getItem("vm-account-id")||"";token=sessionStorage.getItem("vm-session-token")||""}catch{}

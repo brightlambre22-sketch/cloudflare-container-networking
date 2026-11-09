@@ -263,15 +263,52 @@ export async function handlePayments(request: Request, env: PaymentEnv): Promise
     }
     if (paypalCaptureMatch && request.method === "POST") {
       const body = await request.json().catch(() => null) as { order_id?: unknown } | null;
-      const saved = await readJson<{ order_id: string }>(env.PROJECT_STORAGE, keyFor(page.account_id, "paypal-order-" + id));
+      const orderKey = keyFor(page.account_id, "paypal-order-" + id);
+      const saved = await readJson<{ order_id: string; capture_request_id?: string | null; mode?: string }>(env.PROJECT_STORAGE, orderKey);
       if (!saved || body?.order_id !== saved.order_id) return json({ error: "paypal_order_mismatch" }, 400);
+      // Keep one request ID across uncertain/network retries, but rotate it after a
+      // definitive funding decline so PayPal does not replay the previous 422.
+      const captureRequestId = saved.capture_request_id || crypto.randomUUID();
+      if (!saved.capture_request_id) {
+        saved.capture_request_id = captureRequestId;
+        await env.PROJECT_STORAGE.put(orderKey, JSON.stringify(saved), { httpMetadata: { contentType: "application/json" } });
+      }
       const captured = await fetch(host + "/v2/checkout/orders/" + encodeURIComponent(saved.order_id) + "/capture", {
         method: "POST",
-        headers: { authorization: "Bearer " + access, "content-type": "application/json", prefer: "return=representation", "PayPal-Request-Id": id + "-capture" },
+        headers: { authorization: "Bearer " + access, "content-type": "application/json", prefer: "return=representation", "PayPal-Request-Id": captureRequestId },
         body: "{}",
       });
-      const result = await captured.json() as { status?: string; purchase_units?: Array<{ payments?: { captures?: Array<{ status?: string; amount?: { value?: string; currency_code?: string }; id?: string }> } }> };
-      if (!captured.ok) return json({ error: "paypal_capture_failed", paypal_status: captured.status }, 502);
+      const result = await captured.json() as {
+        name?: string; message?: string; debug_id?: string;
+        details?: Array<{ issue?: string; description?: string }>;
+        status?: string;
+        purchase_units?: Array<{ payments?: { captures?: Array<{ status?: string; amount?: { value?: string; currency_code?: string }; id?: string }> } }>;
+      };
+      if (!captured.ok) {
+        const issue = result.details?.find(detail => typeof detail.issue === "string")?.issue ?? null;
+        // INSTRUMENT_DECLINED is a recoverable buyer funding-source failure.
+        // Return a stable machine-readable code so the PayPal JS SDK can restart
+        // the approval flow and let the buyer select another funding source.
+        if (issue === "INSTRUMENT_DECLINED") {
+          const failedAt = new Date().toISOString();
+          const event = {
+            type: "paypal.capture.declined", checkout_id: id, account_id: page.account_id,
+            paypal_order_id: saved.order_id, paypal_request_id: captureRequestId,
+            issue, debug_id: result.debug_id ?? null, http_status: captured.status,
+            message: result.message ?? null, occurred_at: failedAt,
+          };
+          // Persist the decline as a merchant-side payment event without storing
+          // card, payer, or other sensitive funding-source details.
+          await env.PROJECT_STORAGE.put(keyFor(page.account_id, "events/paypal-" + id + "-" + captureRequestId), JSON.stringify(event), { httpMetadata: { contentType: "application/json" } });
+          await env.PROJECT_STORAGE.put(keyFor(page.account_id, "checkout-" + id), JSON.stringify({
+            ...page, paypal_last_capture_failure: { issue, debug_id: result.debug_id ?? null, occurred_at: failedAt },
+          }), { httpMetadata: { contentType: "application/json" } });
+          saved.capture_request_id = null;
+          await env.PROJECT_STORAGE.put(orderKey, JSON.stringify(saved), { httpMetadata: { contentType: "application/json" } });
+          return json({ ok: false, error: "paypal_instrument_declined", paypal_issue: issue, paypal_debug_id: result.debug_id ?? null }, 409);
+        }
+        return json({ ok: false, error: "paypal_capture_failed", paypal_issue: issue, paypal_debug_id: result.debug_id ?? null, paypal_status: captured.status }, 502);
+      }
       const capture = result.purchase_units?.[0]?.payments?.captures?.[0];
       if (result.status !== "COMPLETED" || capture?.status !== "COMPLETED" || capture.amount?.currency_code !== "USD" || Number(capture.amount.value) !== Number(page.amount_usd)) return json({ error: "paypal_payment_not_completed" }, 409);
       const committed = await commitInventory(env, page, saved.order_id, "paypal");

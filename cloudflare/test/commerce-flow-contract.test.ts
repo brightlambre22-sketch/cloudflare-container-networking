@@ -41,6 +41,11 @@ test("public merchant checkout has a real PayPal create-order and capture flow",
   assert.match(app, /window\.paypal\.Buttons/);
   assert.match(app, /\/paypal\/create-order/);
   assert.match(app, /\/paypal\/capture/);
+  assert.match(payments, /capture_request_id\s*\|\|\s*crypto\.randomUUID\(\)/);
+  assert.match(payments, /PayPal-Request-Id": captureRequestId/);
+  assert.match(payments, /paypal\.capture\.declined/);
+  assert.match(payments, /saved\.capture_request_id = null/);
+  assert.match(payments, /paypal_last_capture_failure/);
   assert.match(checkout, /payment goes directly to the independent merchant/i);
 });
 

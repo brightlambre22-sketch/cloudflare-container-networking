@@ -105,12 +105,12 @@ body.oracle-terminal-mode #myst-log{height:calc(100vh - 310px);min-height:300px;
 </section>
 <div id="status" class="runtime-status">Starting Linux VM...</div>
 <details id="account-settings" class="account-settings">
- <summary><span><strong>Account &amp; API settings</strong><small>Account ID and API key</small></span><span class="settings-chevron">⌄</span></summary>
+ <summary><span><strong>Account &amp; API settings</strong><small>Account ID and optional POS integration key</small></span><span class="settings-chevron">⌄</span></summary>
  <div class="account-settings-content">
   <section id="account-id-panel" aria-label="Account ID"><div class="account-id-copy"><strong>Account ID</strong><code id="account-id-value">Not signed in</code></div><button id="account-id-copy" type="button">Copy account ID</button><span id="account-id-message" role="status" aria-live="polite"></span></section>
   <section id="api-key-panel" aria-labelledby="api-key-title">
-   <h2 id="api-key-title">Account API key</h2>
-   <p id="api-key-warning">Your current API key appears here after you sign in. Keys created before dashboard key display was enabled cannot be recovered from their stored hashes; this page will not change those keys automatically. Replacing a key invalidates the previous one.</p>
+   <h2 id="api-key-title">Optional external POS integration key</h2>
+   <p id="api-key-warning">Optional: this is the single key for connecting an external POS system to your merchant account. Your Vampirequid and TinyCore workspace use your normal merchant login and shared session; you do not need this key to sign in or use TinyCore. Keep only one active POS key—replacing it invalidates the previous key. Keys created before dashboard key display was enabled cannot be recovered from their stored hashes; this page will not change those keys automatically.</p>
    <div id="api-key-actions"><button id="api-key-generate" type="button">Replace API key</button><button id="api-key-copy" type="button" hidden>Copy key</button><button id="api-key-hide" type="button" hidden>Hide key</button><span id="api-key-message" role="status" aria-live="polite"></span></div>
    <pre id="api-key-value" hidden></pre>
   </section>
@@ -161,7 +161,7 @@ method:'POST',headers:{'content-type':'application/json','authorization':'Bearer
 });
 const result=await response.json().catch(()=>({}));
 if(!response.ok)throw new Error(result.error||'database initialization failed');
-report('\\nSTOCKROOM_DATABASE_READY schema='+String(result.schema_version||1)+' products='+String(result.product_count||0)+'\\n');
+report('\\nSTOCKROOM_DATABASE_READY backend='+String(result.engine||'unknown')+' schema='+String(result.schema_version||1)+' products='+String(result.product_count||0)+'\\n');
 }catch(error){report('\\nSTOCKROOM_DATABASE_STARTUP_PENDING '+(error&&error.message?error.message:String(error))+'\\n');}
 }
 async function saveVmState(manual=true){
@@ -765,6 +765,7 @@ return;
 bootComplete=true;
 stateText('Guest shell verified: echo command returned successfully.');
 report('RESTORED_GUEST_SHELL_VERIFIED=1\\nprobe='+verification.marker+'\\n');
+await runRestoredNetworkDiagnostic();
 if(String(window.snapshotIdentity||'').startsWith('acct-')||window.snapshotIdentity==='admin')void checkAccountExecution();else statusText('Saved VM resumed; guest shell verified; connecting the Oracle bridge.');
 connectApiAgent();
 return;
@@ -817,6 +818,34 @@ if(lines.some(line=>line.trim()===marker)&&shellPrompt(text))return {ok:true,mar
 await new Promise(resolve=>setTimeout(resolve,25));
 }
 return {ok:false,reason:'echo probe output or the shell prompt did not return within '+commandTimeoutMs+' ms'};
+}
+async function runRestoredNetworkDiagnostic(){
+statusText('Restored Tiny Core shell verified; running the automatic network health diagnostic.');
+report('\\n===== AUTOMATIC NETWORK TEST AFTER SNAPSHOT RESTORE =====\\n');
+let diagnostic;
+try{
+diagnostic=await window.vampireSquidRunNetworkCheck('health');
+report(diagnostic.output+'\\n');
+}catch(error){
+report('Automatic restored network diagnostic failed: '+(error&&error.message?error.message:String(error))+'\\n');
+stateText('Automatic restored network diagnostic could not complete; saved snapshot was left unchanged.');
+return false;
+}
+if(!diagnostic||!diagnostic.complete){
+stateText('Automatic restored network diagnostic was interrupted; saved snapshot was left unchanged.');
+return false;
+}
+const promptDeadline=Date.now()+15000;
+while(Date.now()<promptDeadline){
+if(shellPrompt(screenText())){
+const saved=await saveVmState(false);
+stateText(saved?'Restored guest network diagnostic completed; updated snapshot saved.':'Restored guest network diagnostic completed; snapshot save failed.');
+return saved;
+}
+await new Promise(resolve=>setTimeout(resolve,100));
+}
+stateText('Network diagnostic finished but the shell prompt did not return; saved snapshot was left unchanged.');
+return false;
 }
 function startBootMonitor(){
 statusText('Tiny Core is booting; waiting up to five minutes for a stable shell prompt.');

@@ -49,3 +49,30 @@ test("Wrangler declares all production Stockroom and merchant storage bindings",
     'binding = "PROJECT_STORAGE"',
   ]) assert.ok(config.includes(binding), `Missing binding: ${binding}`);
 });
+
+test("Vampirequid and TinyCore share one merchant session; the account API key is only an optional POS integration credential", async () => {
+  const worker = await source("../src/index.ts");
+  const stockroom = await source("../src/business-database.ts");
+  const dashboard = await source("../../public/vm.html");
+
+  // Login issues one merchant session token. TinyCore session validation and
+  // network-ticket issuance verify that same token against AccountRegistry.
+  assert.match(worker, /url\.pathname === "\/api\/auth\/login"/);
+  assert.match(worker, /url\.pathname === "\/api\/auth\/session"/);
+  assert.match(worker, /url\.pathname === "\/api\/network\/ticket"/);
+  assert.match(worker, /body: JSON\.stringify\(\{ account_id: accountId, token: body\.session_token \}\)/);
+
+  // Stockroom accepts the merchant session token, not a separate merchant key.
+  assert.match(stockroom, /request\.headers\.get\("authorization"\)/);
+  assert.match(stockroom, /auth\/verify/);
+  assert.match(dashboard, /sessionStorage\.setItem\('vm-session-token',data\.session_token\)/);
+  assert.match(dashboard, /api\/auth\/session/);
+  assert.match(dashboard, /api\/network\/ticket/);
+
+  // The separate account API key is a distinct integration credential; it is
+  // never substituted for the merchant session token used by first-party routes.
+  assert.match(dashboard, /id="api-key-panel"/);
+  assert.match(dashboard, /api\/account\/api-key\/rotate/);
+  assert.match(dashboard, /api\/auth\/session/);
+  assert.doesNotMatch(dashboard, /api\/auth\/session[^\n]*api_key/);
+});
