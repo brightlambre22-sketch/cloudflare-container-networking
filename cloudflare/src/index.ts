@@ -159,6 +159,25 @@ function merchantSessionCookie(accountId: string, token: string, maxAge = 604800
     "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Lax";
 }
 
+function adminSessionCookie(key: string, maxAge = 28800): string {
+  return "vq_admin_session=" + encodeURIComponent(key) +
+    "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Strict";
+}
+
+function clearAdminSessionCookie(): string {
+  return "vq_admin_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+}
+
+function adminAuthorized(request: Request, env: Env): boolean {
+  if (!env.ADMIN_ACCESS_KEY) return false;
+  const authorization = request.headers.get("authorization");
+  if (authorized(authorization, env.ADMIN_ACCESS_KEY)) return true;
+  const headerKey = request.headers.get("x-admin-key");
+  if (headerKey && authorized("Bearer " + headerKey, env.ADMIN_ACCESS_KEY)) return true;
+  const cookieKey = cookieValue(request, "vq_admin_session");
+  return Boolean(cookieKey && authorized("Bearer " + cookieKey, env.ADMIN_ACCESS_KEY));
+}
+
 function clearMerchantSessionCookie(): string {
   return "vq_merchant_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
 }
@@ -234,7 +253,7 @@ export default {
     // Uses the existing /api/admin/accounts path with GET; does not delete or modify accounts.
     if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+      if (!adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -253,7 +272,7 @@ export default {
     // The shared auth registry and Admin baseline snapshot are preserved.
     if (url.pathname === "/api/admin/accounts" && request.method === "DELETE") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+      if (!adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
 
@@ -403,7 +422,7 @@ export default {
     // This is separate from DELETE /api/admin/accounts, which clears all registered accounts.
     if (url.pathname === "/api/admin/purge-accounts" && request.method === "POST") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+      if (!adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       const body = await request.json().catch(() => null) as {
@@ -1265,7 +1284,7 @@ export default {
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const accountId = typeof body.account_id === "string" ? body.account_id : "";
       if (accountId === "admin") {
-                if (!env.ADMIN_ACCESS_KEY || typeof body.admin_key !== "string" || !authorized("Bearer " + body.admin_key, env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+                if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       } else {
         if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
         const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -1409,7 +1428,7 @@ export default {
 
     if (url.pathname === "/api/admin/reset-snapshots") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.ADMIN_ACCESS_KEY || !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       let body: { confirm?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       if (body.confirm !== "DELETE_ALL_VM_SNAPSHOTS") return json({ error: "confirmation_required", expected: "DELETE_ALL_VM_SNAPSHOTS" }, 400);
@@ -1468,14 +1487,23 @@ export default {
         body: JSON.stringify({ key: rateLimitKey, action: "reset" }),
       }).catch(() => new Response(null, { status: 503 }));
       if (!resetResponse.ok) return json({ error: "admin_login_state_reset_failed" }, 503);
-      return json({ ok: true });
+      return jsonWithCookie({ ok: true }, 200, adminSessionCookie(body.key));
+    }
+
+    if (url.pathname === "/api/admin/session" && request.method === "GET") {
+      if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      return json({ ok: true, identity: "admin" });
+    }
+
+    if (url.pathname === "/api/admin/logout" && request.method === "POST") {
+      return jsonWithCookie({ ok: true }, 200, clearAdminSessionCookie());
     }
 
     // Admin-only Oracle smoke-test route used to verify the outbound agent and
     // terminal UI without granting regular accounts host-shell access.
     if (url.pathname === "/api/admin/oracle-exec") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.ADMIN_ACCESS_KEY || !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) {
+      if (!adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       let body: { command?: unknown; timeout_ms?: unknown };
