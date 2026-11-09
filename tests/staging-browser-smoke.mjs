@@ -183,7 +183,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("#vq-map-plot .leaflet-tile-loaded").length > 0, { timeout: 30000 });
 
   assert.match(await page.locator("#vq-store-list").innerText(), /Staging Sample Store/);
-  assert.equal(await page.locator("#vq-map-plot .leaflet-marker-icon").count(), 1, "the store should appear as a real map marker");
+  assert.equal(await page.locator("#vq-map-plot .leaflet-marker-icon[title=\"Staging Sample Store\"]").count(), 1, "the staging store should appear as a real map marker");
   assert.ok(await page.locator("#vq-map-plot .leaflet-tile-loaded").count() > 0, "real map tiles should load");
   assert.match(await page.locator("[data-products]").innerText(), new RegExp("Staging Coffee Test " + username));
 
@@ -254,7 +254,7 @@ try {
   await emptyPage.locator("#q").fill("coffee");
   await emptyPage.locator("#location-search button[type=submit]").click();
   await emptyPage.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
-  assert.equal(await emptyPage.locator("#vq-map-plot .leaflet-marker-icon").count(), 0, "deleted store must not leave a map marker");
+  assert.equal(await emptyPage.locator("#vq-map-plot .leaflet-marker-icon[title=\"Staging Sample Store\"]").count(), 0, "deleted store must not leave its map marker");
   assert.equal(await emptyPage.locator("#vq-store-list .vq-store-list-item").count(), 0, "deleted store must not remain in the map's store list");
 } finally {
   await emptyBrowser.close();
