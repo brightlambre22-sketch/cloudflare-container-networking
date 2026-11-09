@@ -121,8 +121,8 @@ test("published Store projects remain discoverable across legacy casing and requ
 });
 
 test("the current Vampirequid workspace branding, account settings, and VM controls are present", () => {
-  assert.ok(dashboard.includes('href="/vampiresquid-mark.svg"'));
-  assert.ok(dashboard.includes('<img src="/vampiresquid-mark.svg"'));
+  assert.ok(dashboard.includes('href="/Gemini_Generated_Image_ivnvy4ivnvy4ivnv.jpg"'));
+  assert.ok(dashboard.includes('<img src="/Gemini_Generated_Image_ivnvy4ivnvy4ivnv.jpg"'));
   assert.ok(dashboard.includes("window.startVm()"));
   for (const id of ["save-vm-state", "clear-vm-state", "run-bootstrap", "paste-terminal", "copy-results", "api-key-generate", "account-id-value", "screen_container"]) {
     assert.ok(dashboard.includes('id="' + id + '"'), "workspace control should remain: " + id);
