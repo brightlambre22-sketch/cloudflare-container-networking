@@ -189,7 +189,7 @@ try {
 
   await page.locator("#q").fill("tea");
   await page.locator("#q").press("Enter");
-  await page.waitForFunction(() => document.querySelectorAll("[data-products] .pcard").length === 0, null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
   assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");
 
   await page.locator("#q").fill("coffee");
@@ -253,7 +253,7 @@ try {
   await emptyPage.locator("#vq-location").fill("75038");
   await emptyPage.locator("#q").fill("coffee");
   await emptyPage.locator("#location-search button[type=submit]").click();
-  await emptyPage.waitForFunction(() => document.querySelectorAll("[data-products] .pcard").length === 0, null, { timeout: 15000 });
+  await emptyPage.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
   assert.equal(await emptyPage.locator("#vq-map-plot .leaflet-marker-icon").count(), 0, "deleted store must not leave a map marker");
   assert.equal(await emptyPage.locator("#vq-store-list .vq-store-list-item").count(), 0, "deleted store must not remain in the map's store list");
 } finally {
