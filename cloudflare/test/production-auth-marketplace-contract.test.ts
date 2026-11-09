@@ -51,6 +51,8 @@ test("admin login survives reload through a secure HttpOnly session and supports
   assert.match(dashboard, /window\.snapshotAdminSession=true/);
   assert.match(dashboard, /fetch\('\/api\/admin\/logout'/);
   assert.match(dashboard, /session-logout/);
+  assert.doesNotMatch(dashboard, /snapshotAdminKey=adminKeyValue/, "the master admin key must not remain in browser JavaScript state");
+  assert.match(dashboard, /adminKey\.value=\x27\x27/, "clear the password field after session creation");
 });
 
 test("account deletion and admin purge remove published stores, merchant files, and business data", async () => {
