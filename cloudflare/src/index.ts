@@ -958,7 +958,14 @@ export default {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      if (!response.ok) return json({ error: "invalid_credentials" }, 401);
+      if (!response.ok) {
+        // Keep bad-password and unknown-user responses indistinguishable, but do
+        // not disguise a Durable Object outage as an incorrect password.
+        if (response.status >= 500) {
+          return json({ error: "authentication_service_unavailable" }, 503);
+        }
+        return json({ error: "invalid_credentials_or_account_not_ready" }, 401);
+      }
       const login = await response.json() as Record<string, unknown>;
       const accountId = typeof login.account_id === "string" ? login.account_id : "";
       if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
