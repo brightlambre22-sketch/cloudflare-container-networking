@@ -423,7 +423,12 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
     const response = await ledger.fetch("https://inventory-ledger.internal/orders/all");
     if (!response.ok) return json({ error: "merchant_order_history_unavailable" }, 503);
     const data = await response.json() as { orders?: unknown[] };
-    return json({ ok: true, orders: data.orders ?? [], tinycore_sync: sync.ok ? "synchronized" : "queued" });
+    const tinycoreConfigured = Boolean(env.STOCKROOM_ORIGIN && env.STOCKROOM_GATEWAY_TOKEN);
+    return json({
+      ok: true, orders: data.orders ?? [],
+      stockroom_backend: tinycoreConfigured ? "tinycore" : "cloudflare_durable_object",
+      tinycore_sync: tinycoreConfigured ? (sync.ok ? "synchronized" : "queued") : "not_configured",
+    });
   }
   if (internalPath === "/offline-allowance" && request.method === "POST") {
     const body = await request.json().catch(() => null);
@@ -471,11 +476,12 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
 
 export async function synchronizePendingOrders(env: BusinessDatabaseEnv, accountId: string): Promise<Response> {
   const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+  const stockroomBackend = env.STOCKROOM_ORIGIN && env.STOCKROOM_GATEWAY_TOKEN ? "tinycore" : "cloudflare_durable_object";
   const pendingResponse = await ledger.fetch("https://inventory-ledger.internal/orders");
   if (!pendingResponse.ok) return json({ error: "order_queue_unavailable" }, 503);
   const pending = await pendingResponse.json() as { orders?: Array<{ order_id: string }> };
   const orders = pending.orders ?? [];
-  if (!orders.length) return json({ ok: true, synchronized: 0, pending: 0 });
+  if (!orders.length) return json({ ok: true, synchronized: 0, pending: 0, stockroom_backend: stockroomBackend });
   const applied = await businessDatabaseFetch(env, accountId, "apply-orders", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ orders }),
   });
@@ -486,7 +492,7 @@ export async function synchronizePendingOrders(env: BusinessDatabaseEnv, account
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ order_ids: orderIds }),
   });
   if (!ack.ok) return json({ error: "order_acknowledgement_failed", synchronized: orderIds.length }, 503);
-  return json({ ok: true, synchronized: orderIds.length, pending: Math.max(0, orders.length - orderIds.length) });
+  return json({ ok: true, synchronized: orderIds.length, pending: Math.max(0, orders.length - orderIds.length), stockroom_backend: stockroomBackend });
 }
 
 /** Publish a versioned catalog snapshot to the always-online inventory authority. */
