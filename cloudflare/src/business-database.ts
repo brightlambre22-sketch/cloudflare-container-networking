@@ -481,10 +481,37 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   if (shouldSync) {
     // Apply pending paid orders before accepting a newer local quantity snapshot.
     // Otherwise a stale offline edit could overwrite central sales deductions.
-    const orders = await synchronizePendingOrders(env, accountId);
-    if (orders.ok) {
-      try { await syncInventoryCatalog(env, accountId); } catch { /* Keep the central catalog unchanged until sync succeeds. */ }
+    let orderSyncOk = false;
+    let catalogSyncOk = false;
+    try {
+      const orders = await synchronizePendingOrders(env, accountId);
+      orderSyncOk = orders.ok;
+    } catch (error) {
+      const incidentId = crypto.randomUUID();
+      console.error("[stockroom] pending order synchronization failed", {
+        incident_id: incidentId, account_id: accountId, path: internalPath,
+        error: error instanceof Error ? error.stack ?? error.message : String(error),
+      });
     }
+    if (orderSyncOk) {
+      try {
+        await syncInventoryCatalog(env, accountId);
+        catalogSyncOk = true;
+      } catch (error) {
+        const incidentId = crypto.randomUUID();
+        console.error("[stockroom] inventory catalog synchronization failed", {
+          incident_id: incidentId, account_id: accountId, path: internalPath,
+          error: error instanceof Error ? error.stack ?? error.message : String(error),
+        });
+      }
+    }
+    // Database writes are already committed at this point. Keep the successful
+    // response and expose sync state rather than turning a durable write into a
+    // misleading 500 that could cause a duplicate retry.
+    const headers = new Headers(response.headers);
+    headers.set("x-stockroom-order-sync", orderSyncOk ? "complete" : "queued");
+    headers.set("x-stockroom-catalog-sync", catalogSyncOk ? "complete" : "pending");
+    response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
   if (credentialType === "pos_api_key" && internalPath === "/products" && request.method === "GET" && response.ok) {
     const data = await response.json().catch(() => null) as { products?: Array<Record<string, unknown>>; [key: string]: unknown } | null;
