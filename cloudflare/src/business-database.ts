@@ -308,7 +308,7 @@ export async function businessDatabaseFetch(env: BusinessDatabaseEnv, accountId:
   return database.fetch(new Request(internalUrl, stockroomRequestInit(init)));
 }
 
-function internalPathPlaceholder(request: Request, url: URL): string {
+function internalPathPlaceholder(url: URL): string {
   return url.pathname.replace(/^\/api\/stockroom/, "") || "/";
 }
 
@@ -401,17 +401,17 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   // authoring, media uploads, and account settings remain merchant-session only.
   if (credentialType === "pos_api_key") {
     const posRouteAllowed =
-      (internalPathPlaceholder(request, url) === "/products" && request.method === "GET") ||
-      (internalPathPlaceholder(request, url) === "/movements" && request.method === "GET") ||
-      (internalPathPlaceholder(request, url) === "/offline-allowance" && request.method === "POST") ||
-      (internalPathPlaceholder(request, url) === "/offline-allowance/release" && request.method === "POST") ||
-      (internalPathPlaceholder(request, url) === "/offline-sales" && request.method === "POST") ||
-      (internalPathPlaceholder(request, url) === "/sync/orders" && request.method === "POST") ||
-      (internalPathPlaceholder(request, url) === "/orders" && request.method === "GET");
+      (internalPathPlaceholder(url) === "/products" && request.method === "GET") ||
+      (internalPathPlaceholder(url) === "/movements" && request.method === "GET") ||
+      (internalPathPlaceholder(url) === "/offline-allowance" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/offline-allowance/release" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/offline-sales" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/sync/orders" && request.method === "POST") ||
+      (internalPathPlaceholder(url) === "/orders" && request.method === "GET");
     if (!posRouteAllowed) return json({ error: "pos_key_scope_forbidden" }, 403);
   }
   url.searchParams.delete("account_id");
-  const internalPath = internalPathPlaceholder(request, url);
+  const internalPath = internalPathPlaceholder(url);
   if (internalPath === "/sync/orders" && request.method === "POST") {
     return synchronizePendingOrders(env, accountId);
   }
