@@ -110,7 +110,8 @@ test("each merchant receives a stable private network identity and authenticated
 test("published Store projects remain discoverable across legacy casing and require owner-matched publish records", () => {
   assert.ok(marketplace.includes('project.kind.trim().toLowerCase()'));
   assert.ok(marketplace.includes('projectKind !== "store"'));
-  assert.ok(marketplace.includes('mapping?.account_id !== accountId || mapping.project_id !== project.id'));
+  assert.ok(marketplace.includes('mapping?.account_id !== accountId || typeof mapping.project_id !== "string"'));
+  assert.ok(marketplace.includes('!PROJECT_ID.test(mapping.project_id) || !SITE_ID.test(slug)'));
   assert.ok(marketplace.includes('url.pathname === "/api/marketplace/profile"'));
   assert.ok(marketplace.includes('url.pathname === "/api/marketplace/geocode"'));
   assert.ok(marketplace.includes('env.PROJECT_STORAGE'));
