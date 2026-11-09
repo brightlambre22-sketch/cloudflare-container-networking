@@ -159,6 +159,7 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
     published_content_objects_deleted: publishedContentKeys.length,
     merchant_objects_deleted: merchantObjectsDeleted,
     business_database_purged: true,
+    wisp_relay_purged: true,
     inventory_ledger_purged: true,
   };
 }
