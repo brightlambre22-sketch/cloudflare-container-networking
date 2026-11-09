@@ -190,7 +190,7 @@ try {
   await page.locator("#q").fill("notfound-" + username);
   await page.locator("#q").press("Enter");
   await page.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
-  assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");
+  assert.ok(productQueries.includes("notfound-" + username), "the top search bar should send the typed query");
 
   await page.locator("#q").fill(username);
   await page.locator("#q").press("Enter");
@@ -200,7 +200,7 @@ try {
     null,
     { timeout: 15000 },
   );
-  assert.ok(productQueries.filter((query) => query === username).length >= 2, "searching coffee again should reload the real store");
+  assert.ok(productQueries.filter((query) => query === username).length >= 2, "searching the unique merchant term again should reload the real store");
   assert.ok(locationQueries.includes("75038"), "ZIP search should call the real location endpoint");
 
   assert.deepEqual(pageErrors, [], "marketplace should not throw browser JavaScript errors");
