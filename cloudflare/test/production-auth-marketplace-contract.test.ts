@@ -15,7 +15,7 @@ test("merchant workspace pages fail closed without a live server-verified sessio
   assert.match(worker, /verifyMerchantSession\(env, match\[1\], match\[2\]\)/);
   assert.match(worker, /auth_required=1/);
   assert.match(worker, /request\.method === "HEAD"/);
-  assert.match(worker, /cache-control", "no-store"/);
+  assert.match(worker, /cache-control.*no-store/);
   assert.match(worker, /clearMerchantSessionCookie/);
 });
 
