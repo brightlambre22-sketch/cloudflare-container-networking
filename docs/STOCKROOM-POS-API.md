@@ -33,7 +33,7 @@ It cannot create, edit, archive products, upload merchant media, or change accou
 ## Offline register workflow
 
 1. Generate a UUID `allocation_id` and request an allowance before disconnecting.
-2. Store the allocation response on the POS device. Allocations default to a 24-hour expiry (configurable from 60 seconds up to 7 days). The same `allocation_id` and same allocation body are idempotent; reusing it with different quantities returns a conflict. Expired allocations release their unused stock on the next ledger request.
+2. Store the allocation response on the POS device. Allocations default to a 24-hour expiry (configurable from 60 seconds up to 7 days). The same `allocation_id` and same allocation body are idempotent; reusing it with different quantities returns a conflict. Expired allocations release their unused stock on the next ledger request. The allocation response also snapshots each product's name and unit price, so a later catalog price edit does not change the amount recorded for an offline sale.
 3. While offline, persist each sale locally with a stable UUID `event_id` and `order_id`. Do not discard the local sale until the server acknowledges it.
 4. When connectivity returns, submit each sale using the original IDs. Repeating the same event/order is safe; reusing an event ID for a different order is rejected.
 5. Release the allocation when the register session ends. Unused quantities return to available stock. A fully consumed allocation closes automatically.
