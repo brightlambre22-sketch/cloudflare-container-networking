@@ -232,6 +232,9 @@ export class InventoryLedger extends DurableObject {
       const eventId=typeof body?.event_id==="string"?body.event_id:"";
       const orderId=typeof body?.order_id==="string"?body.order_id:"";
       if(!UUID.test(allocationId)||!UUID.test(eventId)||!UUID.test(orderId)||!Array.isArray(body?.items)||body.items.length<1||body.items.length>20)return json({error:"invalid_offline_sale"},400);
+      const paymentMethod=typeof body.payment_method==="string"?body.payment_method.trim().toLowerCase():"offline_pos";
+      if(!["offline_pos","cash","card","paypal","gift_card","other"].includes(paymentMethod))return json({error:"invalid_payment_method"},400);
+      const paymentReference=typeof body.payment_reference==="string"?body.payment_reference.trim().slice(0,160):null;
       const prior=sql.exec("SELECT event_id,order_id FROM offline_sales WHERE event_id=?",eventId).toArray()[0] as {event_id:string;order_id:string}|undefined;
       if(prior)return prior.order_id===orderId?json({ok:true,duplicate:true,order_id:orderId}):json({error:"offline_event_id_conflict"},409);
       if(sql.exec("SELECT order_id FROM offline_sales WHERE order_id=?",orderId).toArray()[0])return json({error:"offline_order_already_recorded"},409);
