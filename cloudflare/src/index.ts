@@ -272,10 +272,14 @@ export default {
       const rawSession = cookieValue(request, "vq_merchant_session") ?? "";
       const match = rawSession.match(/^(acct-[a-f0-9-]{36})\.([a-f0-9]{64})$/);
       if (!match || !await verifyMerchantSession(env, match[1], match[2])) {
-        const redirect = Response.redirect(new URL("/vm.html?auth_required=1", request.url), 302);
-        redirect.headers.set("cache-control", "no-store");
-        redirect.headers.append("set-cookie", clearMerchantSessionCookie());
-        return redirect;
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: new URL("/vm.html?auth_required=1", request.url).toString(),
+            "cache-control": "no-store",
+            "set-cookie": clearMerchantSessionCookie(),
+          },
+        });
       }
     }
 
