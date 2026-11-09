@@ -157,3 +157,13 @@ test("ordinary Studio saves preserve server-owned published Store metadata", asy
   assert.match(storage, /delete project\.publishSlug/);
   assert.match(storage, /Publication metadata is owned by this Worker/);
 });
+
+
+test("marketplace discovery repairs published Store projects missing their browser-overwritten slug", async () => {
+  const marketplace = await read("../src/marketplace-directory.ts");
+  assert.match(marketplace, /prefix: "published-sites\/index\/"/);
+  assert.match(marketplace, /publishedByProject\.set\(mapping\.project_id/);
+  assert.match(marketplace, /const publication = publishedByProject\.get\(project\.id\)/);
+  assert.match(marketplace, /project\.publishSlug = slug/);
+  assert.match(marketplace, /await env\.PROJECT_STORAGE\.put\(item\.key, JSON\.stringify\(project\)/);
+});
