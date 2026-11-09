@@ -38,7 +38,8 @@ async function load(){
    const totalCents=Number.isFinite(Number(order.amount_cents))?Number(order.amount_cents):(Array.isArray(order.items)?order.items.reduce((sum,item)=>sum+Number(item.unit_price_cents||0)*Number(item.quantity||0),0):0);
    const amount=el("div","amount",money(totalCents));head.append(left,amount);card.append(head);
    const payment=String(order.payment_method||"payment").toUpperCase();
-   const sync=order.sync_status==="synced"?"Synced to Stockroom":"Saved; Stockroom sync pending";
+   const backend=data.stockroom_backend==="tinycore"?"TinyCore":"Cloudflare";
+   const sync=order.sync_status==="synced"?"Synced to "+backend+" Stockroom":"Saved; Stockroom sync pending";
    card.append(el("div","meta",payment+" · Paid · "+sync));
    const items=el("ul","items");
    for(const item of (Array.isArray(order.items)?order.items:[])){
@@ -47,7 +48,8 @@ async function load(){
    }
    card.append(items);list.append(card);
   }
-  status.textContent=orders.length+" order"+(orders.length===1?"":"s")+" · "+(data.tinycore_sync==="synchronized"?"Stockroom synchronized":"Orders retained online; Stockroom sync pending");
+  const syncSummary=data.tinycore_sync==="synchronized"?"TinyCore Stockroom synchronized":data.tinycore_sync==="not_configured"?"Cloudflare Stockroom active; TinyCore bridge not configured":"Orders retained online; TinyCore sync pending";
+  status.textContent=orders.length+" order"+(orders.length===1?"":"s")+" · "+syncSummary;
  }catch(error){status.textContent=error.message||"Order history unavailable";status.style.color="#a12626"}
 }
 try{accountId=sessionStorage.getItem("vm-account-id")||"";token=sessionStorage.getItem("vm-session-token")||""}catch{}
