@@ -72,7 +72,7 @@ Content-Type: application/json
 }
 ```
 
-The server records the sale against the allocation, decrements both the allocation remainder and central available stock, and creates a `pending_sync` order in the durable outbox.
+The server records the sale against the allocation, stores the payment method/reference for reconciliation, decrements both the allocation remainder and central available stock, and creates a `pending_sync` order in the durable outbox. Supported payment methods are `offline_pos` (default), `cash`, `card`, `paypal`, `gift_card`, and `other`.
 
 ### Release unused stock
 
