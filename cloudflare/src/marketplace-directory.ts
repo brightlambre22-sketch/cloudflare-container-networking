@@ -130,25 +130,52 @@ type PublishedStore = { project_id: string; name: string; site_id: string; publi
 async function getPublishedStores(env: MarketplaceEnv, accountId: string): Promise<PublishedStore[]> {
   const prefix = "accounts/" + accountId + "/projects/";
   const stores: PublishedStore[] = [];
+  // The signed-in owner's publication index is authoritative. Older Studio
+  // clients could overwrite a project's publishSlug after publishing, so build
+  // this index first and use it to recover those already-published Store records.
+  const publishedByProject = new Map<string, { slug: string; published_at?: string }>();
+  let publishedCursor: string | undefined;
+  do {
+    const page = await env.PROJECT_STORAGE.list({
+      prefix: "published-sites/index/", limit: 1000, ...(publishedCursor ? { cursor: publishedCursor } : {}),
+    });
+    for (const item of page.objects) {
+      const mapping = await readJson<{ account_id?: string; project_id?: string; published_at?: string }>(
+        env.PROJECT_STORAGE, item.key,
+      );
+      const slug = item.key.slice("published-sites/index/".length).replace(/\.json$/, "");
+      if (mapping?.account_id !== accountId || typeof mapping.project_id !== "string" ||
+          !PROJECT_ID.test(mapping.project_id) || !SITE_ID.test(slug)) continue;
+      publishedByProject.set(mapping.project_id, { slug, published_at: mapping.published_at });
+    }
+    publishedCursor = page.truncated ? page.cursor : undefined;
+  } while (publishedCursor);
+
   let cursor: string | undefined;
   do {
     const page = await env.PROJECT_STORAGE.list({ prefix, limit: 100, ...(cursor ? { cursor } : {}) });
     for (const item of page.objects) {
       const project = await readJson<Record<string, unknown>>(env.PROJECT_STORAGE, item.key);
       // Older Studio releases saved the Store type with different casing.
-      // Publication is confirmed independently by the signed-in owner's site index.
       const projectKind = typeof project?.kind === "string" ? project.kind.trim().toLowerCase() : "";
-      if (!project || projectKind !== "store" || typeof project.id !== "string" ||
-          !PROJECT_ID.test(project.id) || typeof project.publishSlug !== "string" || !SITE_ID.test(project.publishSlug)) continue;
-      const mapping = await readJson<{ account_id?: string; project_id?: string }>(
-        env.PROJECT_STORAGE, "published-sites/index/" + project.publishSlug + ".json",
-      );
-      if (mapping?.account_id !== accountId || mapping.project_id !== project.id) continue;
+      if (!project || projectKind !== "store" || typeof project.id !== "string" || !PROJECT_ID.test(project.id)) continue;
+      const publication = publishedByProject.get(project.id);
+      if (!publication) continue;
+      const slug = publication.slug;
+      // Repair project documents damaged by the old post-publish sync behavior.
+      if (project.publishSlug !== slug || typeof project.publishedUrl !== "string") {
+        project.publishSlug = slug;
+        project.publishedUrl = "/sites/" + slug + "/";
+        if (typeof project.publishedAt !== "string" && publication.published_at) project.publishedAt = publication.published_at;
+        await env.PROJECT_STORAGE.put(item.key, JSON.stringify(project), {
+          httpMetadata: { contentType: "application/json; charset=utf-8" },
+        });
+      }
       stores.push({
         project_id: project.id,
         name: typeof project.name === "string" ? project.name.slice(0, 80) : "Local store",
-        site_id: project.publishSlug,
-        published_url: "/sites/" + project.publishSlug + "/",
+        site_id: slug,
+        published_url: "/sites/" + slug + "/",
       });
       if (stores.length >= 100) return stores;
     }

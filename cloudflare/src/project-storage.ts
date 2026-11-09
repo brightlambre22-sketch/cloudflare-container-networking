@@ -144,6 +144,24 @@ export async function handleProjectStorageRequest(request: Request, env: Project
   } catch { return json({ error: "invalid_project_json" }, 400); }
   if (!project || project.id !== projectId || typeof project.name !== "string" || project.name.trim().length < 1 ||
       project.name.length > 80 || typeof project.kind !== "string" || project.kind.length > 40) return json({ error: "invalid_project_document" }, 400);
+  // Publication metadata is owned by this Worker, not by the browser's possibly stale
+  // project copy. Preserve it across ordinary Studio saves so publishing cannot be
+  // accidentally undone by the post-publish sync.
+  const existingProjectObject = await env.PROJECT_STORAGE.get(key);
+  let existingProject: Record<string, unknown> | null = null;
+  if (existingProjectObject) {
+    try { existingProject = await existingProjectObject.json() as Record<string, unknown>; } catch { /* replace corrupt project data */ }
+  }
+  const existingPublishSlug = existingProject?.publishSlug;
+  if (typeof existingPublishSlug === "string" && /^[a-f0-9]{32}$/.test(existingPublishSlug)) {
+    project.publishSlug = existingPublishSlug;
+    if (typeof existingProject?.publishedUrl === "string") project.publishedUrl = existingProject.publishedUrl;
+    if (typeof existingProject?.publishedAt === "string") project.publishedAt = existingProject.publishedAt;
+  } else {
+    delete project.publishSlug;
+    delete project.publishedUrl;
+    delete project.publishedAt;
+  }
   const body = JSON.stringify(project);
   const size = new TextEncoder().encode(body).byteLength;
   const existing = await env.PROJECT_STORAGE.head(key);
