@@ -33,6 +33,7 @@ async function geocodeStoreAddress(bucket: R2Bucket, address: string): Promise<{
   const endpoint = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(address);
   const response = await fetch(endpoint, {
     headers: { "accept": "application/json", "user-agent": "Vampirequid-Store-Locator/1.0" },
+    signal: AbortSignal.timeout(8000),
   });
   if (!response.ok) throw new Error("geocoder_http_" + response.status);
   const results = await response.json() as Array<{ lat?: string; lon?: string; display_name?: string }>;
@@ -43,6 +44,48 @@ async function geocodeStoreAddress(bucket: R2Bucket, address: string): Promise<{
   const result = { latitude, longitude, display_name: String(first.display_name ?? address).slice(0, 500), cached_at: new Date().toISOString() };
   await bucket.put(cacheKey, JSON.stringify(result), { httpMetadata: { contentType: "application/json" } });
   return result;
+}
+
+async function geocodePostalCode(bucket: R2Bucket, postalCode: string): Promise<{
+  latitude: number; longitude: number; display_name: string; provider: string;
+} | null> {
+  const zip = postalCode.trim().slice(0, 5);
+  const cacheKey = "marketplace/geocode/us-zip-" + zip + ".json";
+  const cached = await readJson<{ latitude: number; longitude: number; display_name: string; provider: string; cached_at: string }>(bucket, cacheKey);
+  if (cached && Date.now() - Date.parse(cached.cached_at) < 30 * 24 * 60 * 60 * 1000 &&
+      validCoordinates(cached.latitude, cached.longitude)) return cached;
+
+  try {
+    const response = await fetch("https://api.zippopotam.us/us/" + zip, {
+      headers: { "accept": "application/json" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (response.status === 404) return null;
+    if (response.ok) {
+      const data = await response.json() as {
+        places?: Array<{ latitude?: string; longitude?: string; "place name"?: string; "state abbreviation"?: string }>;
+      };
+      const place = data.places?.[0];
+      const latitude = Number(place?.latitude);
+      const longitude = Number(place?.longitude);
+      if (place && validCoordinates(latitude, longitude)) {
+        const result = {
+          latitude,
+          longitude,
+          display_name: [place["place name"], place["state abbreviation"], zip, "USA"].filter(Boolean).join(", "),
+          provider: "Zippopotam.us",
+          cached_at: new Date().toISOString(),
+        };
+        await bucket.put(cacheKey, JSON.stringify(result), { httpMetadata: { contentType: "application/json" } });
+        return result;
+      }
+    }
+  } catch {
+    // Fall back to Nominatim if the ZIP service is unavailable or times out.
+  }
+
+  const fallback = await geocodeStoreAddress(bucket, zip + ", USA");
+  return fallback ? { ...fallback, provider: "OpenStreetMap Nominatim" } : null;
 }
 
 const json = (value: unknown, status = 200) => Response.json(value, {
@@ -198,7 +241,7 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       return json({ error: "invalid_postal_code", message: "Enter a valid US ZIP code." }, 400);
     }
     try {
-      const location = await geocodeStoreAddress(env.PROJECT_STORAGE, postalCode + ", USA");
+      const location = await geocodePostalCode(env.PROJECT_STORAGE, postalCode);
       if (!location) return json({ error: "location_not_found", message: "We couldn't locate that ZIP code. Check it and try again." }, 404);
       return json({
         ok: true,
@@ -206,7 +249,7 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
         latitude: location.latitude,
         longitude: location.longitude,
         display_name: location.display_name,
-        provider: "OpenStreetMap Nominatim",
+        provider: location.provider,
       });
     } catch (error) {
       return json({
@@ -239,7 +282,9 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     postal = cityZip[1];
     city = "";
     try {
-      const location = await geocodeStoreAddress(env.PROJECT_STORAGE, postal + ", USA");
+      const location = /^\d{5}(?:-\d{4})?$/.test(postal)
+        ? await geocodePostalCode(env.PROJECT_STORAGE, postal)
+        : await geocodeStoreAddress(env.PROJECT_STORAGE, postal + ", USA");
       if (location) {
         latitude = location.latitude;
         longitude = location.longitude;
@@ -275,6 +320,17 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
     return json({ error: "invalid_cursor" }, 400);
   }
 
+  // Marketplace metadata is not an authority for account existence. Read the
+  // shared auth registry once per search and fail closed if it cannot be checked.
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const activeResponse = await authRegistry.fetch("https://account-registry.internal/admin/list-accounts")
+    .catch(() => new Response(null, { status: 503 }));
+  if (!activeResponse.ok) return json({ error: "merchant_directory_unavailable" }, 503);
+  const activeData = await activeResponse.json() as { accounts?: Array<{ account_id?: unknown }> };
+  const activeAccounts = new Set((Array.isArray(activeData.accounts) ? activeData.accounts : [])
+    .map((entry) => entry.account_id)
+    .filter((id): id is string => typeof id === "string" && ACCOUNT_ID.test(id)));
+
   const matches: Array<Record<string, unknown>> = [];
   const categories = new Set<string>();
   let cursor: string | undefined;
@@ -290,7 +346,7 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       const storeLatitude = profile?.latitude;
       const storeLongitude = profile?.longitude;
       if (!profile || profile.active !== true || typeof profile.account_id !== "string" ||
-          !ACCOUNT_ID.test(profile.account_id) || typeof profile.site_id !== "string" ||
+          !ACCOUNT_ID.test(profile.account_id) || !activeAccounts.has(profile.account_id) || typeof profile.site_id !== "string" ||
           !SITE_ID.test(profile.site_id) || typeof storeLatitude !== "number" ||
           typeof storeLongitude !== "number" || !validCoordinates(storeLatitude, storeLongitude)) continue;
       const storeCity = String(profile.city ?? "");

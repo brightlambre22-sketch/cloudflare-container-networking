@@ -80,6 +80,151 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise<{ profile_deleted: boolean; index_objects_deleted: number; published_content_objects_deleted: number; merchant_objects_deleted: number; business_database_purged: boolean; wisp_relay_purged: boolean; inventory_ledger_purged: boolean }> {
+  const profileKey = "marketplace/merchants/" + accountId + ".json";
+  const syncKey = "marketplace/catalog-sync/" + accountId + ".json";
+  const indexKeys: string[] = [];
+  const publishedContentKeys: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await env.PROJECT_STORAGE.list({
+      prefix: "published-sites/index/", limit: 1000, ...(cursor ? { cursor } : {}),
+    });
+    for (const object of page.objects) {
+      const mapping = await env.PROJECT_STORAGE.get(object.key);
+      if (!mapping) continue;
+      const value = await mapping.json<{ account_id?: unknown }>().catch(() => null);
+      if (value?.account_id !== accountId) continue;
+      indexKeys.push(object.key);
+      const slug = object.key.slice("published-sites/index/".length).replace(/\.json$/, "");
+      if (!/^[a-f0-9]{32}$/.test(slug)) continue;
+      let siteCursor: string | undefined;
+      do {
+        const sitePage = await env.PROJECT_STORAGE.list({
+          prefix: "published-sites/" + slug + "/", limit: 1000, ...(siteCursor ? { cursor: siteCursor } : {}),
+        });
+        publishedContentKeys.push(...sitePage.objects.map((entry) => entry.key));
+        siteCursor = sitePage.truncated ? sitePage.cursor : undefined;
+      } while (siteCursor);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  const profile = await env.PROJECT_STORAGE.get(profileKey);
+  let profileDeleted = false;
+  if (profile) {
+    await env.PROJECT_STORAGE.delete(profileKey);
+    profileDeleted = true;
+  }
+  await env.PROJECT_STORAGE.delete(syncKey);
+  for (let offset = 0; offset < indexKeys.length; offset += 1000) {
+    await env.PROJECT_STORAGE.delete(indexKeys.slice(offset, offset + 1000));
+  }
+  for (let offset = 0; offset < publishedContentKeys.length; offset += 1000) {
+    await env.PROJECT_STORAGE.delete(publishedContentKeys.slice(offset, offset + 1000));
+  }
+
+  let merchantObjectsDeleted = 0;
+  let merchantCursor: string | undefined;
+  do {
+    const page = await env.PROJECT_STORAGE.list({
+      prefix: "merchants/" + accountId + "/", limit: 1000,
+      ...(merchantCursor ? { cursor: merchantCursor } : {}),
+    });
+    if (page.objects.length) {
+      await env.PROJECT_STORAGE.delete(page.objects.map((object) => object.key));
+      merchantObjectsDeleted += page.objects.length;
+    }
+    merchantCursor = page.truncated ? page.cursor : undefined;
+  } while (merchantCursor);
+
+  const businessDatabasePurge = await businessDatabaseFetch(env, accountId, "purge", { method: "POST" });
+  if (!businessDatabasePurge.ok) throw new Error("business_database_purge_http_" + businessDatabasePurge.status);
+
+  const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+  const relayPurge = await relay.fetch("https://wisp-relay.internal/purge", { method: "POST" });
+  if (!relayPurge.ok) throw new Error("wisp_relay_purge_http_" + relayPurge.status);
+  const relayResult = await relayPurge.json() as { ok?: unknown; purged?: unknown };
+  if (relayResult.ok !== true || relayResult.purged !== true) throw new Error("wisp_relay_purge_unverified");
+
+  const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+  const ledgerPurge = await ledger.fetch("https://inventory-ledger.internal/purge", { method: "POST" });
+  if (!ledgerPurge.ok) throw new Error("inventory_ledger_purge_http_" + ledgerPurge.status);
+  const ledgerResult = await ledgerPurge.json() as { ok?: unknown; purged?: unknown };
+  if (ledgerResult.ok !== true || ledgerResult.purged !== true) throw new Error("inventory_ledger_purge_unverified");
+
+  return {
+    profile_deleted: profileDeleted,
+    index_objects_deleted: indexKeys.length,
+    published_content_objects_deleted: publishedContentKeys.length,
+    merchant_objects_deleted: merchantObjectsDeleted,
+    business_database_purged: true,
+    wisp_relay_purged: true,
+    inventory_ledger_purged: true,
+  };
+}
+
+function cookieValue(request: Request, name: string): string | undefined {
+  const cookie = request.headers.get("cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); } catch { return undefined; }
+  }
+  return undefined;
+}
+
+function jsonWithCookie(data: unknown, status: number, cookie: string): Response {
+  const response = json(data, status);
+  const headers = new Headers(response.headers);
+  headers.append("set-cookie", cookie);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function merchantSessionCookie(accountId: string, token: string, maxAge = 604800): string {
+  return "vq_merchant_session=" + encodeURIComponent(accountId + "." + token) +
+    "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Lax";
+}
+
+function adminSessionCookie(token: string, maxAge = 28800): string {
+  return "vq_admin_session=" + encodeURIComponent(token) +
+    "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Strict";
+}
+
+function clearAdminSessionCookie(): string {
+  return "vq_admin_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
+}
+
+async function adminAuthorized(request: Request, env: Env): Promise<boolean> {
+  if (!env.ADMIN_ACCESS_KEY) return false;
+  const authorization = request.headers.get("authorization");
+  if (authorized(authorization, env.ADMIN_ACCESS_KEY)) return true;
+  const headerKey = request.headers.get("x-admin-key");
+  if (headerKey && authorized("Bearer " + headerKey, env.ADMIN_ACCESS_KEY)) return true;
+  const token = cookieValue(request, "vq_admin_session");
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return false;
+  const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const response = await registry.fetch("https://account-registry.internal/admin/session/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  }).catch(() => new Response(null, { status: 503 }));
+  return response.ok;
+}
+
+function clearMerchantSessionCookie(): string {
+  return "vq_merchant_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
+}
+
+async function verifyMerchantSession(env: Env, accountId: string, token: string): Promise<boolean> {
+  if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || !/^[a-f0-9]{64}$/.test(token)) return false;
+  const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const response = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ account_id: accountId, token }),
+  }).catch(() => new Response(null, { status: 503 }));
+  return response.ok;
+}
+
 function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
@@ -121,11 +266,34 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // These pages contain account-specific dashboards and controls. Enforce the
+    // session at the Worker edge so an unauthenticated visitor never receives
+    // the private page shell or its client-side application.
+    const protectedMerchantPages = new Set([
+      "/studio", "/studio.html", "/workspace", "/workspace.html",
+      "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html",
+    ]);
+    const requestedPage = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
+    if ((request.method === "GET" || request.method === "HEAD") && protectedMerchantPages.has(requestedPage)) {
+      const rawSession = cookieValue(request, "vq_merchant_session") ?? "";
+      const match = rawSession.match(/^(acct-[a-f0-9-]{36})\.([a-f0-9]{64})$/);
+      if (!match || !await verifyMerchantSession(env, match[1], match[2])) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: new URL("/vm.html?auth_required=1", request.url).toString(),
+            "cache-control": "no-store",
+            "set-cookie": clearMerchantSessionCookie(),
+          },
+        });
+      }
+    }
+
     // Read-only account ID inventory from the shared AccountRegistry Durable Object.
     // Uses the existing /api/admin/accounts path with GET; does not delete or modify accounts.
     if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -144,7 +312,7 @@ export default {
     // The shared auth registry and Admin baseline snapshot are preserved.
     if (url.pathname === "/api/admin/accounts" && request.method === "DELETE") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
 
@@ -265,6 +433,13 @@ export default {
         } while (mediaCursor);
 
         try {
+          const marketplace = await purgeMarketplaceAccountData(env, accountId);
+          if (!marketplace.inventory_ledger_purged) throw new Error("inventory_ledger_purge_unverified");
+        } catch {
+          failures.push({ account_id: accountId, step: "marketplace_and_inventory", error: "purge_failed" });
+        }
+
+        try {
           await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json");
         } catch {
           failures.push({ account_id: accountId, step: "runtime_job", error: "r2_delete_failed" });
@@ -287,7 +462,7 @@ export default {
     // This is separate from DELETE /api/admin/accounts, which clears all registered accounts.
     if (url.pathname === "/api/admin/purge-accounts" && request.method === "POST") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized(request.headers.get("authorization"), env.ADMIN_ACCESS_KEY)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       const body = await request.json().catch(() => null) as {
@@ -417,6 +592,13 @@ export default {
             }
           }
           steps.product_media_objects_deleted = errors.some((entry) => entry.step === "product_media_objects") ? null : mediaKeys.length;
+          try {
+            const marketplace = await purgeMarketplaceAccountData(env, accountId);
+            steps.marketplace_and_inventory = marketplace;
+          } catch {
+            errors.push({ step: "marketplace_and_inventory", error: "purge_failed" });
+          }
+
           try {
             await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json");
             steps.runtime_job_deleted = true;
@@ -809,10 +991,10 @@ export default {
       const identityRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
       const identityResponse = await identityRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
       const identity = identityResponse.ok ? await identityResponse.json() as { virtual_ip?: string; virtual_mac?: string } : {};
-      return json({ ...session, username, status: isComplete ? "complete" : "provisioning",
+      return jsonWithCookie({ ...session, username, status: isComplete ? "complete" : "provisioning",
         snapshot_identity: accountId, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac,
         snapshot_cloned: isComplete, baseline_id: env.VM_BASELINE_ID ?? "admin",
-        progress_endpoint: "/api/auth/registration-status" }, 202);
+        progress_endpoint: "/api/auth/registration-status" }, 202, merchantSessionCookie(accountId, session.session_token));
     }
 
     // Ordinary merchant signup provisions a new merchant account directly.
@@ -934,10 +1116,11 @@ export default {
       }
 
       const session = await signupSession.json() as { account_id: string; session_token: string; expires_at: string };
-      return json({ ...session, username, status: "provisioning", snapshot_identity: accountId,
+      return jsonWithCookie({ ...session, username, status: "provisioning", snapshot_identity: accountId,
         virtual_ip: allocation.virtual_ip, virtual_mac: allocation.virtual_mac,
         snapshot_cloned: false, baseline_id: baselineId, progress_endpoint: "/api/auth/registration-status",
-        provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." }, 202);
+        provisioning: "The verified Admin snapshot is being copied to this account in the background; Linux is not booted during signup." },
+        202, merchantSessionCookie(accountId, session.session_token));
     }
 
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
@@ -958,13 +1141,20 @@ export default {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
-      if (!response.ok) return json({ error: "invalid_credentials" }, 401);
+      if (!response.ok) {
+        // Keep bad-password and unknown-user responses indistinguishable, but do
+        // not disguise a Durable Object outage as an incorrect password.
+        if (response.status >= 500) {
+          return json({ error: "authentication_service_unavailable" }, 503);
+        }
+        return json({ error: "invalid_credentials_or_account_not_ready" }, 401);
+      }
       const login = await response.json() as Record<string, unknown>;
       const accountId = typeof login.account_id === "string" ? login.account_id : "";
       if (!/^acct-[a-f0-9-]{36}$/.test(accountId)) return json({ error: "invalid_account_session" }, 500);
       const identity = await getOrAllocateAccountNetworkIdentity(env, accountId);
       if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
-      return json({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac });
+      return jsonWithCookie({ ...login, username, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac }, 200, merchantSessionCookie(accountId, String(login.session_token ?? "")));
     }
 
     if (url.pathname === "/api/auth/registration-status" && request.method === "POST") {
@@ -1056,10 +1246,6 @@ export default {
       }).catch(() => new Response("account_data_purge_failed", { status: 500 }));
       if (!accountData.ok) failures.push("account_registry");
 
-      const businessDatabasePurge = await businessDatabaseFetch(env, accountId, "purge", { method: "POST" })
-        .catch(() => new Response("business_database_purge_failed", { status: 500 }));
-      if (!businessDatabasePurge.ok) failures.push("business_database");
-
       const provisioner = env.ACCOUNT_PROVISIONER.get(env.ACCOUNT_PROVISIONER.idFromName(accountId));
       const provisionerData = await provisioner.fetch("https://account-provisioner.internal/purge", { method: "POST" })
         .catch(() => new Response("provisioner_purge_failed", { status: 500 }));
@@ -1080,6 +1266,9 @@ export default {
           cursor = page.truncated ? page.cursor : undefined;
         } while (cursor);
       }
+      try { await purgeMarketplaceAccountData(env, accountId); }
+      catch { failures.push("marketplace_and_inventory"); }
+
       try { await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json"); }
       catch { failures.push("runtime_job"); }
 
@@ -1092,7 +1281,7 @@ export default {
       if (!authPurge.ok) return json({ error: "account_auth_cleanup_failed" }, 502);
       const result = await authPurge.json().catch(() => ({})) as { verification?: { passed?: unknown } };
       if (result.verification?.passed !== true) return json({ error: "account_auth_cleanup_unverified" }, 502);
-      return json({ ok: true, deleted: true, account_id: accountId });
+      return jsonWithCookie({ ok: true, deleted: true, account_id: accountId }, 200, clearMerchantSessionCookie());
     }
 
     if (url.pathname === "/api/auth/logout" && request.method === "POST") {
@@ -1107,7 +1296,7 @@ export default {
         body: JSON.stringify({ account_id: accountId, token: sessionToken }),
       });
       if (!revoked.ok) return json({ error: "logout_failed" }, 502);
-      return json({ ok: true });
+      return jsonWithCookie({ ok: true }, 200, clearMerchantSessionCookie());
     }
 
     if (url.pathname === "/api/auth/session" && request.method === "POST") {
@@ -1123,7 +1312,7 @@ export default {
       const verified = await response.json() as { username?: unknown };
       const identity = await getOrAllocateAccountNetworkIdentity(env, body.account_id);
       if (!identity) return json({ error: "account_network_identity_unavailable" }, 409);
-      return json({ ok: true, ...(typeof verified.username === "string" ? { username: verified.username } : {}), ...identity });
+      return jsonWithCookie({ ok: true, ...(typeof verified.username === "string" ? { username: verified.username } : {}), ...identity }, 200, merchantSessionCookie(body.account_id, body.session_token));
     }
 
     if (url.pathname === "/api/network/ticket" && request.method === "POST") {
@@ -1131,7 +1320,7 @@ export default {
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const accountId = typeof body.account_id === "string" ? body.account_id : "";
       if (accountId === "admin") {
-                if (!env.ADMIN_ACCESS_KEY || typeof body.admin_key !== "string" || !authorized("Bearer " + body.admin_key, env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+                if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       } else {
         if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
         const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -1275,7 +1464,7 @@ export default {
 
     if (url.pathname === "/api/admin/reset-snapshots") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.ADMIN_ACCESS_KEY || !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       let body: { confirm?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       if (body.confirm !== "DELETE_ALL_VM_SNAPSHOTS") return json({ error: "confirmation_required", expected: "DELETE_ALL_VM_SNAPSHOTS" }, 400);
@@ -1299,49 +1488,63 @@ export default {
     if (url.pathname === "/api/admin/access") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       let body: { key?: unknown };
-      try { body = (await request.json()) as { key?: unknown }; }
+      try { body = await request.json() as typeof body; }
       catch { return json({ error: "invalid_json" }, 400); }
       if (!env.ADMIN_ACCESS_KEY || !/^[A-Za-z0-9]{15,128}$/.test(env.ADMIN_ACCESS_KEY)) {
         return json({ error: "admin_access_key_not_configured" }, 503);
       }
 
-      // Three attempts per source IP in a rolling 15-minute window. The IP is
-      // SHA-256 hashed before it is persisted; it is used only as a rate-limit key,
-      // never as an allowlist or an authorization factor.
       const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "unknown";
       const ipDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(clientIp));
       const rateLimitKey = Array.from(new Uint8Array(ipDigest), (b) => b.toString(16).padStart(2, "0")).join("");
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-      const attemptResponse = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
+      const attempt = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: rateLimitKey, action: "consume" }),
       }).catch(() => new Response(null, { status: 503 }));
-      if (!attemptResponse.ok && attemptResponse.status !== 429) {
-        return json({ error: "admin_login_rate_limit_unavailable" }, 503);
-      }
-      const attempt = await attemptResponse.json().catch(() => ({})) as {
-        allowed?: boolean; attempts_remaining?: number; retry_after_ms?: number;
-      };
-      if (!attemptResponse.ok || attempt.allowed !== true) {
-        return json({ error: "admin_login_locked", retry_after_ms: attempt.retry_after_ms ?? 900000 }, 429);
-      }
-      if (typeof body.key !== "string" || !/^[A-Za-z0-9]{15,128}$/.test(body.key) ||
-          !authorized("Bearer " + body.key, env.ADMIN_ACCESS_KEY)) {
-        return json({ error: "invalid_admin_key", attempts_remaining: attempt.attempts_remaining ?? 0 }, 401);
+      if (!attempt.ok) return json({ error: attempt.status === 429 ? "too_many_attempts" : "admin_login_throttle_unavailable" }, attempt.status === 429 ? 429 : 503);
+      if (typeof body.key !== "string" || !authorized("Bearer " + body.key, env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "unauthorized" }, 401);
       }
       const resetResponse = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: rateLimitKey, action: "reset" }),
       }).catch(() => new Response(null, { status: 503 }));
       if (!resetResponse.ok) return json({ error: "admin_login_state_reset_failed" }, 503);
-      return json({ ok: true });
+
+      const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+      const token = Array.from(tokenBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const created = await authRegistry.fetch("https://account-registry.internal/admin/session/create", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, expires_at: Date.now() + 8 * 60 * 60 * 1000 }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!created.ok) return json({ error: "admin_session_create_failed" }, 503);
+      return jsonWithCookie({ ok: true }, 200, adminSessionCookie(token));
+    }
+
+    if (url.pathname === "/api/admin/session" && request.method === "GET") {
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      return json({ ok: true, identity: "admin" });
+    }
+
+    if (url.pathname === "/api/admin/logout" && request.method === "POST") {
+      const token = cookieValue(request, "vq_admin_session");
+      if (token && /^[a-f0-9]{64}$/.test(token)) {
+        const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const revoked = await registry.fetch("https://account-registry.internal/admin/session/revoke", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!revoked.ok) return jsonWithCookie({ error: "admin_session_revoke_failed" }, 503, clearAdminSessionCookie());
+      }
+      return jsonWithCookie({ ok: true }, 200, clearAdminSessionCookie());
     }
 
     // Admin-only Oracle smoke-test route used to verify the outbound agent and
     // terminal UI without granting regular accounts host-shell access.
     if (url.pathname === "/api/admin/oracle-exec") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!env.ADMIN_ACCESS_KEY || !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       let body: { command?: unknown; timeout_ms?: unknown };
@@ -1452,7 +1655,7 @@ export default {
     if (url.pathname === "/api/vm/agent-ticket") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
             if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       const requestedIdentity = request.headers.get("x-agent-identity") ?? "admin";
       if (requestedIdentity !== "admin" && requestedIdentity !== "oracle") {
         return json({ error: "unknown_agent_identity", supported_identities: ["admin", "oracle"] }, 400);
@@ -1512,7 +1715,7 @@ export default {
       const identity = snapshotIdentity.toLowerCase();
       const isAdmin = identity === "admin";
             if (isAdmin && !env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (isAdmin && !authorized("Bearer " + (request.headers.get("x-admin-key") ?? ""), env.ADMIN_ACCESS_KEY)) return json({ error: "unauthorized" }, 401);
+      if (isAdmin && !await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       // Account snapshots accept either the one-time provisioning API key or a
       // short-lived login session bound to this exact account ID.

@@ -34,6 +34,40 @@ export class AccountRegistry extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
+    // Opaque, revocable admin browser sessions. Only token digests are persisted.
+    if (url.pathname === "/admin/session/create" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { token?: unknown; expires_at?: unknown } | null;
+      if (!body || typeof body.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token) ||
+          typeof body.expires_at !== "number" || !Number.isSafeInteger(body.expires_at) ||
+          body.expires_at <= Date.now() || body.expires_at > Date.now() + 8 * 60 * 60 * 1000) {
+        return json({ error: "invalid_admin_session" }, 400);
+      }
+      const digest = await this.sha256(body.token);
+      await this.ctx.storage.put("admin-session:" + digest, { expires_at: body.expires_at });
+      return json({ ok: true });
+    }
+
+    if (url.pathname === "/admin/session/verify" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { token?: unknown } | null;
+      if (typeof body?.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token)) return json({ error: "unauthorized" }, 401);
+      const digest = await this.sha256(body.token);
+      const key = "admin-session:" + digest;
+      const session = await this.ctx.storage.get<{ expires_at: number }>(key);
+      if (!session || session.expires_at <= Date.now()) {
+        if (session) await this.ctx.storage.delete(key);
+        return json({ error: "unauthorized" }, 401);
+      }
+      return json({ ok: true });
+    }
+
+    if (url.pathname === "/admin/session/revoke" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { token?: unknown } | null;
+      if (typeof body?.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token)) return json({ error: "invalid_admin_session" }, 400);
+      const digest = await this.sha256(body.token);
+      await this.ctx.storage.delete("admin-session:" + digest);
+      return json({ ok: true, revoked: true });
+    }
+
     // Internal Worker-only Admin login throttle. The caller supplies a SHA-256
     // digest of the source IP, not the raw address. Three attempts are allowed
     // in a rolling 15-minute window; a successful login clears the counter.

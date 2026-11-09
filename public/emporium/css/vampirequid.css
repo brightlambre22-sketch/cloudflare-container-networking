@@ -52,3 +52,26 @@
 .vq-load-wrap{display:flex;justify-content:center;padding:1.5rem 0}
 @media(max-width:760px){.vq-checkout-grid{grid-template-columns:1fr}.vq-filter-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.vq-filter-controls input,.vq-filter-controls select{width:100%}}
 @media(max-width:700px){.vq-store-map__head{display:block}.vq-store-map__hint{margin-top:.35rem}.vq-store-map__body{grid-template-columns:1fr}.vq-store-list{max-height:220px}}
+
+/* Marketplace map, store navigation, and brand visibility */
+.emp-brand__logo{display:block;width:56px;height:56px;flex:0 0 56px;object-fit:contain;object-position:center;border-radius:0;background:transparent;box-shadow:none;transform:none}
+.emp-brand{gap:.8rem}
+.vq-store-link{color:inherit;text-decoration:underline;text-decoration-color:#a9b4c8;text-underline-offset:3px}
+.vq-store-link:hover{color:#176044;text-decoration-color:currentColor}
+.vq-store-map{margin:1.2rem 0;padding:1rem;border:1px solid #e4e5eb;border-radius:1rem;background:#fff}
+.vq-store-map__head{display:flex;justify-content:space-between;align-items:end;gap:1rem;margin-bottom:.75rem}
+.vq-map-plot{height:390px;min-height:300px;border-radius:.75rem;overflow:hidden;background:#eef3f0;position:relative;z-index:0}
+.vq-map-plot .leaflet-container{width:100%;height:100%;font:inherit;z-index:0}
+.vq-map-message{height:100%;min-height:260px;display:grid;place-items:center;padding:2rem;text-align:center;color:#606477}
+.vq-store-list{list-style:none;padding:0;margin:0;max-height:390px;overflow:auto}
+.vq-store-list-item{padding:.4rem 0 .65rem}
+.vq-store-list-item+.vq-store-list-item{border-top:1px solid #ececf1}
+.vq-store-filter{display:flex;align-items:center;gap:.65rem;width:100%;padding:.65rem .35rem;border-radius:.55rem;text-align:left;color:#29283a;text-decoration:none}
+.vq-store-filter:hover{background:#f3f0fb;color:#29283a}
+.vq-store-filter>span:nth-child(2){display:grid;flex:1;min-width:0}
+.vq-store-filter small{display:block;color:#686b7b;font-size:.78rem;overflow-wrap:anywhere}
+.vq-store-number{display:grid;place-items:center;flex:0 0 1.8rem;width:1.8rem;height:1.8rem;border-radius:50%;background:#6545cd;color:#fff;font-weight:800}
+.vq-store-actions{font-size:.78rem;color:#686b7b;white-space:nowrap}
+.vq-store-streetview{display:inline-block;margin-left:2.8rem;padding:.15rem 0;color:#176044;font-size:.78rem;font-weight:750;text-decoration:underline;text-underline-offset:2px}
+.vq-store-streetview:hover{color:#0b4932}
+@media(max-width:760px){.vq-store-map__head{display:block}.vq-store-map__hint{margin-top:.35rem}.vq-store-map__body{grid-template-columns:1fr}.vq-map-plot{height:320px}.vq-store-list{max-height:280px}.emp-brand__logo{width:50px;height:50px;flex-basis:50px}}

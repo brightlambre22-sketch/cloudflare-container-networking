@@ -39,6 +39,18 @@ export class InventoryLedger extends DurableObject {
     const now = new Date().toISOString();
     this.expireOfflineAllocations(now);
 
+    // Account deletion must erase the durable online catalog, reservations,
+    // order outbox, and offline POS allocations for this merchant.
+    if (url.pathname === "/purge" && request.method === "POST") {
+      this.ctx.storage.transactionSync(() => {
+        for (const table of [
+          "inventory_reservation_items", "inventory_reservations", "inventory_orders",
+          "offline_allocation_items", "offline_allocations", "offline_sales", "inventory_catalog",
+        ]) sql.exec("DELETE FROM " + table);
+      });
+      return json({ ok: true, purged: true });
+    }
+
     if (url.pathname === "/catalog/sync" && request.method === "PUT") {
       const body = await request.json().catch(() => null) as { products?: unknown } | null;
       if (!Array.isArray(body?.products) || body.products.length > 5000) return json({ error: "invalid_catalog" }, 400);

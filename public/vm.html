@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="/vampiresquid-mark.svg">
+<link rel="icon" type="image/jpeg" href="/Gemini_Generated_Image_ivnvy4ivnvy4ivnv.jpg">
 <title>Developer Workspace · Vampirequid</title>
 <style>
 body{margin:0;background:#111;color:#ddd;font-family:monospace}#login-panel{padding:12px;background:#181818;border-bottom:1px solid #333}#login-panel h2{font-size:16px;margin:0 0 8px}#login-panel p{font-size:12px;line-height:1.5}#login-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}#login-form input,#login-form select{font:inherit;padding:7px;max-width:100%}#login-message{color:#ffc66d}body:not(.logged-in) #status,body:not(.logged-in) #toolbar,body:not(.logged-in) #results,body:not(.logged-in) #myst-log,body:not(.logged-in) #screen_container{display:none}
@@ -92,7 +92,7 @@ body.oracle-terminal-mode #myst-log{height:calc(100vh - 310px);min-height:300px;
 </head>
 <body>
 <section id="login-panel">
-  <h2 style="display:flex;align-items:center;gap:10px"><img src="/vampiresquid-mark.svg" alt="" width="36" height="36"> Vampirequid · Developer Workspace</h2>
+  <h2 style="display:flex;align-items:center;gap:10px"><img src="/Gemini_Generated_Image_ivnvy4ivnvy4ivnv.jpg" alt="" width="49" height="36" style="object-fit:contain"> Vampirequid · Developer Workspace</h2>
   <p>Your optional Linux development environment. Your account and saved guest remain managed by the existing Cloudflare service. <a href="/studio.html">← Back to Vampirequid Studio</a> · <a href="/signup.html">Create an account</a></p>
   <form id="login-form">
     <label for="access-type">Account</label>
@@ -121,7 +121,7 @@ body.oracle-terminal-mode #myst-log{height:calc(100vh - 310px);min-height:300px;
  <div id="admin-account-list" class="admin-account-list" aria-live="polite"></div>
 </section>
 <section id="toolbar" aria-label="Terminal actions">
- <div class="toolbar-heading"><div><strong>Workspace controls</strong><span>Manage your VM session</span></div><a class="studio-return" href="/studio.html">← Studio</a></div>
+ <div class="toolbar-heading"><div><strong>Workspace controls</strong><span>Manage your VM session</span></div><div style="display:flex;gap:8px;align-items:center"><button id="session-logout" type="button">Sign out</button><a class="studio-return" href="/studio.html">← Studio</a></div></div>
  <div class="toolbar-groups">
   <div class="action-group"><span class="action-label">VM STATE</span><div class="action-buttons"><button id="save-vm-state" type="button">Save VM state</button><button id="clear-vm-state" class="danger-action" type="button">Delete saved state</button></div></div>
   <div class="action-group"><span class="action-label">SHELL</span><div class="action-buttons"><button id="run-bootstrap" type="button">Manual shell recovery</button><button id="paste-terminal" type="button">Paste into VM</button></div></div>
@@ -239,7 +239,7 @@ function drawOracleTerminal(){
   mystLog.scrollTop=mystLog.scrollHeight;
 }
 function activateOracleTerminal(){
-  const isAdmin=window.snapshotIdentity==='admin'&&Boolean(window.snapshotAdminKey);
+  const isAdmin=window.snapshotIdentity==='admin'&&Boolean(window.snapshotAdminKey||window.snapshotAdminSession);
   const isAccount=/^acct-[a-f0-9-]{36}$/.test(String(window.snapshotIdentity||''))&&Boolean(window.snapshotAuthToken);
   if((!isAdmin&&!isAccount)||oracleTerminalMode)return;
   oracleTerminalMode=true;
@@ -259,7 +259,7 @@ async function checkAccountExecution(){
   const toggle=document.getElementById('oracle-terminal-toggle');
   oracleExecutionAvailable=false;
   toggle.hidden=true;
-  if(window.snapshotIdentity==='admin'&&window.snapshotAdminKey){
+  if(window.snapshotIdentity==='admin'&&(window.snapshotAdminKey||window.snapshotAdminSession)){
     try{
       const response=await fetch('/api/vm/oracle-status',{method:'GET',cache:'no-store'});
       const data=await response.json().catch(()=>({}));
@@ -305,6 +305,9 @@ document.getElementById('oracle-terminal-toggle').addEventListener('click',funct
   if(oracleTerminalMode){deactivateOracleTerminal();return;}
   if(oracleExecutionAvailable)activateOracleTerminal();
 });
+// Oracle execution is independent of TinyCore snapshot restore. Show the button
+// as soon as the authenticated account's execution capability is confirmed.
+void checkAccountExecution();
 async function runOracleTerminalCommand(raw){
   if(oracleTerminalBusy)return;
   const command=String(raw||'').replace(/\r/g,'');
@@ -320,7 +323,7 @@ async function runOracleTerminalCommand(raw){
   try{
     const isAdmin=window.snapshotIdentity==='admin';
     const headers={'content-type':'application/json'};
-    if(isAdmin)headers['x-admin-key']=window.snapshotAdminKey;
+    if(isAdmin&&window.snapshotAdminKey)headers['x-admin-key']=window.snapshotAdminKey;
     const endpoint=isAdmin?'/api/admin/oracle-exec':'/api/account/exec';
     const payload=isAdmin?{command,timeout_ms:15000}:{account_id:window.snapshotIdentity,session_token:window.snapshotAuthToken,command,timeout_ms:15000};
     const response=await fetch(endpoint,{method:'POST',headers,cache:'no-store',body:JSON.stringify(payload)});
@@ -556,11 +559,11 @@ function startOracleBridgeStatus(){
   oracleStatusTimer=setInterval(checkOracleBridge,15000);
 }
 async function connectApiAgent(){
-if(window.snapshotIdentity!=='admin'||!window.snapshotAdminKey||apiAgentConnecting)return;
+if(window.snapshotIdentity!=='admin'||!(window.snapshotAdminKey||window.snapshotAdminSession)||apiAgentConnecting)return;
 if(apiAgentSocket&&apiAgentSocket.readyState<=1)return;
 apiAgentConnecting=true;
 try{
-const ticketResponse=await fetch('/api/vm/agent-ticket',{method:'POST',headers:{'x-admin-key':window.snapshotAdminKey}});
+const ticketResponse=await fetch('/api/vm/agent-ticket',{method:'POST',headers:window.snapshotAdminKey?{'x-admin-key':window.snapshotAdminKey}:{}});
 if(!ticketResponse.ok)throw new Error('agent ticket HTTP '+ticketResponse.status);
 const ticket=await ticketResponse.json();
 const wsUrl=new URL('/api/vm/agent',window.location.href);
@@ -696,7 +699,7 @@ window.snapshotVirtualMac=virtualMac;
 window.snapshotRouterIp=routerIp;
 let networkTicket='';
 try{
-  const ticketBody=networkIdentity==='admin'?{account_id:'admin',admin_key:window.snapshotAdminKey}:{account_id:networkIdentity,session_token:window.snapshotAuthToken};
+  const ticketBody=networkIdentity==='admin'?{account_id:'admin'}:{account_id:networkIdentity,session_token:window.snapshotAuthToken};
   const ticketResponse=await fetch(apiUrl+'/api/network/ticket',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ticketBody)});
   const ticketData=await ticketResponse.json().catch(()=>({}));
   if(!ticketResponse.ok||typeof ticketData.ticket!=='string'||!/^[a-f0-9]{64}$/.test(ticketData.ticket))throw new Error(ticketData.error||'network_ticket_failed');
@@ -949,11 +952,21 @@ const panel=document.getElementById('login-panel'),form=document.getElementById(
 const adminKey=document.getElementById('admin-key'),username=document.getElementById('username'),password=document.getElementById('user-password');
 const message=document.getElementById('login-message'),createButton=document.getElementById('create-account'),loginButton=document.getElementById('open-vm');
 const adminAccountsPanel=document.getElementById('admin-accounts'),adminAccountList=document.getElementById('admin-account-list'),adminAccountCount=document.getElementById('admin-account-count'),adminAccountsRefresh=document.getElementById('admin-accounts-refresh');
+document.getElementById('session-logout')?.addEventListener('click',async()=>{
+  const admin=window.snapshotIdentity==='admin';
+  try{
+    if(admin)await fetch('/api/admin/logout',{method:'POST',cache:'no-store'});
+    else if(window.snapshotAuthToken&&window.snapshotIdentity)await fetch('/api/auth/logout',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:window.snapshotIdentity,session_token:window.snapshotAuthToken}),cache:'no-store'});
+  }catch(e){}
+  try{['vm-account-id','vm-session-token','vm-username','vm-login-time','vm-initial-snapshot-pending'].forEach(key=>sessionStorage.removeItem(key));}catch(e){}
+  window.snapshotIdentity=null;window.snapshotAuthToken=null;window.snapshotAdminKey=null;window.snapshotAdminSession=false;
+  location.replace('/vm.html?logged_out=1');
+});
 async function loadAdminAccounts(){
-  if(!window.snapshotAdminKey||!adminAccountsPanel)return;
+  if(!(window.snapshotAdminKey||window.snapshotAdminSession)||!adminAccountsPanel)return;
   adminAccountsRefresh.disabled=true;adminAccountCount.textContent='Loading…';
   try{
-    const response=await fetch('/api/admin/accounts',{method:'GET',headers:{authorization:'Bearer '+window.snapshotAdminKey},cache:'no-store'});
+    const response=await fetch('/api/admin/accounts',{method:'GET',headers:window.snapshotAdminKey?{authorization:'Bearer '+window.snapshotAdminKey}:{},cache:'no-store'});
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
     const accounts=Array.isArray(data.accounts)?data.accounts:[];
@@ -1048,14 +1061,16 @@ form.addEventListener('submit',async function(event){
       const response=await fetch('/api/admin/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:adminKeyValue}),cache:'no-store'});
       const result=await response.json().catch(()=>({}));
       if(!response.ok){
-        const reason=result.error==='admin_login_locked'?'Too many attempts. Try again in 15 minutes.':
-          result.error==='admin_login_rate_limit_unavailable'?'The login protection service is temporarily unavailable. Try again shortly.':
+        const reason=result.error==='too_many_attempts'?'Too many attempts. Try again in 15 minutes.':
+          result.error==='admin_login_throttle_unavailable'?'The login protection service is temporarily unavailable. Try again shortly.':
           result.error==='admin_access_key_not_configured'?'ADMIN_ACCESS_KEY is not available to the deployed Worker.':
-          result.error==='invalid_admin_key'?'The admin key is incorrect. '+String(result.attempts_remaining??0)+' attempts remaining.':
+          result.error==='unauthorized'?'The admin key is incorrect.':
           (result.error||('HTTP '+response.status));
         throw new Error('Admin login failed: '+reason);
       }
-      window.snapshotAdminKey=adminKeyValue;
+      adminKey.value='';
+      window.snapshotAdminKey=null;
+      window.snapshotAdminSession=true;
       adminAccountsPanel.hidden=false;void loadAdminAccounts();
     }catch(error){message.textContent=error.message||'Admin access check failed.';return}
     window.snapshotIdentity='admin';
@@ -1068,22 +1083,55 @@ form.addEventListener('submit',async function(event){
   if(pass.length<8){message.textContent='Password must be at least 8 characters.';password.focus();return}
    if(!creating&&!pass){message.textContent='Enter your password.';return}
   message.textContent=creating?'Creating your account; the VM snapshot will be saved after its first network test…':'Signing in and loading your saved VM…';
+  loginButton.disabled=true;
   try{
     const response=await fetch(creating?'/api/auth/signup':'/api/auth/login',{
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:name,password:pass})
+      method:'POST',headers:{'content-type':'application/json'},cache:'no-store',
+      body:JSON.stringify({username:name,password:pass})
     });
     const data=await response.json().catch(()=>({}));
-    if(!response.ok){const reason=data.error==='username_unavailable'?'That username is already taken.':data.error==='username_must_be_2_to_32_chars_and_password_8_to_128_chars'?'Signup requirements: username 2–32 characters (letters, numbers, _ or -); password 8–128 characters.':data.error==='admin_baseline_snapshot_not_found'||data.error==='baseline_snapshot_not_found'?'Account creation is temporarily unavailable because the TinyCore baseline snapshot has not been configured yet.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.';throw new Error(reason)}
+    if(!response.ok){
+      const errors={
+        invalid_credentials:'The username or password is incorrect.',
+        invalid_credentials_or_account_not_ready:'The username or password is incorrect, or account setup has not finished yet. If you just registered, wait for setup to complete and try again.',
+        authentication_service_unavailable:'The sign-in service is temporarily unavailable. Your account has not been changed. Please try again shortly.',
+        rate_limited:'Too many sign-in attempts. Wait a few minutes and try again.',
+        account_network_identity_unavailable:'Your credentials were accepted, but your account network identity could not be loaded. Please retry; no account data was changed.',
+        admin_baseline_snapshot_not_found:'Account creation is temporarily unavailable because the TinyCore baseline snapshot has not been configured yet.'
+      };
+      const reason=errors[data.error]||
+        (data.error==='username_unavailable'?'That username is already taken.':
+        data.error==='username_must_be_2_to_32_chars_and_password_8_to_128_chars'?'Signup requirements: username 2–32 characters (letters, numbers, _ or -); password 8–128 characters.':
+        creating?'Account creation failed: '+(data.error||response.status):'Sign-in failed ('+response.status+'). '+(data.error||'Please try again.'));
+      throw new Error(reason);
+    }
     const wasCreating=creating;
     creating=false;
     if(wasCreating&&data.status==='provisioning')await waitForRegistration(data);
     else beginAccountSession(data);
-  }catch(error){message.textContent=error&&error.message?error.message:'Account request failed.';updateFields()}
+  }catch(error){
+    message.textContent=error&&error.message?error.message:'Account request failed.';
+    loginButton.disabled=false;
+    updateFields();
+  }
 });
 updateFields();
 // Keep the session through a same-tab refresh, but ask the server to validate it before
 // opening any per-account snapshot. The session token never goes in localStorage.
 (async()=>{
+  // Admin sessions live in a Secure, HttpOnly cookie. Restore them without
+  // exposing the long-lived admin key to JavaScript or localStorage.
+  try{
+    const adminResponse=await fetch('/api/admin/session',{method:'GET',cache:'no-store'});
+    if(adminResponse.ok){
+      window.snapshotAdminSession=true;
+      window.snapshotIdentity='admin';
+      showAccountId('admin');
+      panel.hidden=true;document.body.classList.add('logged-in');
+      window.startVm();
+      return;
+    }
+  }catch(e){}
   let accountId='',token='';
   try{accountId=sessionStorage.getItem('vm-account-id')||'';token=sessionStorage.getItem('vm-session-token')||''}catch(e){}
   if(!accountId||!token)return;

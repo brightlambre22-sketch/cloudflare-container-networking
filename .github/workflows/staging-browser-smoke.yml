@@ -1,0 +1,49 @@
+name: Staging browser smoke tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cloudflare/**"
+      - "public/**"
+      - "tests/staging-browser-smoke.mjs"
+      - ".github/workflows/staging-browser-smoke.yml"
+
+permissions:
+  checks: read
+  contents: read
+
+jobs:
+  staging-browser-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install browser test runner
+        run: npm install --no-save playwright@1.56.1
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Wait for this commit's Cloudflare Preview build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for attempt in $(seq 1 60); do
+            checks=$(curl -fsS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/check-runs")
+            status=$(echo "$checks" | jq -r '.check_runs[] | select(.name == "Workers Builds: cloudflare-container-networking") | .status' | tail -n 1)
+            conclusion=$(echo "$checks" | jq -r '.check_runs[] | select(.name == "Workers Builds: cloudflare-container-networking") | .conclusion' | tail -n 1)
+            if [ "$status" = "completed" ]; then
+              [ "$conclusion" = "success" ] || { echo "Cloudflare preview build ended with: $conclusion"; exit 1; }
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for Cloudflare Preview build"
+          exit 1
+      - name: Test isolated staging preview
+        env:
+          STAGING_URL: https://vampirequid-staging-cloudflare-container-networking.brightlambre22-6dd.workers.dev
+        run: node tests/staging-browser-smoke.mjs
