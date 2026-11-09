@@ -11,6 +11,7 @@ test("Stockroom accepts shared merchant sessions and validates POS keys against 
   assert.match(source, /x-account-key-sha256/);
   assert.match(source, /pos_api_key/);
   assert.match(source, /pos_key_scope_forbidden/);
+  assert.match(source, /Merchant cost is private accounting data/);
   assert.match(source, /offline-allowance\/release/);
 });
 
@@ -33,6 +34,8 @@ test("offline POS allocations are idempotent, releasable, and bound to remaining
   assert.match(source, /url\.pathname === "\/offline\/release"/);
   assert.match(source, /offline_allocation_items SET remaining=remaining-\?/);
   assert.match(source, /offline_allowance_exceeded/);
+  assert.match(source, /expires_at TEXT NOT NULL/);
+  assert.match(source, /expireOfflineAllocations\(now\)/);
 });
 
 test("offline POS sales enter the same durable outbox as paid online orders", async () => {
