@@ -1068,17 +1068,37 @@ form.addEventListener('submit',async function(event){
   if(pass.length<8){message.textContent='Password must be at least 8 characters.';password.focus();return}
    if(!creating&&!pass){message.textContent='Enter your password.';return}
   message.textContent=creating?'Creating your account; the VM snapshot will be saved after its first network test…':'Signing in and loading your saved VM…';
+  loginButton.disabled=true;
   try{
     const response=await fetch(creating?'/api/auth/signup':'/api/auth/login',{
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:name,password:pass})
+      method:'POST',headers:{'content-type':'application/json'},cache:'no-store',
+      body:JSON.stringify({username:name,password:pass})
     });
     const data=await response.json().catch(()=>({}));
-    if(!response.ok){const reason=data.error==='username_unavailable'?'That username is already taken.':data.error==='username_must_be_2_to_32_chars_and_password_8_to_128_chars'?'Signup requirements: username 2–32 characters (letters, numbers, _ or -); password 8–128 characters.':data.error==='admin_baseline_snapshot_not_found'||data.error==='baseline_snapshot_not_found'?'Account creation is temporarily unavailable because the TinyCore baseline snapshot has not been configured yet.':creating?'Account creation failed: '+(data.error||response.status):'Incorrect username or password.';throw new Error(reason)}
+    if(!response.ok){
+      const errors={
+        invalid_credentials:'The username or password is incorrect.',
+        invalid_credentials_or_account_not_ready:'The username or password is incorrect, or account setup has not finished yet. If you just registered, wait for setup to complete and try again.',
+        authentication_service_unavailable:'The sign-in service is temporarily unavailable. Your account has not been changed. Please try again shortly.',
+        rate_limited:'Too many sign-in attempts. Wait a few minutes and try again.',
+        account_network_identity_unavailable:'Your credentials were accepted, but your account network identity could not be loaded. Please retry; no account data was changed.',
+        admin_baseline_snapshot_not_found:'Account creation is temporarily unavailable because the TinyCore baseline snapshot has not been configured yet.'
+      };
+      const reason=errors[data.error]||
+        (data.error==='username_unavailable'?'That username is already taken.':
+        data.error==='username_must_be_2_to_32_chars_and_password_8_to_128_chars'?'Signup requirements: username 2–32 characters (letters, numbers, _ or -); password 8–128 characters.':
+        creating?'Account creation failed: '+(data.error||response.status):'Sign-in failed ('+response.status+'). '+(data.error||'Please try again.'));
+      throw new Error(reason);
+    }
     const wasCreating=creating;
     creating=false;
     if(wasCreating&&data.status==='provisioning')await waitForRegistration(data);
     else beginAccountSession(data);
-  }catch(error){message.textContent=error&&error.message?error.message:'Account request failed.';updateFields()}
+  }catch(error){
+    message.textContent=error&&error.message?error.message:'Account request failed.';
+    loginButton.disabled=false;
+    updateFields();
+  }
 });
 updateFields();
 // Keep the session through a same-tab refresh, but ask the server to validate it before
