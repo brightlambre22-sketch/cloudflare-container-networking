@@ -141,6 +141,12 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
   const businessDatabasePurge = await businessDatabaseFetch(env, accountId, "purge", { method: "POST" });
   if (!businessDatabasePurge.ok) throw new Error("business_database_purge_http_" + businessDatabasePurge.status);
 
+  const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
+  const relayPurge = await relay.fetch("https://wisp-relay.internal/purge", { method: "POST" });
+  if (!relayPurge.ok) throw new Error("wisp_relay_purge_http_" + relayPurge.status);
+  const relayResult = await relayPurge.json() as { ok?: unknown; purged?: unknown };
+  if (relayResult.ok !== true || relayResult.purged !== true) throw new Error("wisp_relay_purge_unverified");
+
   const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
   const ledgerPurge = await ledger.fetch("https://inventory-ledger.internal/purge", { method: "POST" });
   if (!ledgerPurge.ok) throw new Error("inventory_ledger_purge_http_" + ledgerPurge.status);
