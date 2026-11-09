@@ -43,7 +43,10 @@ jobs:
           done
           echo "Timed out waiting for Cloudflare Preview build"
           exit 1
+      - name: Resolve branch Preview URL
+        shell: bash
+        run: |
+          branch_slug="$(printf '%s' "$GITHUB_HEAD_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g' | cut -c1-31 | sed -E 's/-+$//')"
+          echo "STAGING_URL=https://${branch_slug}-cloudflare-container-networking.brightlambre22-6dd.workers.dev" >> "$GITHUB_ENV"
       - name: Test isolated staging preview
-        env:
-          STAGING_URL: https://vampirequid-staging-cloudflare-container-networking.brightlambre22-6dd.workers.dev
         run: node tests/staging-browser-smoke.mjs

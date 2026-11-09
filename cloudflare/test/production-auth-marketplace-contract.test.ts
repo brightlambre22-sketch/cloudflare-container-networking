@@ -136,7 +136,12 @@ test("merchant marketplace settings can geocode the entered physical shop addres
   assert.match(page, /Find shop coordinates from address/);
   assert.match(app, /async function geocodeMarketplaceAddress\(\)/);
   assert.match(app, /api\/marketplace\/geocode\?account_id=/);
-  assert.match(app, /marketplace-latitude.*data\.latitude/);
-  assert.match(app, /marketplace-longitude.*data\.longitude/);
+  assert.match(app, /const lat=Number\(data\.latitude\),lng=Number\(data\.longitude\)/);
+  assert.match(app, /#marketplace-latitude'\)\.value=lat\.toFixed\(7\)/);
+  assert.match(app, /#marketplace-longitude'\)\.value=lng\.toFixed\(7\)/);
+  assert.match(app, /function marketplaceAddressKey\(\)/);
+  assert.match(app, /function clearMarketplaceCoordinates\(message=/);
+  assert.match(app, /function showMarketplaceMap\(latitude,longitude\)/);
+  assert.match(app, /dataset\.addressKey=key/);
   assert.match(app, /addEventListener\('click',geocodeMarketplaceAddress\)/);
 });
