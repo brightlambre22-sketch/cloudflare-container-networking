@@ -73,7 +73,7 @@ test("startup wakes the shell before the first command and waits for a bounded b
 });
 
 test("startup completion markers match the sequential command controller", () => {
-  const normalized = html.replace(/""\s*""/g, "");
+  const normalized = html.replace(/"\s*"/g, "");
   for (const marker of ["DHCP_DONE","__RESOURCE_PREFLIGHT_DONE","__TLS_DOWNLOAD_DONE:","__OPENSSL_INSTALL_DONE:","__CA_CERTIFICATES_INSTALL_DONE:","__EGRESS_PREFLIGHT_DONE:"]) {
     assert.ok(normalized.includes(marker), "expected startup marker: " + marker);
   }
