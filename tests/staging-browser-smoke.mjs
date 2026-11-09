@@ -83,6 +83,9 @@ while (Date.now() < provisionDeadline) {
 }
 assert.equal(provision?.complete, true, "merchant snapshot provisioning should finish in staging");
 
+const signupCookie = (signupResponse.headers.get("set-cookie") || "").split(";")[0];
+let cleanupAccountId = signup.account_id;
+try {
 const loginResponse = await fetch(base + "/api/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -153,43 +156,6 @@ for (const path of ["/studio.html", "/workspace.html", "/merchant-orders.html", 
   assert.equal(response.status, 200, path + " should open with a valid merchant session");
 }
 
-const logoutResponse = await fetch(base + "/api/auth/logout", {
-  method: "POST",
-  headers: { "content-type": "application/json", cookie: loginCookie },
-  body: JSON.stringify({ account_id: login.account_id, session_token: login.session_token }),
-});
-assert.equal(logoutResponse.status, 200, "merchant logout should succeed");
-const afterLogout = await fetch(base + "/studio.html", { redirect: "manual" });
-assert.equal(afterLogout.status, 302, "merchant pages must close immediately after logout");
-
-const reloginResponse = await fetch(base + "/api/auth/login", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ username, password }),
-});
-assert.equal(reloginResponse.status, 200, "merchant can log in again after logout");
-const relogin = await reloginResponse.json();
-const reloginCookie = (reloginResponse.headers.get("set-cookie") || "").split(";")[0];
-const deletionResponse = await fetch(base + "/api/account/delete", {
-  method: "DELETE",
-  headers: { "content-type": "application/json", cookie: reloginCookie },
-  body: JSON.stringify({ account_id: relogin.account_id, session_token: relogin.session_token }),
-});
-assert.equal(deletionResponse.status, 200, "merchant self-delete should complete all account cleanup");
-const afterDeleteSearch = await fetch(liveStoreSearchUrl);
-assert.equal(afterDeleteSearch.status, 200, "marketplace search should remain available after deletion");
-const afterDeleteData = await afterDeleteSearch.json();
-assert.equal(afterDeleteData.products.length, 0, "deleted merchant products must disappear from marketplace ZIP search");
-assert.equal((await fetch(base + "/sites/" + siteSlug + "/")).status, 404, "deleted merchant's published store must no longer resolve");
-const deletedLogin = await fetch(base + "/api/auth/login", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ username, password }),
-});
-assert.equal(deletedLogin.status, 401, "deleted merchant credentials must no longer authenticate");
-const adminSessionResponse = await fetch(base + "/api/admin/session");
-assert.equal(adminSessionResponse.status, 401, "admin APIs must reject visitors without an admin session");
-
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -250,3 +216,56 @@ try {
 } finally {
   await browser.close();
 }
+
+const logoutResponse = await fetch(base + "/api/auth/logout", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie: loginCookie },
+  body: JSON.stringify({ account_id: login.account_id, session_token: login.session_token }),
+});
+assert.equal(logoutResponse.status, 200, "merchant logout should succeed");
+const afterLogout = await fetch(base + "/studio.html", { redirect: "manual" });
+assert.equal(afterLogout.status, 302, "merchant pages must close immediately after logout");
+
+const reloginResponse = await fetch(base + "/api/auth/login", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ username, password }),
+});
+assert.equal(reloginResponse.status, 200, "merchant can log in again after logout");
+const relogin = await reloginResponse.json();
+const reloginCookie = (reloginResponse.headers.get("set-cookie") || "").split(";")[0];
+const deletionResponse = await fetch(base + "/api/account/delete", {
+  method: "DELETE",
+  headers: { "content-type": "application/json", cookie: reloginCookie },
+  body: JSON.stringify({ account_id: relogin.account_id, session_token: relogin.session_token }),
+});
+assert.equal(deletionResponse.status, 200, "merchant self-delete should complete all account cleanup");
+const afterDeleteSearch = await fetch(liveStoreSearchUrl);
+assert.equal(afterDeleteSearch.status, 200, "marketplace search should remain available after deletion");
+const afterDeleteData = await afterDeleteSearch.json();
+assert.equal(afterDeleteData.products.length, 0, "deleted merchant products must disappear from marketplace ZIP search");
+assert.equal((await fetch(base + "/sites/" + siteSlug + "/")).status, 404, "deleted merchant's published store must no longer resolve");
+const deletedLogin = await fetch(base + "/api/auth/login", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ username, password }),
+});
+assert.equal(deletedLogin.status, 401, "deleted merchant credentials must no longer authenticate");
+const adminSessionResponse = await fetch(base + "/api/admin/session");
+assert.equal(adminSessionResponse.status, 401, "admin APIs must reject visitors without an admin session");
+cleanupAccountId = null;
+} finally {
+  if (cleanupAccountId) {
+    try {
+      await fetch(base + "/api/account/delete", {
+        method: "DELETE",
+        headers: { "content-type": "application/json", cookie: signupCookie },
+        body: JSON.stringify({ account_id: cleanupAccountId, session_token: signup.session_token }),
+      });
+    } catch (error) {
+      console.error("staging cleanup failed:", error);
+    }
+  }
+}
+
+
