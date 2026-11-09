@@ -196,47 +196,15 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const productQueries = [];
+  const locationQueries = [];
 
   await page.route("**/api/marketplace/location?*", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ ok: true, latitude: 32.8998, longitude: -96.8997, display_name: "Irving, Texas 75038" }),
-    });
+    locationQueries.push(new URL(route.request().url()).searchParams.get("postal_code"));
+    await route.continue();
   });
   await page.route("**/api/marketplace/products?*", async (route) => {
-    const url = new URL(route.request().url());
-    const query = url.searchParams.get("q") || "coffee";
-    productQueries.push(query);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        ok: true,
-        products: [{
-          product_id: "11111111-1111-4111-8111-111111111111",
-          site_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          name: "Staging " + query + " sample",
-          description: "Synthetic product used only by the staging browser test.",
-          category: "Coffee",
-          price: 12.5,
-          quantity: 5,
-          in_stock: true,
-          store: {
-            name: "Staging Sample Store",
-            address: "123 Main Street",
-            city: "Irving",
-            state: "TX",
-            postal_code: "75038",
-            latitude: 32.8998,
-            longitude: -96.8997,
-          },
-        }],
-        categories: ["Coffee"],
-        total_count: 1,
-        next_cursor: null,
-      }),
-    });
+    productQueries.push(new URL(route.request().url()).searchParams.get("q") || "");
+    await route.continue();
   });
 
   await page.goto(base + "/marketplace", { waitUntil: "domcontentloaded" });
@@ -251,12 +219,12 @@ try {
   assert.match(await page.locator("#vq-store-list").innerText(), /Staging Sample Store/);
   assert.equal(await page.locator("#vq-map-plot .leaflet-marker-icon").count(), 1, "the store should appear as a real map marker");
   assert.ok(await page.locator("#vq-map-plot .leaflet-tile-loaded").count() > 0, "real map tiles should load");
-  assert.match(await page.locator("[data-products]").innerText(), /Staging coffee sample/);
+  assert.match(await page.locator("[data-products]").innerText(), /Staging Coffee Test/);
 
   await page.locator("#q").fill("tea");
   await page.locator("#q").press("Enter");
   await page.waitForFunction(() => document.querySelector("[data-products]")?.textContent?.includes("Staging tea sample"), { timeout: 15000 });
-  assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");
+  assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");\n  assert.equal(await page.locator("[data-products] .pcard").count(), 0, "a no-match search should clear prior product cards");\n  await page.locator("#q").fill("coffee");\n  await page.locator("#q").press("Enter");\n  await page.waitForSelector("#vq-map-plot .leaflet-marker-icon", { timeout: 15000 });\n  assert.ok(productQueries.filter((query) => query === "coffee").length >= 2, "searching coffee again should reload the real store");\n  assert.ok(locationQueries.includes("75038"), "ZIP search should call the real location endpoint");
 
   assert.deepEqual(pageErrors, [], "marketplace should not throw browser JavaScript errors");
   console.log(JSON.stringify({
