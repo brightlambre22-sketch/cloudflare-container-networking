@@ -74,6 +74,10 @@ test("marketplace discovery excludes deleted accounts even if stale R2 listing m
   assert.match(marketplace, /admin\/list-accounts/);
   assert.match(marketplace, /activeAccounts\.has\(profile\.account_id\)/);
   assert.match(marketplace, /merchant_directory_unavailable/);
+  assert.match(marketplace, /api\.zippopotam\.us\/us\//);
+  assert.match(marketplace, /AbortSignal\.timeout\(6000\)/);
+  assert.match(marketplace, /AbortSignal\.timeout\(8000\)/);
+  assert.match(marketplace, /geocodePostalCode/);
 });
 
 test("marketplace uses a real geographic tile map and ZIP-based search", async () => {
