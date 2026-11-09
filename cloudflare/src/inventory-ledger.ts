@@ -179,7 +179,9 @@ export class InventoryLedger extends DurableObject {
       const existing=sql.exec("SELECT status FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string}|undefined;
       if (existing) {
         if (existing.status!=="active") return json({error:"offline_allocation_not_active",status:existing.status},409);
-        const saved=sql.exec("SELECT product_id,allocated,remaining FROM offline_allocation_items WHERE allocation_id=? ORDER BY product_id",allocationId).toArray();
+        const saved=sql.exec("SELECT product_id,allocated,remaining FROM offline_allocation_items WHERE allocation_id=? ORDER BY product_id",allocationId).toArray() as Array<{product_id:string;allocated:number;remaining:number}>;
+        const same=saved.length===allocations.length&&saved.every(row=>allocations.some(item=>item.id===row.product_id&&item.quantity===Number(row.allocated)));
+        if(!same)return json({error:"offline_allocation_id_conflict"},409);
         return json({ok:true,already_allocated:true,allocation_id:allocationId,allocations:saved});
       }
       let insufficient:string|null=null;
@@ -206,6 +208,7 @@ export class InventoryLedger extends DurableObject {
       const allocation=sql.exec("SELECT status FROM offline_allocations WHERE allocation_id=?",allocationId).toArray()[0] as {status:string}|undefined;
       if(!allocation)return json({error:"offline_allocation_not_found"},404);
       if(allocation.status==="released")return json({ok:true,already_released:true});
+      if(allocation.status!=="active")return json({ok:true,already_closed:true,status:allocation.status});
       this.ctx.storage.transactionSync(()=>{
         const rows=sql.exec("SELECT product_id,remaining FROM offline_allocation_items WHERE allocation_id=?",allocationId).toArray() as Array<{product_id:string;remaining:number}>;
         for(const row of rows){
