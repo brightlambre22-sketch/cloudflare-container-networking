@@ -221,16 +221,35 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
 
   const latitudeText = url.searchParams.get("lat");
   const longitudeText = url.searchParams.get("lng");
-  const hasCoordinates = latitudeText !== null || longitudeText !== null;
-  const latitude = latitudeText === null ? NaN : Number(latitudeText);
-  const longitude = longitudeText === null ? NaN : Number(longitudeText);
+  let hasCoordinates = latitudeText !== null || longitudeText !== null;
+  let latitude = latitudeText === null ? NaN : Number(latitudeText);
+  let longitude = longitudeText === null ? NaN : Number(longitudeText);
   if (hasCoordinates && (!validCoordinates(latitude, longitude) || latitudeText?.trim() === "" || longitudeText?.trim() === "")) {
     return json({ error: "valid_location_required" }, 400);
   }
-  const city = (url.searchParams.get("city") ?? "").trim().slice(0, 80).toLowerCase();
+  let city = (url.searchParams.get("city") ?? "").trim().slice(0, 80).toLowerCase();
   const state = (url.searchParams.get("state") ?? "").trim().slice(0, 2).toUpperCase();
-  const postal = (url.searchParams.get("postal_code") ?? "").trim().slice(0, 12);
+  let postal = (url.searchParams.get("postal_code") ?? "").trim().slice(0, 12);
   if (postal && !/^[0-9A-Za-z -]{3,12}$/.test(postal)) return json({ error: "invalid_postal_code" }, 400);
+  // Older marketplace pages submit the location field as `city`, including
+  // when the shopper enters a ZIP. Resolve ZIPs here so those pages work too;
+  // if geocoding is unavailable, retain an exact ZIP match as a safe fallback.
+  const cityZip = !hasCoordinates && !postal ? city.match(/^([0-9]{5})(?:-[0-9]{4})?$/) : null;
+  if (cityZip) {
+    postal = cityZip[1];
+    city = "";
+    try {
+      const location = await geocodeStoreAddress(env.PROJECT_STORAGE, postal + ", USA");
+      if (location) {
+        latitude = location.latitude;
+        longitude = location.longitude;
+        hasCoordinates = true;
+        postal = "";
+      }
+    } catch {
+      // The postal-code filter below still finds stores that serve this ZIP.
+    }
+  }
   if (!hasCoordinates && !city && !postal) return json({ error: "location_or_city_required" }, 400);
 
   const query = (url.searchParams.get("q") ?? "").trim().slice(0, 100).toLowerCase();
