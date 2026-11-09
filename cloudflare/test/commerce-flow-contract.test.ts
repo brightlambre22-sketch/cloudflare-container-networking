@@ -16,8 +16,8 @@ test("marketplace refreshes the merchant Stockroom catalog before discovery", as
   assert.match(app, /data-add-to-cart/);
   assert.match(app, /api\/payments\/public\/checkout/);
   assert.match(app, /search\.delete\("city"\); search\.delete\("state"\);/);
-  assert.match(marketplace, /distance > radius && !postalMatch/);
-  assert.match(marketplace, /postalMatch && distance > radius/);
+  assert.match(marketplace, /distance !== null && distance > radius\) continue/);
+  assert.doesNotMatch(marketplace, /distance > radius && !postalMatch/);
 });
 
 test("paid orders are committed and immediately synchronized when Stockroom is available", async () => {
