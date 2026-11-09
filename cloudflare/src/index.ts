@@ -80,6 +80,63 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise<{ profile_deleted: boolean; index_objects_deleted: number; merchant_objects_deleted: number; inventory_ledger_purged: boolean }> {
+  const profileKey = "marketplace/merchants/" + accountId + ".json";
+  const syncKey = "marketplace/catalog-sync/" + accountId + ".json";
+  const indexKeys: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await env.PROJECT_STORAGE.list({
+      prefix: "published-sites/index/", limit: 1000, ...(cursor ? { cursor } : {}),
+    });
+    for (const object of page.objects) {
+      const mapping = await env.PROJECT_STORAGE.get(object.key);
+      if (!mapping) continue;
+      const value = await mapping.json<{ account_id?: unknown }>().catch(() => null);
+      if (value?.account_id === accountId) indexKeys.push(object.key);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  const profile = await env.PROJECT_STORAGE.get(profileKey);
+  let profileDeleted = false;
+  if (profile) {
+    await env.PROJECT_STORAGE.delete(profileKey);
+    profileDeleted = true;
+  }
+  await env.PROJECT_STORAGE.delete(syncKey);
+  for (let offset = 0; offset < indexKeys.length; offset += 1000) {
+    await env.PROJECT_STORAGE.delete(indexKeys.slice(offset, offset + 1000));
+  }
+
+  let merchantObjectsDeleted = 0;
+  let merchantCursor: string | undefined;
+  do {
+    const page = await env.PROJECT_STORAGE.list({
+      prefix: "merchants/" + accountId + "/", limit: 1000,
+      ...(merchantCursor ? { cursor: merchantCursor } : {}),
+    });
+    if (page.objects.length) {
+      await env.PROJECT_STORAGE.delete(page.objects.map((object) => object.key));
+      merchantObjectsDeleted += page.objects.length;
+    }
+    merchantCursor = page.truncated ? page.cursor : undefined;
+  } while (merchantCursor);
+
+  const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+  const ledgerPurge = await ledger.fetch("https://inventory-ledger.internal/purge", { method: "POST" });
+  if (!ledgerPurge.ok) throw new Error("inventory_ledger_purge_http_" + ledgerPurge.status);
+  const ledgerResult = await ledgerPurge.json() as { ok?: unknown; purged?: unknown };
+  if (ledgerResult.ok !== true || ledgerResult.purged !== true) throw new Error("inventory_ledger_purge_unverified");
+
+  return {
+    profile_deleted: profileDeleted,
+    index_objects_deleted: indexKeys.length,
+    merchant_objects_deleted: merchantObjectsDeleted,
+    inventory_ledger_purged: true,
+  };
+}
+
 function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
@@ -265,6 +322,13 @@ export default {
         } while (mediaCursor);
 
         try {
+          const marketplace = await purgeMarketplaceAccountData(env, accountId);
+          if (!marketplace.inventory_ledger_purged) throw new Error("inventory_ledger_purge_unverified");
+        } catch {
+          failures.push({ account_id: accountId, step: "marketplace_and_inventory", error: "purge_failed" });
+        }
+
+        try {
           await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json");
         } catch {
           failures.push({ account_id: accountId, step: "runtime_job", error: "r2_delete_failed" });
@@ -417,6 +481,13 @@ export default {
             }
           }
           steps.product_media_objects_deleted = errors.some((entry) => entry.step === "product_media_objects") ? null : mediaKeys.length;
+          try {
+            const marketplace = await purgeMarketplaceAccountData(env, accountId);
+            steps.marketplace_and_inventory = marketplace;
+          } catch {
+            errors.push({ step: "marketplace_and_inventory", error: "purge_failed" });
+          }
+
           try {
             await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json");
             steps.runtime_job_deleted = true;
@@ -1087,6 +1158,9 @@ export default {
           cursor = page.truncated ? page.cursor : undefined;
         } while (cursor);
       }
+      try { await purgeMarketplaceAccountData(env, accountId); }
+      catch { failures.push("marketplace_and_inventory"); }
+
       try { await env.VM_SNAPSHOTS.delete("runtime-jobs/" + accountId + ".json"); }
       catch { failures.push("runtime_job"); }
 
