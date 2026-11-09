@@ -84,6 +84,7 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
   const profileKey = "marketplace/merchants/" + accountId + ".json";
   const syncKey = "marketplace/catalog-sync/" + accountId + ".json";
   const indexKeys: string[] = [];
+  const publishedContentKeys: string[] = [];
   let cursor: string | undefined;
   do {
     const page = await env.PROJECT_STORAGE.list({
@@ -93,7 +94,18 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
       const mapping = await env.PROJECT_STORAGE.get(object.key);
       if (!mapping) continue;
       const value = await mapping.json<{ account_id?: unknown }>().catch(() => null);
-      if (value?.account_id === accountId) indexKeys.push(object.key);
+      if (value?.account_id !== accountId) continue;
+      indexKeys.push(object.key);
+      const slug = object.key.slice("published-sites/index/".length).replace(/\.json$/, "");
+      if (!/^[a-f0-9]{32}$/.test(slug)) continue;
+      let siteCursor: string | undefined;
+      do {
+        const sitePage = await env.PROJECT_STORAGE.list({
+          prefix: "published-sites/" + slug + "/", limit: 1000, ...(siteCursor ? { cursor: siteCursor } : {}),
+        });
+        publishedContentKeys.push(...sitePage.objects.map((entry) => entry.key));
+        siteCursor = sitePage.truncated ? sitePage.cursor : undefined;
+      } while (siteCursor);
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -107,6 +119,9 @@ async function purgeMarketplaceAccountData(env: Env, accountId: string): Promise
   await env.PROJECT_STORAGE.delete(syncKey);
   for (let offset = 0; offset < indexKeys.length; offset += 1000) {
     await env.PROJECT_STORAGE.delete(indexKeys.slice(offset, offset + 1000));
+  }
+  for (let offset = 0; offset < publishedContentKeys.length; offset += 1000) {
+    await env.PROJECT_STORAGE.delete(publishedContentKeys.slice(offset, offset + 1000));
   }
 
   let merchantObjectsDeleted = 0;
