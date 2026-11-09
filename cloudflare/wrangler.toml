@@ -103,3 +103,55 @@ storage = "sqlite"
 [exports.WispRelay]
 type = "durable-object"
 storage = "sqlite"
+
+# Isolated settings for Workers Builds branch previews. These bindings never
+# point at production R2 data; Durable Object preview namespaces are isolated
+# automatically by Cloudflare for each preview.
+[previews.vars]
+VM_BASELINE_ID = "admin"
+ORACLE_ACCOUNT_EXEC_ENABLED = "false"
+DOORDASH_ENVIRONMENT = "sandbox"
+
+[[previews.r2_buckets]]
+binding = "VM_SNAPSHOTS"
+bucket_name = "vampirequid-preview-vm-snapshots"
+
+[[previews.r2_buckets]]
+binding = "PROJECT_STORAGE"
+bucket_name = "vampirequid-preview-project-storage"
+
+[[previews.durable_objects.bindings]]
+name = "TUNNEL_HUB"
+class_name = "TunnelHub"
+
+[[previews.durable_objects.bindings]]
+name = "NODE_REGISTRY"
+class_name = "NodeRegistry"
+
+[[previews.durable_objects.bindings]]
+name = "NODE_RUNTIME"
+class_name = "NodeRuntime"
+
+[[previews.durable_objects.bindings]]
+name = "VM_EXECUTION"
+class_name = "VmExecution"
+
+[[previews.durable_objects.bindings]]
+name = "ACCOUNT_REGISTRY"
+class_name = "AccountRegistry"
+
+[[previews.durable_objects.bindings]]
+name = "ACCOUNT_PROVISIONER"
+class_name = "AccountProvisioner"
+
+[[previews.durable_objects.bindings]]
+name = "BUSINESS_DATABASE"
+class_name = "BusinessDatabase"
+
+[[previews.durable_objects.bindings]]
+name = "INVENTORY_LEDGER"
+class_name = "InventoryLedger"
+
+[[previews.durable_objects.bindings]]
+name = "WISP_RELAY"
+class_name = "WispRelay"
