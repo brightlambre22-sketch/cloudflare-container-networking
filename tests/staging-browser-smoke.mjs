@@ -223,8 +223,19 @@ try {
 
   await page.locator("#q").fill("tea");
   await page.locator("#q").press("Enter");
-  await page.waitForFunction(() => document.querySelector("[data-products]")?.textContent?.includes("Staging tea sample"), { timeout: 15000 });
-  assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");\n  assert.equal(await page.locator("[data-products] .pcard").count(), 0, "a no-match search should clear prior product cards");\n  await page.locator("#q").fill("coffee");\n  await page.locator("#q").press("Enter");\n  await page.waitForSelector("#vq-map-plot .leaflet-marker-icon", { timeout: 15000 });\n  assert.ok(productQueries.filter((query) => query === "coffee").length >= 2, "searching coffee again should reload the real store");\n  assert.ok(locationQueries.includes("75038"), "ZIP search should call the real location endpoint");
+  await page.waitForFunction(() => document.querySelectorAll("[data-products] .pcard").length === 0, null, { timeout: 15000 });
+  assert.ok(productQueries.includes("tea"), "the top search bar should send the typed query");
+
+  await page.locator("#q").fill("coffee");
+  await page.locator("#q").press("Enter");
+  await page.waitForFunction(() =>
+    document.querySelector("[data-products]")?.textContent?.includes("Staging Coffee Test") &&
+    document.querySelectorAll("#vq-map-plot .leaflet-marker-icon").length > 0,
+    null,
+    { timeout: 15000 },
+  );
+  assert.ok(productQueries.filter((query) => query === "coffee").length >= 2, "searching coffee again should reload the real store");
+  assert.ok(locationQueries.includes("75038"), "ZIP search should call the real location endpoint");
 
   assert.deepEqual(pageErrors, [], "marketplace should not throw browser JavaScript errors");
   console.log(JSON.stringify({
