@@ -34,6 +34,7 @@ test("offline POS allocations are idempotent, releasable, and bound to remaining
   assert.match(source, /url\.pathname === "\/offline\/release"/);
   assert.match(source, /offline_allocation_items SET remaining=remaining-\?/);
   assert.match(source, /offline_allowance_exceeded/);
+  assert.match(source, /invalid_payment_method/);
   assert.match(source, /expires_at TEXT NOT NULL/);
   assert.match(source, /expireOfflineAllocations\(now\)/);
 });
