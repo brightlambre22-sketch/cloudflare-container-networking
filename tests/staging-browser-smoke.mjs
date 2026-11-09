@@ -25,7 +25,8 @@ const marketplaceResponse = await fetch(base + "/marketplace");
 assert.equal(marketplaceResponse.status, 200, "marketplace page should be public");
 const marketplaceHtml = await marketplaceResponse.text();
 assert.match(marketplaceHtml, /id="vq-map-plot"/, "marketplace must include its map container");
-assert.match(marketplaceHtml, /leaflet@1\.9\.4\/dist\/leaflet\.js/, "marketplace must load Leaflet");
+assert.match(marketplaceHtml, /maplibre-gl@4\.7\.1\/dist\/maplibre-gl\.js/, "marketplace must load MapLibre");
+assert.match(marketplaceHtml, /maplibre-gl@4\.7\.1\/dist\/maplibre-gl\.css/, "marketplace must load MapLibre styles");
 
 for (const path of ["/studio", "/studio.html", "/workspace", "/workspace.html", "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html"]) {
   const response = await fetch(base + path, { redirect: "manual" });
