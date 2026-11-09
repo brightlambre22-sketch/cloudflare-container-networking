@@ -95,18 +95,21 @@ test("marketplace uses a real geographic tile map and ZIP-based search", async (
     read("../../public/emporium/js/marketplace-app.js"),
     read("../../public/marketplace.html"),
   ]);
-  assert.match(app, /L\.map\(plot/);
-  assert.match(app, /tileLayer\("https:\/\/\{s\}\.tile\.openstreetmap\.org/);
-  assert.doesNotMatch(app, /basemaps\.cartocdn\.com|carto\.com\/attributions/i, "marketplace map must not request a third-party provider or API key");
-  assert.match(app, /Use OpenStreetMap directly, matching the merchant dashboard map/);
+  assert.match(app, /new window\.maplibregl\.Map\(/);
+  assert.match(app, /https:\/\/tiles\.openfreemap\.org\/styles\/liberty/);
+  assert.match(app, /new window\.maplibregl\.Marker/);
+  assert.match(app, /Visit store page/);
+  assert.match(app, /Open Street View/);
+  assert.doesNotMatch(app, /L\.map\(plot|tileLayer\(/, "marketplace map must not initialize Leaflet or raster tile layers");
+  assert.doesNotMatch(app, /basemaps\.cartocdn\.com|carto\.com\/attributions/i, "marketplace map must not request CARTO or an API key");
   assert.match(app, /api\/marketplace\/location\?postal_code=/);
   assert.match(app, /search\.set\("lat"/);
   assert.match(app, /search\.set\("lng"/);
   assert.match(app, /addEventListener\("submit"/);
   assert.match(page, /id="vq-location"/);
   assert.match(page, /id="vq-map-plot"/);
-  assert.match(page, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
-  assert.match(page, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
+  assert.match(page, /maplibre-gl@4\.7\.1\/dist\/maplibre-gl\.js/);
+  assert.match(page, /maplibre-gl@4\.7\.1\/dist\/maplibre-gl\.css/);
 });
 
 

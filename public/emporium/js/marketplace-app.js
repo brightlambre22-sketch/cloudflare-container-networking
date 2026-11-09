@@ -81,8 +81,7 @@
     if (empty) empty.hidden = document.querySelectorAll("[data-products] .pcard:not([hidden])").length > 0;
   }
   var storeMap = null;
-  var storeMarkers = null;
-  var storeTileLayer = null;
+  var storeMarkers = [];
   var lastStoreRefreshAt = 0;
   function streetViewUrl(store) {
     return "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" +
@@ -103,12 +102,12 @@
         site: site, name: String(store.name || "Local merchant"),
         address: [store.address, store.city, store.state, store.postal_code].filter(Boolean).join(", "),
         lat: lat, lng: lng,
-        hasCoordinates: store.latitude != null && store.longitude != null && Number.isFinite(lat) && Number.isFinite(lng),
+        hasCoordinates: store.latitude != null && store.longitude != null && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180,
         distance: product.distance_miles == null || !Number.isFinite(Number(product.distance_miles)) ? null : Number(product.distance_miles)
       });
     });
     if (!stores.length) {
-      if (storeMap) { storeMap.remove(); storeMap = null; storeMarkers = null; storeTileLayer = null; }
+      if (storeMap) { storeMap.remove(); storeMap = null; storeMarkers = []; }
       list.innerHTML = ""; plot.innerHTML = ""; panel.hidden = true;
       return;
     }
@@ -119,39 +118,71 @@
       return "<li class=\"vq-store-list-item\"><a class=\"vq-store-filter\" href=\"" + esc(storePageUrl(store)) + "\" aria-label=\"Visit " + esc(store.name) + " store page\"><span class=\"vq-store-number\">" + (index + 1) + "</span><span><strong>" + esc(store.name) + "</strong><small>" + esc(location) + "</small></span><span class=\"vq-store-actions\">" + (store.distance === null ? "" : "<small>" + store.distance.toFixed(1) + " mi</small>") + "</span></a>" + street + "</li>";
     }).join("");
     var valid = stores.filter(function (store) { return store.hasCoordinates; });
-    if (storeMap) { storeMap.remove(); storeMap = null; storeMarkers = null; }
+    if (storeMap) { storeMap.remove(); storeMap = null; storeMarkers = []; }
     if (!valid.length) {
       plot.innerHTML = "<div class=\"vq-map-message\">Store addresses are listed, but no verified map coordinates are available yet.</div>";
       return;
     }
-    if (typeof window.L === "undefined") {
+    if (typeof window.maplibregl === "undefined") {
       plot.innerHTML = "<div class=\"vq-map-message\">The interactive map could not load. Store links and Street View links are still available.</div>";
       return;
     }
     plot.innerHTML = "";
-    storeMap = window.L.map(plot, { scrollWheelZoom: false, zoomControl: true }).setView([valid[0].lat, valid[0].lng], 15);
-    // Use OpenStreetMap directly, matching the merchant dashboard map.
-    // No API key or third-party map-provider account is required.
-    var transparentTile = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-    storeTileLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19, errorTileUrl: transparentTile,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
-    }).addTo(storeMap);
-    storeMarkers = window.L.featureGroup().addTo(storeMap);
-    valid.forEach(function (store, index) {
-      var pageUrl = storePageUrl(store);
-      var popup = "<strong>" + esc(store.name) + "</strong><br>" + esc(store.address || "Local shop") +
-        '<br><a href="' + esc(pageUrl) + '">Visit store page</a>' +
-        '<br><a href="' + esc(streetViewUrl(store)) + '" target="_blank" rel="noopener noreferrer">Open Street View ↗</a>';
-      window.L.marker([store.lat, store.lng], { title: store.name, alt: store.name })
-        .bindPopup(popup).addTo(storeMarkers);
+    // OpenFreeMap provides a keyless vector basemap; MapLibre renders it without Leaflet.
+    storeMap = new window.maplibregl.Map({
+      container: plot,
+      style: "https://tiles.openfreemap.org/styles/liberty",
+      center: [valid[0].lng, valid[0].lat],
+      zoom: 13,
+      minZoom: 2,
+      maxZoom: 19,
+      attributionControl: true
     });
-    if (valid.length === 1) {
-      storeMap.setView([valid[0].lat, valid[0].lng], 15);
-    } else {
-      storeMap.fitBounds(storeMarkers.getBounds().pad(0.22), { maxZoom: 14 });
-    }
-    window.setTimeout(function () { if (storeMap) storeMap.invalidateSize(); }, 80);
+    storeMap.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    storeMap.on("load", function () {
+      storeMarkers = [];
+      var bounds = new window.maplibregl.LngLatBounds();
+      valid.forEach(function (store, index) {
+        var pageUrl = storePageUrl(store);
+        var popupNode = document.createElement("div");
+        var title = document.createElement("strong");
+        title.textContent = store.name;
+        var address = document.createElement("p");
+        address.textContent = store.address || "Local shop";
+        address.style.margin = "5px 0";
+        var visit = document.createElement("a");
+        visit.href = pageUrl;
+        visit.textContent = "Visit store page";
+        var street = document.createElement("a");
+        street.href = streetViewUrl(store);
+        street.target = "_blank";
+        street.rel = "noopener noreferrer";
+        street.textContent = "Open Street View ↗";
+        street.style.marginLeft = "12px";
+        popupNode.appendChild(title);
+        popupNode.appendChild(address);
+        popupNode.appendChild(visit);
+        popupNode.appendChild(street);
+        var markerNode = document.createElement("div");
+        markerNode.className = "vq-map-marker";
+        markerNode.setAttribute("title", store.name);
+        var number = document.createElement("span");
+        number.textContent = String(index + 1);
+        markerNode.appendChild(number);
+        var marker = new window.maplibregl.Marker({ element: markerNode, anchor: "bottom" })
+          .setLngLat([store.lng, store.lat])
+          .setPopup(new window.maplibregl.Popup({ offset: 22 }).setDOMContent(popupNode))
+          .addTo(storeMap);
+        storeMarkers.push(marker);
+        bounds.extend([store.lng, store.lat]);
+      });
+      if (valid.length === 1) storeMap.easeTo({ center: [valid[0].lng, valid[0].lat], zoom: 15 });
+      else storeMap.fitBounds(bounds, { padding: 54, maxZoom: 14, duration: 0 });
+    });
+    storeMap.on("error", function (event) {
+      if (event && event.error) console.warn("Marketplace basemap error:", event.error.message || event.error);
+    });
+    window.setTimeout(function () { if (storeMap) storeMap.resize(); }, 100);
   }
   function queryFor(location) {
     var search = new URLSearchParams();

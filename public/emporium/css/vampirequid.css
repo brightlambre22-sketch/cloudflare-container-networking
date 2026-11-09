@@ -79,3 +79,13 @@
 /* Keep Leaflet raster tiles at their native dimensions even when global image rules are present. */
 .vq-map-plot .leaflet-tile{width:256px!important;height:256px!important;max-width:none!important;max-height:none!important;background:transparent!important}
 .vq-map-plot .leaflet-tile-container{pointer-events:none}
+
+/* Marketplace map uses MapLibre GL; dashboard Leaflet styles remain untouched. */
+.vq-map-plot .maplibregl-map{width:100%;height:100%;font:inherit;z-index:0}
+.vq-map-plot .maplibregl-canvas{outline:0}
+.vq-map-plot .maplibregl-ctrl-group{border-radius:10px;box-shadow:0 2px 10px #17231f22}
+.vq-map-plot .maplibregl-ctrl-attrib{font-size:10px}
+.vq-map-plot .maplibregl-popup-content{font:inherit;border-radius:10px;padding:12px 14px;box-shadow:0 8px 28px #17231f22}
+.vq-map-plot .maplibregl-popup-content a{color:#0c6b58;font-weight:700}
+.vq-map-marker{display:grid;place-items:center;width:34px;height:34px;border:3px solid #fff;border-radius:50% 50% 50% 4px;background:#0c6b58;color:#fff;font:800 13px/1 Manrope, sans-serif;box-shadow:0 2px 8px #17231f55;transform:rotate(-45deg)}
+.vq-map-marker span{transform:rotate(45deg)}
