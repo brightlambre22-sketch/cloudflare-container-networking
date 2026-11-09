@@ -263,13 +263,16 @@ export default {
     // session at the Worker edge so an unauthenticated visitor never receives
     // the private page shell or its client-side application.
     const protectedMerchantPages = new Set([
-      "/studio.html", "/workspace.html", "/merchant-orders.html", "/merchant-location.html",
+      "/studio", "/studio.html", "/workspace", "/workspace.html",
+      "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html",
     ]);
-    if (request.method === "GET" && protectedMerchantPages.has(url.pathname)) {
+    const requestedPage = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
+    if ((request.method === "GET" || request.method === "HEAD") && protectedMerchantPages.has(requestedPage)) {
       const rawSession = cookieValue(request, "vq_merchant_session") ?? "";
       const match = rawSession.match(/^(acct-[a-f0-9-]{36})\.([a-f0-9]{64})$/);
       if (!match || !await verifyMerchantSession(env, match[1], match[2])) {
         const redirect = Response.redirect(new URL("/vm.html?auth_required=1", request.url), 302);
+        redirect.headers.set("cache-control", "no-store");
         redirect.headers.append("set-cookie", clearMerchantSessionCookie());
         return redirect;
       }
