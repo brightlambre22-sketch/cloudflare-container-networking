@@ -19,7 +19,10 @@ export class InventoryLedger extends DurableObject {
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_reservation_items (checkout_id TEXT NOT NULL, product_id TEXT NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0), unit_price_cents INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(checkout_id, product_id))");
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_orders (order_id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, acknowledged_at TEXT)");
     sql.exec("CREATE TABLE IF NOT EXISTS offline_sales (event_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)");
-    sql.exec("CREATE TABLE IF NOT EXISTS offline_allocations (allocation_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','consumed','released')), created_at TEXT NOT NULL, expires_at TEXT NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS offline_allocations (allocation_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','consumed','released')), created_at TEXT NOT NULL, expires_at TEXT NOT NULL DEFAULT '')");
+    const allocationExpiryColumns = sql.exec("PRAGMA table_info(offline_allocations)").toArray() as Array<{name:string}>;
+    if (!allocationExpiryColumns.some(column => column.name === "expires_at")) sql.exec("ALTER TABLE offline_allocations ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''");
+    sql.exec("UPDATE offline_allocations SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ',created_at,'+24 hours') WHERE expires_at=''");
     sql.exec("CREATE TABLE IF NOT EXISTS offline_allocation_items (allocation_id TEXT NOT NULL, product_id TEXT NOT NULL, allocated INTEGER NOT NULL CHECK(allocated > 0), remaining INTEGER NOT NULL CHECK(remaining >= 0), unit_price_cents INTEGER NOT NULL DEFAULT 0, name TEXT NOT NULL DEFAULT '', PRIMARY KEY(allocation_id, product_id))");
     const allocationColumns = sql.exec("PRAGMA table_info(offline_allocation_items)").toArray() as Array<{name:string}>;
     if (!allocationColumns.some(column => column.name === "unit_price_cents")) sql.exec("ALTER TABLE offline_allocation_items ADD COLUMN unit_price_cents INTEGER NOT NULL DEFAULT 0");
