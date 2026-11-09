@@ -51,6 +51,7 @@ test("offline POS allocations are idempotent, releasable, and bound to remaining
   assert.match(consume, /invalid_payment_method/);
   assert.match(consume, /payment_method:paymentMethod/);
   assert.match(consume, /payment_reference:paymentReference/);
+  assert.match(consume, /SELECT order_id FROM inventory_orders WHERE order_id=/);
 });
 
 test("offline POS sales enter the same durable outbox as paid online orders", async () => {
