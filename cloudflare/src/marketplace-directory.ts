@@ -361,7 +361,9 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
       // still included by the normal radius check.
       if (postal && !hasCoordinates && !postalMatch) continue;
       const distance = hasCoordinates ? distanceMiles(latitude, longitude, storeLatitude, storeLongitude) : null;
-      if (distance !== null && distance > radius && !postalMatch) continue;
+      // Once a shopper has exact coordinates, the configured radius is strict.
+      // A ZIP-code match must never pull a store beyond the 10-mile radius.
+      if (distance !== null && distance > radius) continue;
       const mapping = await readJson<{ account_id?: string; project_id?: string }>(
         env.PROJECT_STORAGE, "published-sites/index/" + profile.site_id + ".json",
       );
@@ -418,7 +420,7 @@ export async function handleMarketplaceRequest(request: Request, env: Marketplac
             city: storeCity, state: storeState, postal_code: String(profile.postal_code ?? ""),
             latitude: storeLatitude, longitude: storeLongitude,
           },
-          distance_miles: distance === null || (postalMatch && distance > radius) ? null : Number(distance.toFixed(1)),
+          distance_miles: distance === null ? null : Number(distance.toFixed(1)),
           postal_code_match: postalMatch,
         });
       }
