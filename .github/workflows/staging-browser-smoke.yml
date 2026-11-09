@@ -29,9 +29,10 @@ jobs:
       - name: Wait for this commit's Cloudflare Preview build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           for attempt in $(seq 1 60); do
-            checks=$(curl -fsS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs")
+            checks=$(curl -fsS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/check-runs")
             status=$(echo "$checks" | jq -r '.check_runs[] | select(.name == "Workers Builds: cloudflare-container-networking") | .status' | tail -n 1)
             conclusion=$(echo "$checks" | jq -r '.check_runs[] | select(.name == "Workers Builds: cloudflare-container-networking") | .conclusion' | tail -n 1)
             if [ "$status" = "completed" ]; then
