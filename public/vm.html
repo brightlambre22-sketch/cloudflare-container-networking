@@ -161,7 +161,7 @@ method:'POST',headers:{'content-type':'application/json','authorization':'Bearer
 });
 const result=await response.json().catch(()=>({}));
 if(!response.ok)throw new Error(result.error||'database initialization failed');
-report('\\nSTOCKROOM_DATABASE_READY schema='+String(result.schema_version||1)+' products='+String(result.product_count||0)+'\\n');
+report('\\nSTOCKROOM_DATABASE_READY backend='+String(result.engine||'unknown')+' schema='+String(result.schema_version||1)+' products='+String(result.product_count||0)+'\\n');
 }catch(error){report('\\nSTOCKROOM_DATABASE_STARTUP_PENDING '+(error&&error.message?error.message:String(error))+'\\n');}
 }
 async function saveVmState(manual=true){
