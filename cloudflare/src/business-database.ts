@@ -460,6 +460,12 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
       try { await syncInventoryCatalog(env, accountId); } catch { /* Keep the central catalog unchanged until sync succeeds. */ }
     }
   }
+  if (credentialType === "pos_api_key" && internalPath === "/products" && request.method === "GET" && response.ok) {
+    const data = await response.json().catch(() => null) as { products?: Array<Record<string, unknown>>; [key: string]: unknown } | null;
+    if (!data || !Array.isArray(data.products)) return json({ error: "pos_catalog_response_invalid" }, 502);
+    // Merchant cost is private accounting data and is never returned to external POS keys.
+    return json({ ...data, products: data.products.map(({ cost: _cost, cost_cents: _costCents, ...product }) => product) }, response.status);
+  }
   return response;
 }
 
