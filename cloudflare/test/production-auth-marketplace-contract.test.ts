@@ -37,6 +37,14 @@ test("admin login survives reload through a secure HttpOnly session and supports
   assert.match(worker, /vq_admin_session=/);
   assert.match(worker, /HttpOnly; Secure; SameSite=Strict/);
   assert.match(worker, /function adminAuthorized\(request: Request, env: Env\)/);
+  assert.match(worker, /crypto\.getRandomValues\(new Uint8Array\(32\)\)/, "admin browser sessions must use high-entropy random tokens");
+  assert.match(worker, /admin\/session\/create/);
+  assert.match(worker, /admin\/session\/verify/);
+  assert.match(worker, /admin\/session\/revoke/);
+  assert.match(worker, /adminSessionCookie\(token\)/, "the cookie must contain the opaque session token, not the master key");
+  assert.doesNotMatch(worker, /adminSessionCookie\(body\.key/);
+  assert.match(worker, /await adminAuthorized\(request, env\)/, "every route guard must await session verification");
+
   assert.match(worker, /url\.pathname === "\/api\/admin\/session"/);
   assert.match(worker, /url\.pathname === "\/api\/admin\/logout"/);
   assert.match(dashboard, /fetch\('\/api\/admin\/session'/);
