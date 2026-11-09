@@ -103,14 +103,14 @@ const authHeaders = { "content-type": "application/json", authorization: "Bearer
 const projectResponse = await fetch(base + "/api/studio/projects/" + projectId + "?account_id=" + encodeURIComponent(login.account_id), {
   method: "PUT",
   headers: authHeaders,
-  body: JSON.stringify({ id: projectId, name: "Staging Sample Store", kind: "store" }),
+  body: JSON.stringify({ id: projectId, name: "Staging Sample Store " + username, kind: "store" }),
 });
 assert.equal(projectResponse.status, 200, "merchant should be able to create a staging store project");
 
 const publishResponse = await fetch(base + "/api/studio/publish?account_id=" + encodeURIComponent(login.account_id), {
   method: "POST",
   headers: authHeaders,
-  body: JSON.stringify({ project_id: projectId, html: "<!doctype html><html><body><h1>Staging Sample Store</h1></body></html>" }),
+  body: JSON.stringify({ project_id: projectId, html: "<!doctype html><html><body><h1>Staging Sample Store " + username + "</h1></body></html>" }),
 });
 assert.equal(publishResponse.status, 200, "merchant should be able to publish a staging storefront");
 const published = await publishResponse.json();
@@ -148,7 +148,7 @@ liveStoreSearchUrl.searchParams.set("q", username);
 const liveStoreSearch = await fetch(liveStoreSearchUrl);
 assert.equal(liveStoreSearch.status, 200, "marketplace should find the new store by ZIP");
 const liveStoreData = await liveStoreSearch.json();
-assert.ok(liveStoreData.products.some((product) => product.store?.name === "Staging Sample Store"), "published merchant should appear in marketplace ZIP search");
+assert.ok(liveStoreData.products.some((product) => product.store?.name === "Staging Sample Store " + username), "published merchant should appear in marketplace ZIP search");
 assert.equal((await fetch(base + "/sites/" + siteSlug + "/")).status, 200, "published store should be publicly reachable before deletion");
 
 for (const path of ["/studio.html", "/workspace.html", "/merchant-orders.html", "/merchant-location.html"]) {
@@ -182,7 +182,7 @@ try {
   await page.waitForSelector("#vq-map-plot .leaflet-marker-icon", { timeout: 15000 });
   await page.waitForFunction(() => document.querySelectorAll("#vq-map-plot .leaflet-tile-loaded").length > 0, { timeout: 30000 });
 
-  assert.match(await page.locator("#vq-store-list").innerText(), /Staging Sample Store/);
+  assert.ok((await page.locator("#vq-store-list").innerText()).includes("Staging Sample Store " + username));
   assert.equal(await page.locator("#vq-map-plot .leaflet-marker-icon[title=\"Staging Sample Store\"]").count(), 1, "the staging store should appear as a real map marker");
   assert.ok(await page.locator("#vq-map-plot .leaflet-tile-loaded").count() > 0, "real map tiles should load");
   assert.match(await page.locator("[data-products]").innerText(), new RegExp("Staging Coffee Test " + username));
@@ -251,11 +251,11 @@ try {
   const emptyPage = await emptyBrowser.newPage();
   await emptyPage.goto(base + "/marketplace", { waitUntil: "domcontentloaded" });
   await emptyPage.locator("#vq-location").fill("75038");
-  await emptyPage.locator("#q").fill("coffee");
+  await emptyPage.locator("#q").fill(username);
   await emptyPage.locator("#location-search button[type=submit]").click();
   await emptyPage.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
   assert.equal(await emptyPage.locator("#vq-map-plot .leaflet-marker-icon[title=\"Staging Sample Store\"]").count(), 0, "deleted store must not leave its map marker");
-  assert.equal(await emptyPage.locator("#vq-store-list .vq-store-list-item").count(), 0, "deleted store must not remain in the map's store list");
+  assert.equal(await emptyPage.locator("#vq-store-list .vq-store-list-item").filter({ hasText: "Staging Sample Store " + username }).count(), 0, "deleted store must not remain in the map store list");
 } finally {
   await emptyBrowser.close();
 }
