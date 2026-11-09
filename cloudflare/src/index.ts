@@ -980,10 +980,10 @@ export default {
       const identityRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
       const identityResponse = await identityRegistry.fetch("https://account-registry.internal/network/identity/" + accountId);
       const identity = identityResponse.ok ? await identityResponse.json() as { virtual_ip?: string; virtual_mac?: string } : {};
-      return json({ ...session, username, status: isComplete ? "complete" : "provisioning",
+      return jsonWithCookie({ ...session, username, status: isComplete ? "complete" : "provisioning",
         snapshot_identity: accountId, virtual_ip: identity.virtual_ip, virtual_mac: identity.virtual_mac,
         snapshot_cloned: isComplete, baseline_id: env.VM_BASELINE_ID ?? "admin",
-        progress_endpoint: "/api/auth/registration-status" }, 202);
+        progress_endpoint: "/api/auth/registration-status" }, 202, merchantSessionCookie(accountId, session.session_token));
     }
 
     // Ordinary merchant signup provisions a new merchant account directly.
