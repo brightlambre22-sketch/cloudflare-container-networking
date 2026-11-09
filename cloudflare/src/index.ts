@@ -186,8 +186,8 @@ function merchantSessionCookie(accountId: string, token: string, maxAge = 604800
     "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Lax";
 }
 
-function adminSessionCookie(key: string, maxAge = 28800): string {
-  return "vq_admin_session=" + encodeURIComponent(key) +
+function adminSessionCookie(token: string, maxAge = 28800): string {
+  return "vq_admin_session=" + encodeURIComponent(token) +
     "; Path=/; Max-Age=" + maxAge + "; HttpOnly; Secure; SameSite=Strict";
 }
 
@@ -195,14 +195,20 @@ function clearAdminSessionCookie(): string {
   return "vq_admin_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict";
 }
 
-function adminAuthorized(request: Request, env: Env): boolean {
+async function adminAuthorized(request: Request, env: Env): Promise<boolean> {
   if (!env.ADMIN_ACCESS_KEY) return false;
   const authorization = request.headers.get("authorization");
   if (authorized(authorization, env.ADMIN_ACCESS_KEY)) return true;
   const headerKey = request.headers.get("x-admin-key");
   if (headerKey && authorized("Bearer " + headerKey, env.ADMIN_ACCESS_KEY)) return true;
-  const cookieKey = cookieValue(request, "vq_admin_session");
-  return Boolean(cookieKey && authorized("Bearer " + cookieKey, env.ADMIN_ACCESS_KEY));
+  const token = cookieValue(request, "vq_admin_session");
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return false;
+  const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+  const response = await registry.fetch("https://account-registry.internal/admin/session/verify", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  }).catch(() => new Response(null, { status: 503 }));
+  return response.ok;
 }
 
 function clearMerchantSessionCookie(): string {
@@ -287,7 +293,7 @@ export default {
     // Uses the existing /api/admin/accounts path with GET; does not delete or modify accounts.
     if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!adminAuthorized(request, env)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -306,7 +312,7 @@ export default {
     // The shared auth registry and Admin baseline snapshot are preserved.
     if (url.pathname === "/api/admin/accounts" && request.method === "DELETE") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!adminAuthorized(request, env)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
 
@@ -456,7 +462,7 @@ export default {
     // This is separate from DELETE /api/admin/accounts, which clears all registered accounts.
     if (url.pathname === "/api/admin/purge-accounts" && request.method === "POST") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!adminAuthorized(request, env)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       const body = await request.json().catch(() => null) as {
@@ -1314,7 +1320,7 @@ export default {
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const accountId = typeof body.account_id === "string" ? body.account_id : "";
       if (accountId === "admin") {
-                if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+                if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       } else {
         if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
         const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
@@ -1458,7 +1464,7 @@ export default {
 
     if (url.pathname === "/api/admin/reset-snapshots") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       let body: { confirm?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       if (body.confirm !== "DELETE_ALL_VM_SNAPSHOTS") return json({ error: "confirmation_required", expected: "DELETE_ALL_VM_SNAPSHOTS" }, 400);
@@ -1482,50 +1488,54 @@ export default {
     if (url.pathname === "/api/admin/access") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       let body: { key?: unknown };
-      try { body = (await request.json()) as { key?: unknown }; }
+      try { body = await request.json() as typeof body; }
       catch { return json({ error: "invalid_json" }, 400); }
       if (!env.ADMIN_ACCESS_KEY || !/^[A-Za-z0-9]{15,128}$/.test(env.ADMIN_ACCESS_KEY)) {
         return json({ error: "admin_access_key_not_configured" }, 503);
       }
 
-      // Three attempts per source IP in a rolling 15-minute window. The IP is
-      // SHA-256 hashed before it is persisted; it is used only as a rate-limit key,
-      // never as an allowlist or an authorization factor.
       const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "unknown";
       const ipDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(clientIp));
       const rateLimitKey = Array.from(new Uint8Array(ipDigest), (b) => b.toString(16).padStart(2, "0")).join("");
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-      const attemptResponse = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
+      const attempt = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: rateLimitKey, action: "consume" }),
       }).catch(() => new Response(null, { status: 503 }));
-      if (!attemptResponse.ok && attemptResponse.status !== 429) {
-        return json({ error: "admin_login_rate_limit_unavailable" }, 503);
-      }
-      const attempt = await attemptResponse.json().catch(() => ({})) as {
-        allowed?: boolean; attempts_remaining?: number; retry_after_ms?: number;
-      };
-      if (!attemptResponse.ok || attempt.allowed !== true) {
-        return json({ error: "admin_login_locked", retry_after_ms: attempt.retry_after_ms ?? 900000 }, 429);
-      }
-      if (typeof body.key !== "string" || !/^[A-Za-z0-9]{15,128}$/.test(body.key) ||
-          !authorized("Bearer " + body.key, env.ADMIN_ACCESS_KEY)) {
-        return json({ error: "invalid_admin_key", attempts_remaining: attempt.attempts_remaining ?? 0 }, 401);
+      if (!attempt.ok) return json({ error: attempt.status === 429 ? "too_many_attempts" : "admin_login_throttle_unavailable" }, attempt.status === 429 ? 429 : 503);
+      if (typeof body.key !== "string" || !authorized("Bearer " + body.key, env.ADMIN_ACCESS_KEY)) {
+        return json({ error: "unauthorized" }, 401);
       }
       const resetResponse = await authRegistry.fetch("https://account-registry.internal/admin/login-attempt", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ key: rateLimitKey, action: "reset" }),
       }).catch(() => new Response(null, { status: 503 }));
       if (!resetResponse.ok) return json({ error: "admin_login_state_reset_failed" }, 503);
-      return jsonWithCookie({ ok: true }, 200, adminSessionCookie(body.key));
+
+      const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
+      const token = Array.from(tokenBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const created = await authRegistry.fetch("https://account-registry.internal/admin/session/create", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, expires_at: Date.now() + 8 * 60 * 60 * 1000 }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!created.ok) return json({ error: "admin_session_create_failed" }, 503);
+      return jsonWithCookie({ ok: true }, 200, adminSessionCookie(token));
     }
 
     if (url.pathname === "/api/admin/session" && request.method === "GET") {
-      if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       return json({ ok: true, identity: "admin" });
     }
 
     if (url.pathname === "/api/admin/logout" && request.method === "POST") {
+      const token = cookieValue(request, "vq_admin_session");
+      if (token && /^[a-f0-9]{64}$/.test(token)) {
+        const registry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        await registry.fetch("https://account-registry.internal/admin/session/revoke", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+        }).catch(() => new Response(null, { status: 503 }));
+      }
       return jsonWithCookie({ ok: true }, 200, clearAdminSessionCookie());
     }
 
@@ -1533,7 +1543,7 @@ export default {
     // terminal UI without granting regular accounts host-shell access.
     if (url.pathname === "/api/admin/oracle-exec") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      if (!adminAuthorized(request, env)) {
+      if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
       let body: { command?: unknown; timeout_ms?: unknown };
@@ -1644,7 +1654,7 @@ export default {
     if (url.pathname === "/api/vm/agent-ticket") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
             if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
-      if (!adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       const requestedIdentity = request.headers.get("x-agent-identity") ?? "admin";
       if (requestedIdentity !== "admin" && requestedIdentity !== "oracle") {
         return json({ error: "unknown_agent_identity", supported_identities: ["admin", "oracle"] }, 400);
