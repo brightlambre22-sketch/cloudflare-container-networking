@@ -305,6 +305,9 @@ document.getElementById('oracle-terminal-toggle').addEventListener('click',funct
   if(oracleTerminalMode){deactivateOracleTerminal();return;}
   if(oracleExecutionAvailable)activateOracleTerminal();
 });
+// Oracle execution is independent of TinyCore snapshot restore. Show the button
+// as soon as the authenticated account's execution capability is confirmed.
+void checkAccountExecution();
 async function runOracleTerminalCommand(raw){
   if(oracleTerminalBusy)return;
   const command=String(raw||'').replace(/\r/g,'');
