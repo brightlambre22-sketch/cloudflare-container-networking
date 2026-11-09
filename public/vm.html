@@ -121,7 +121,7 @@ body.oracle-terminal-mode #myst-log{height:calc(100vh - 310px);min-height:300px;
  <div id="admin-account-list" class="admin-account-list" aria-live="polite"></div>
 </section>
 <section id="toolbar" aria-label="Terminal actions">
- <div class="toolbar-heading"><div><strong>Workspace controls</strong><span>Manage your VM session</span></div><a class="studio-return" href="/studio.html">← Studio</a></div>
+ <div class="toolbar-heading"><div><strong>Workspace controls</strong><span>Manage your VM session</span></div><div style="display:flex;gap:8px;align-items:center"><button id="session-logout" type="button">Sign out</button><a class="studio-return" href="/studio.html">← Studio</a></div></div>
  <div class="toolbar-groups">
   <div class="action-group"><span class="action-label">VM STATE</span><div class="action-buttons"><button id="save-vm-state" type="button">Save VM state</button><button id="clear-vm-state" class="danger-action" type="button">Delete saved state</button></div></div>
   <div class="action-group"><span class="action-label">SHELL</span><div class="action-buttons"><button id="run-bootstrap" type="button">Manual shell recovery</button><button id="paste-terminal" type="button">Paste into VM</button></div></div>
@@ -949,6 +949,16 @@ const panel=document.getElementById('login-panel'),form=document.getElementById(
 const adminKey=document.getElementById('admin-key'),username=document.getElementById('username'),password=document.getElementById('user-password');
 const message=document.getElementById('login-message'),createButton=document.getElementById('create-account'),loginButton=document.getElementById('open-vm');
 const adminAccountsPanel=document.getElementById('admin-accounts'),adminAccountList=document.getElementById('admin-account-list'),adminAccountCount=document.getElementById('admin-account-count'),adminAccountsRefresh=document.getElementById('admin-accounts-refresh');
+document.getElementById('session-logout')?.addEventListener('click',async()=>{
+  const admin=window.snapshotIdentity==='admin';
+  try{
+    if(admin)await fetch('/api/admin/logout',{method:'POST',cache:'no-store'});
+    else if(window.snapshotAuthToken&&window.snapshotIdentity)await fetch('/api/auth/logout',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({account_id:window.snapshotIdentity,session_token:window.snapshotAuthToken}),cache:'no-store'});
+  }catch(e){}
+  try{['vm-account-id','vm-session-token','vm-username','vm-login-time','vm-initial-snapshot-pending'].forEach(key=>sessionStorage.removeItem(key));}catch(e){}
+  window.snapshotIdentity=null;window.snapshotAuthToken=null;window.snapshotAdminKey=null;window.snapshotAdminSession=false;
+  location.replace('/vm.html?logged_out=1');
+});
 async function loadAdminAccounts(){
   if(!(window.snapshotAdminKey||window.snapshotAdminSession)||!adminAccountsPanel)return;
   adminAccountsRefresh.disabled=true;adminAccountCount.textContent='Loading…';
