@@ -69,7 +69,10 @@ test("Vampirequid and TinyCore share one merchant session; the account API key i
   assert.match(dashboard, /api\/auth\/session/);
   assert.match(dashboard, /api\/network\/ticket/);
 
-  // The separate account API key is optional and intended only for external POS connections.
-  assert.match(dashboard, /Optional external POS integration key/);
-  assert.match(dashboard, /you do not need this key to sign in or use TinyCore/i);
+  // The separate account API key is a distinct integration credential; it is
+  // never substituted for the merchant session token used by first-party routes.
+  assert.match(dashboard, /id="api-key-panel"/);
+  assert.match(dashboard, /api\/account\/api-key\/rotate/);
+  assert.match(dashboard, /api\/auth\/session/);
+  assert.doesNotMatch(dashboard, /api\/auth\/session[^\n]*api_key/);
 });
