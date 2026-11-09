@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Merchant payments · Vampirequid</title>
+<style>
+:root{color-scheme:light;--ink:#18231d;--muted:#66736b;--line:#dce4dd;--wash:#f5f7f4;--green:#176044}
+*{box-sizing:border-box}body{margin:0;background:var(--wash);color:var(--ink);font:15px/1.5 Inter,system-ui,sans-serif}header{background:white;border-bottom:1px solid var(--line)}nav{max-width:1180px;margin:auto;padding:15px 22px;display:flex;gap:20px;align-items:center;flex-wrap:wrap}nav strong{margin-right:auto;font-size:18px}a{color:var(--green);font-weight:650;text-decoration:none}main{max-width:1180px;margin:34px auto;padding:0 22px}h1{font-size:30px;letter-spacing:-.04em;margin:0}p{color:var(--muted)}.bar{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0}.bar input,.bar select{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:white;font:inherit}.bar input{flex:1;min-width:200px}.bar button{border:0;border-radius:9px;background:var(--green);color:white;padding:10px 16px;font-weight:700;cursor:pointer}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.metric,.payment{background:white;border:1px solid var(--line);border-radius:12px;padding:15px}.metric small{display:block;color:var(--muted)}.metric strong{font-size:22px}.payments{display:grid;gap:12px}.payment-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.money{font-size:20px;font-weight:850}.pill{display:inline-block;border-radius:20px;padding:3px 9px;background:#edf2ee;font-size:12px;font-weight:750;text-transform:capitalize}.pill.completed{background:#e3f4e9;color:#176044}.pill.declined,.pill.reversed{background:#fae8e8;color:#9b2929}.pill.pending{background:#fff3d8;color:#765400}.meta{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.details{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.timeline{margin:12px 0 0;padding-left:20px;font-size:13px}.empty{padding:30px;text-align:center;background:white;border:1px dashed var(--line);border-radius:12px;color:var(--muted)}#status{font-size:13px;color:var(--muted)}@media(max-width:650px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.details{grid-template-columns:1fr}nav{gap:12px}}
+</style></head><body>
+<header><nav><a href="/" style="display:flex;align-items:center;gap:9px;color:inherit"><img src="/vampire-quid.svg" width="38" height="38" alt=""><strong>Vampirequid · Merchant</strong></a><a href="/vm.html">Dashboard</a><a href="/merchant-orders.html">Orders</a><a href="/merchant-payments.html">Payments</a><a href="/merchant-location.html">Store location</a></nav></header>
+<main><h1>Payments</h1><p>Complete payment activity for this merchant, including pending checkouts, failed and declined attempts, refunds and reversals.</p>
+<div class="summary"><div class="metric"><small>Payments</small><strong id="count">—</strong></div><div class="metric"><small>Net paid</small><strong id="volume">$0.00</strong></div><div class="metric"><small>Pending</small><strong id="pending">0</strong></div><div class="metric"><small>Declined</small><strong id="declined">0</strong></div></div>
+<div class="bar"><input id="search" type="search" placeholder="Search buyer, email, checkout or item"><select id="filter"><option value="all">All statuses</option><option>pending</option><option>completed</option><option>declined</option><option>failed</option><option>expired</option><option>refunded</option><option>partially_refunded</option><option>reversed</option><option>voided</option></select><button id="refresh">Refresh payments</button></div>
+<div id="status" role="status" aria-live="polite">Checking merchant session…</div><section id="webhook-status" class="metric" aria-live="polite" style="margin:14px 0">Checking PayPal notification status…</section><section id="payments" class="payments"></section></main>
+<script>
+const $=id=>document.getElementById(id),el=(tag,cls,value)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(value!==undefined)n.textContent=value;return n};
+const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
+let records=[],accountId="",token="";
+function render(){
+ const q=$("search").value.trim().toLowerCase(),filter=$("filter").value;
+ const rows=records.filter(p=>(filter==="all"||p.status===filter)&&(!q||[p.buyer?.name,p.buyer?.email,p.checkout_id,p.paypal_order_id,p.description,...(p.items||[]).map(x=>x.name)].join(" ").toLowerCase().includes(q)));
+ $("count").textContent=String(records.length);
+ $("volume").textContent=money(records.filter(p=>["completed","refunded","partially_refunded"].includes(p.status)).reduce((n,p)=>n+Math.max(0,Number(p.amount||0)-Number(p.refunded_amount||0)),0));
+ $("pending").textContent=String(records.filter(p=>p.status==="pending").length);
+ $("declined").textContent=String(records.filter(p=>p.status==="declined").length);
+ const root=$("payments");root.replaceChildren();
+ if(!rows.length){root.append(el("div","empty",records.length?"No payments match these filters.":"No payment activity has been recorded yet."));return}
+ for(const p of rows){
+  const card=el("article","payment"),head=el("div","payment-head"),left=el("div","");
+  left.append(el("strong","",p.description||"Customer payment"),el("div","meta","Checkout "+String(p.checkout_id||"").slice(0,12)));
+  const right=el("div","");right.append(el("div","money",money(p.amount)),el("span","pill "+p.status,p.status.replaceAll("_"," ")));
+  head.append(left,right);card.append(head);
+  card.append(el("div","meta",(p.payment_method||"Payment").toUpperCase()+" · "+String(p.environment||"").toUpperCase()+" · "+new Date(p.created_at||Date.now()).toLocaleString()));
+  const details=el("div","details");
+  const fields=[["Buyer",p.buyer?.name||"Not supplied"],["Buyer email",p.buyer?.email||"Not supplied"],["PayPal payer ID",p.buyer?.payer_id||"Not supplied"],["PayPal order",p.paypal_order_id||"—"],["Capture ID",p.paypal_capture_id||"—"],["Vampirequid order",p.order_id||"—"],["Refunded",Number(p.refunded_amount||0)>0?money(p.refunded_amount):"—"],["Paid at",p.paid_at?new Date(p.paid_at).toLocaleString():"—"]];
+  for(const [label,value] of fields){const wrap=el("div","");wrap.append(el("div","meta",label),el("div","",value));details.append(wrap)}
+  card.append(details);
+  if(p.items?.length){const items=el("div","meta","Items: "+p.items.map(i=>(i.quantity||1)+" × "+i.name).join(", "));card.append(items)}
+  if(p.timeline?.length){const list=el("ol","timeline");for(const event of p.timeline){list.append(el("li","",(event.status||event.type)+" · "+(event.occurred_at?new Date(event.occurred_at).toLocaleString():"time unavailable")+(event.message?" · "+event.message:"")+(event.paypal_issue?" · "+event.paypal_issue:"")+(event.paypal_debug_id?" · Debug "+event.paypal_debug_id:"")+(event.amount?.value?" · Amount "+money(event.amount.value):"")))}card.append(list)}
+  root.append(card);
+ }
+}
+async function loadWebhookStatus(){
+ const root=$("webhook-status");root.replaceChildren(el("strong","","PayPal notifications"));
+ const results=await Promise.all(["sandbox","live"].map(async mode=>{
+  try{
+   const response=await fetch("/api/payments/paypal/status?account_id="+encodeURIComponent(accountId)+"&mode="+mode,{headers:{authorization:"Bearer "+token,accept:"application/json"},cache:"no-store"});
+   const data=await response.json();if(!response.ok)throw new Error(data.error||"status unavailable");
+   return {mode,connected:Boolean(data.connected),status:data.webhook_status||"not_registered"};
+  }catch{return {mode,connected:false,status:"unavailable"}}
+ }));
+ for(const item of results){
+  const row=el("div","meta",item.mode.toUpperCase()+" · "+(item.connected?"credentials connected":"not connected")+" · webhook "+item.status.replaceAll("_"," "));
+  root.append(row);
+ }
+ if(results.some(x=>x.connected&&x.status!=="active")){
+  root.append(el("p","meta","Payment history still records checkout and capture activity, but automatic pending, refund and reversal updates require an active PayPal webhook. Re-save these PayPal credentials from Dashboard → Payments to register notifications."));
+ }
+}
+async function load(){
+ $("status").textContent="Loading merchant payment history…";
+ try{
+  const session=await fetch("/api/auth/session",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({account_id:accountId,session_token:token})});
+  if(!session.ok)throw new Error("Your merchant session expired. Please log in again.");
+  const response=await fetch("/api/payments/history?account_id="+encodeURIComponent(accountId),{headers:{authorization:"Bearer "+token,accept:"application/json"},cache:"no-store"});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||"Payment history unavailable");
+  records=Array.isArray(data.payments)?data.payments:[];render();$("status").textContent=records.length+" payment record"+(records.length===1?"":"s")+" · Merchant account only";
+  await loadWebhookStatus();
+ }catch(error){$("status").textContent=error.message||"Payment history unavailable"}
+}
+try{accountId=sessionStorage.getItem("vm-account-id")||"";token=sessionStorage.getItem("vm-session-token")||""}catch{}
+if(accountId&&token)load();else $("status").textContent="Log in to your merchant account to view payments.";
+$("refresh").addEventListener("click",load);$("search").addEventListener("input",render);$("filter").addEventListener("change",render);
+</script></body></html>

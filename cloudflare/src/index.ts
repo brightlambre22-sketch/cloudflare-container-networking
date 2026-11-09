@@ -271,7 +271,7 @@ export default {
     // the private page shell or its client-side application.
     const protectedMerchantPages = new Set([
       "/studio", "/studio.html", "/workspace", "/workspace.html",
-      "/merchant-orders", "/merchant-orders.html", "/merchant-location", "/merchant-location.html",
+      "/merchant-orders", "/merchant-orders.html", "/merchant-payments", "/merchant-payments.html", "/merchant-location", "/merchant-location.html",
     ]);
     const requestedPage = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, "") : url.pathname;
     if ((request.method === "GET" || request.method === "HEAD") && protectedMerchantPages.has(requestedPage)) {
