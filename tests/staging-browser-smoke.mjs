@@ -179,12 +179,12 @@ try {
   await page.locator("#location-search button[type=submit]").click();
   await page.waitForSelector("[data-products] .pcard", { timeout: 20000 });
   await page.waitForSelector("#vq-store-list .vq-store-list-item", { timeout: 10000 });
-  await page.waitForSelector("#vq-map-plot .leaflet-marker-icon", { timeout: 15000 });
-  await page.waitForFunction(() => document.querySelectorAll("#vq-map-plot .leaflet-tile-loaded").length > 0, { timeout: 30000 });
+  await page.waitForSelector("#vq-map-plot .vq-map-marker", { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelectorAll("#vq-map-plot .maplibregl-canvas").length > 0, { timeout: 30000 });
 
   assert.ok((await page.locator("#vq-store-list").innerText()).includes("Staging Sample Store " + username));
-  assert.equal(await page.locator("#vq-map-plot .leaflet-marker-icon[title=\"Staging Sample Store " + username + "\"]").count(), 1, "the staging store should appear as a real map marker");
-  assert.ok(await page.locator("#vq-map-plot .leaflet-tile-loaded").count() > 0, "real map tiles should load");
+  assert.equal(await page.locator("#vq-map-plot .vq-map-marker[title=\"Staging Sample Store " + username + "\"]").count(), 1, "the staging store should appear as a real map marker");
+  assert.ok(await page.locator("#vq-map-plot .maplibregl-canvas").count() > 0, "MapLibre canvas should render");
   assert.match(await page.locator("[data-products]").innerText(), new RegExp("Staging Coffee Test " + username));
 
   await page.locator("#q").fill("notfound-" + username);
@@ -196,7 +196,7 @@ try {
   await page.locator("#q").press("Enter");
   await page.waitForFunction((productName) =>
     document.querySelector("[data-products]")?.textContent?.includes(productName) &&
-    document.querySelectorAll("#vq-map-plot .leaflet-marker-icon").length > 0,
+    document.querySelectorAll("#vq-map-plot .vq-map-marker").length > 0,
     "Staging Coffee Test " + username,
     { timeout: 15000 },
   );
@@ -210,8 +210,8 @@ try {
     zip_geocoding: "passed",
     backend_zip_search: "passed",
     search_bar: "passed",
-    real_leaflet_map_tiles: await page.locator("#vq-map-plot .leaflet-tile-loaded").count(),
-    store_markers: await page.locator("#vq-map-plot .leaflet-marker-icon").count(),
+    maplibre_canvas: await page.locator("#vq-map-plot .maplibregl-canvas").count(),
+    store_markers: await page.locator("#vq-map-plot .vq-map-marker").count(),
   }, null, 2));
 } finally {
   await browser.close();
@@ -254,7 +254,7 @@ try {
   await emptyPage.locator("#q").fill(username);
   await emptyPage.locator("#location-search button[type=submit]").click();
   await emptyPage.waitForFunction(() => document.querySelector("#vq-status")?.textContent?.includes("No live products found nearby"), null, { timeout: 15000 });
-  assert.equal(await emptyPage.locator("#vq-map-plot .leaflet-marker-icon[title=\"Staging Sample Store " + username + "\"]").count(), 0, "deleted store must not leave its map marker");
+  assert.equal(await emptyPage.locator("#vq-map-plot .vq-map-marker[title=\"Staging Sample Store " + username + "\"]").count(), 0, "deleted store must not leave its map marker");
   assert.equal(await emptyPage.locator("#vq-store-list .vq-store-list-item").filter({ hasText: "Staging Sample Store " + username }).count(), 0, "deleted store must not remain in the map store list");
 } finally {
   await emptyBrowser.close();
