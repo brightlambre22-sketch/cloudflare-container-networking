@@ -404,6 +404,7 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
       (internalPathPlaceholder(request, url) === "/products" && request.method === "GET") ||
       (internalPathPlaceholder(request, url) === "/movements" && request.method === "GET") ||
       (internalPathPlaceholder(request, url) === "/offline-allowance" && request.method === "POST") ||
+      (internalPathPlaceholder(request, url) === "/offline-allowance/release" && request.method === "POST") ||
       (internalPathPlaceholder(request, url) === "/offline-sales" && request.method === "POST") ||
       (internalPathPlaceholder(request, url) === "/sync/orders" && request.method === "POST") ||
       (internalPathPlaceholder(request, url) === "/orders" && request.method === "GET");
@@ -428,6 +429,13 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
     const body = await request.json().catch(() => null);
     const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
     return ledger.fetch("https://inventory-ledger.internal/offline/allocate", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}),
+    });
+  }
+  if (internalPath === "/offline-allowance/release" && request.method === "POST") {
+    const body = await request.json().catch(() => null);
+    const ledger = env.INVENTORY_LEDGER.get(env.INVENTORY_LEDGER.idFromName(accountId));
+    return ledger.fetch("https://inventory-ledger.internal/offline/release", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}),
     });
   }
