@@ -395,7 +395,17 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
   const accountId = url.searchParams.get("account_id") ?? "";
   const token = request.headers.get("authorization")?.startsWith("Bearer ") ? request.headers.get("authorization")!.slice(7) : "";
   if (!ACCOUNT_ID.test(accountId)) return json({ error: "unauthorized" }, 401);
-  const credentialType = await authenticateStockroomCredential(env, accountId, token);
+  let credentialType: "merchant_session" | "pos_api_key" | null;
+  try {
+    credentialType = await authenticateStockroomCredential(env, accountId, token);
+  } catch (error) {
+    const incidentId = crypto.randomUUID();
+    console.error("[stockroom] credential verification failed", {
+      incident_id: incidentId, account_id: accountId, path: url.pathname,
+      error: error instanceof Error ? error.stack ?? error.message : String(error),
+    });
+    return json({ error: "stockroom_auth_service_unavailable", incident_id: incidentId }, 503);
+  }
   if (!credentialType) return json({ error: "unauthorized" }, 401);
   // POS keys are deliberately restricted to register workflows. Product
   // authoring, media uploads, and account settings remain merchant-session only.
@@ -451,7 +461,18 @@ export async function handleBusinessDatabaseRequest(request: Request, env: Busin
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}),
     });
   }
-  const response = await businessDatabaseFetch(env, accountId, internalPath + (url.search ? url.search : ""), request);
+  let response: Response;
+  try {
+    response = await businessDatabaseFetch(env, accountId, internalPath + (url.search ? url.search : ""), request);
+  } catch (error) {
+    const incidentId = crypto.randomUUID();
+    console.error("[stockroom] business database request failed", {
+      incident_id: incidentId, account_id: accountId, path: internalPath, method: request.method,
+      backend: env.STOCKROOM_ORIGIN && env.STOCKROOM_GATEWAY_TOKEN ? "tinycore" : "cloudflare_durable_object",
+      error: error instanceof Error ? error.stack ?? error.message : String(error),
+    });
+    return json({ error: "stockroom_database_unavailable", incident_id: incidentId }, 503);
+  }
   const shouldSync = response.ok && (
     (internalPath === "/initialize" && request.method === "POST") ||
     (internalPath === "/products" && ["POST", "PUT"].includes(request.method)) ||
