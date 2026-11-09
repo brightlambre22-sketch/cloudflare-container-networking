@@ -165,6 +165,7 @@
         popupNode.appendChild(street);
         var markerNode = document.createElement("div");
         markerNode.className = "vq-map-marker";
+        markerNode.setAttribute("title", store.name);
         var number = document.createElement("span");
         number.textContent = String(index + 1);
         markerNode.appendChild(number);
