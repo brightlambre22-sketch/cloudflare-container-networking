@@ -105,12 +105,12 @@ body.oracle-terminal-mode #myst-log{height:calc(100vh - 310px);min-height:300px;
 </section>
 <div id="status" class="runtime-status">Starting Linux VM...</div>
 <details id="account-settings" class="account-settings">
- <summary><span><strong>Account &amp; API settings</strong><small>Account ID and API key</small></span><span class="settings-chevron">⌄</span></summary>
+ <summary><span><strong>Account &amp; API settings</strong><small>Account ID and optional POS integration key</small></span><span class="settings-chevron">⌄</span></summary>
  <div class="account-settings-content">
   <section id="account-id-panel" aria-label="Account ID"><div class="account-id-copy"><strong>Account ID</strong><code id="account-id-value">Not signed in</code></div><button id="account-id-copy" type="button">Copy account ID</button><span id="account-id-message" role="status" aria-live="polite"></span></section>
   <section id="api-key-panel" aria-labelledby="api-key-title">
-   <h2 id="api-key-title">Account API key</h2>
-   <p id="api-key-warning">Your current API key appears here after you sign in. Keys created before dashboard key display was enabled cannot be recovered from their stored hashes; this page will not change those keys automatically. Replacing a key invalidates the previous one.</p>
+   <h2 id="api-key-title">Optional external POS integration key</h2>
+   <p id="api-key-warning">Optional: this is the single key for connecting an external POS system to your merchant account. Your Vampirequid and TinyCore workspace use your normal merchant login and shared session; you do not need this key to sign in or use TinyCore. Keep only one active POS key—replacing it invalidates the previous key. Keys created before dashboard key display was enabled cannot be recovered from their stored hashes; this page will not change those keys automatically.</p>
    <div id="api-key-actions"><button id="api-key-generate" type="button">Replace API key</button><button id="api-key-copy" type="button" hidden>Copy key</button><button id="api-key-hide" type="button" hidden>Hide key</button><span id="api-key-message" role="status" aria-live="polite"></span></div>
    <pre id="api-key-value" hidden></pre>
   </section>
