@@ -19,7 +19,7 @@ export class InventoryLedger extends DurableObject {
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_reservation_items (checkout_id TEXT NOT NULL, product_id TEXT NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0), unit_price_cents INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(checkout_id, product_id))");
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_orders (order_id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, acknowledged_at TEXT)");
     sql.exec("CREATE TABLE IF NOT EXISTS offline_sales (event_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)");
-    sql.exec("CREATE TABLE IF NOT EXISTS offline_allocations (allocation_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','consumed','released')), created_at TEXT NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS offline_allocations (allocation_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('active','consumed','released')), created_at TEXT NOT NULL, expires_at TEXT NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS offline_allocation_items (allocation_id TEXT NOT NULL, product_id TEXT NOT NULL, allocated INTEGER NOT NULL CHECK(allocated > 0), remaining INTEGER NOT NULL CHECK(remaining >= 0), PRIMARY KEY(allocation_id, product_id))");
     sql.exec("CREATE INDEX IF NOT EXISTS reservations_expiry ON inventory_reservations(status, expires_at)");
     sql.exec("CREATE INDEX IF NOT EXISTS orders_pending ON inventory_orders(status, created_at)");
@@ -30,6 +30,7 @@ export class InventoryLedger extends DurableObject {
     const url = new URL(request.url);
     const sql = this.ctx.storage.sql;
     const now = new Date().toISOString();
+    this.expireOfflineAllocations(now);
 
     if (url.pathname === "/catalog/sync" && request.method === "PUT") {
       const body = await request.json().catch(() => null) as { products?: unknown } | null;
@@ -162,7 +163,7 @@ export class InventoryLedger extends DurableObject {
     }
 
     if (url.pathname === "/offline/allocate" && request.method === "POST") {
-      const body=await request.json().catch(()=>null) as {allocation_id?:unknown;allocations?:unknown}|null;
+      const body=await request.json().catch(()=>null) as {allocation_id?:unknown;allocations?:unknown;ttl_seconds?:unknown}|null;
       const allocationId=typeof body?.allocation_id==="string"?body.allocation_id:"";
       if (!UUID.test(allocationId)||!Array.isArray(body?.allocations)||body.allocations.length<1||body.allocations.length>100) return json({error:"invalid_allocations"},400);
       const allocations:Array<{id:string;quantity:number}>=[];
@@ -184,6 +185,8 @@ export class InventoryLedger extends DurableObject {
         if(!same)return json({error:"offline_allocation_id_conflict"},409);
         return json({ok:true,already_allocated:true,allocation_id:allocationId,allocations:saved});
       }
+      const ttlSeconds=Math.min(604800,Math.max(60,Number(body.ttl_seconds)||86400));
+      const expiresAt=new Date(Date.parse(now)+ttlSeconds*1000).toISOString();
       let insufficient:string|null=null;
       this.ctx.storage.transactionSync(()=>{
         this.expireReservations(now);
@@ -191,14 +194,14 @@ export class InventoryLedger extends DurableObject {
           const row=sql.exec("SELECT on_hand,offline_allocated,COALESCE((SELECT SUM(i.quantity) FROM inventory_reservation_items i JOIN inventory_reservations r ON r.checkout_id=i.checkout_id WHERE i.product_id=inventory_catalog.product_id AND r.status='active'),0) AS reserved FROM inventory_catalog WHERE product_id=? AND status='active'",x.id).toArray()[0] as Record<string,number>|undefined;
           if(!row||row.on_hand-row.offline_allocated-row.reserved<x.quantity){insufficient=x.id;return;}
         }
-        sql.exec("INSERT INTO offline_allocations(allocation_id,status,created_at) VALUES(?,'active',?)",allocationId,now);
+        sql.exec("INSERT INTO offline_allocations(allocation_id,status,created_at,expires_at) VALUES(?,'active',?,?)",allocationId,now,expiresAt);
         for(const x of allocations){
           sql.exec("UPDATE inventory_catalog SET offline_allocated=offline_allocated+? WHERE product_id=?",x.quantity,x.id);
           sql.exec("INSERT INTO offline_allocation_items(allocation_id,product_id,allocated,remaining) VALUES(?,?,?,?)",allocationId,x.id,x.quantity,x.quantity);
         }
       });
       if(insufficient)return json({error:"insufficient_unallocated_stock",product_id:insufficient},409);
-      return json({ok:true,allocation_id:allocationId,allocations:allocations.map(x=>({product_id:x.id,allocated:x.quantity,remaining:x.quantity}))});
+      return json({ok:true,allocation_id:allocationId,expires_at:expiresAt,allocations:allocations.map(x=>({product_id:x.id,allocated:x.quantity,remaining:x.quantity}))});
     }
 
     if (url.pathname === "/offline/release" && request.method === "POST") {
@@ -288,6 +291,22 @@ export class InventoryLedger extends DurableObject {
     }
 
     return json({error:"not_found"},404);
+  }
+
+  private expireOfflineAllocations(now:string) {
+    const sql=this.ctx.storage.sql;
+    const expired=sql.exec("SELECT allocation_id FROM offline_allocations WHERE status='active' AND expires_at<=?",now).toArray() as Array<{allocation_id:string}>;
+    if(!expired.length)return;
+    this.ctx.storage.transactionSync(()=>{
+      for(const allocation of expired){
+        const rows=sql.exec("SELECT product_id,remaining FROM offline_allocation_items WHERE allocation_id=?",allocation.allocation_id).toArray() as Array<{product_id:string;remaining:number}>;
+        for(const row of rows){
+          if(row.remaining>0)sql.exec("UPDATE inventory_catalog SET offline_allocated=MAX(0,offline_allocated-?) WHERE product_id=?",row.remaining,row.product_id);
+          sql.exec("UPDATE offline_allocation_items SET remaining=0 WHERE allocation_id=? AND product_id=?",allocation.allocation_id,row.product_id);
+        }
+        sql.exec("UPDATE offline_allocations SET status='released' WHERE allocation_id=? AND status='active'",allocation.allocation_id);
+      }
+    });
   }
 
   private expireReservations(now:string) {
