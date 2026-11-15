@@ -7,6 +7,10 @@ if [ "$(id -u)" -ne 0 ]; then echo "Run as root." >&2; exit 1; fi
 : "${GUEST_CIDR:?Set GUEST_CIDR}"
 : "${GUEST_GATEWAY:?Set GUEST_GATEWAY}"
 command -v iptables >/dev/null 2>&1 || { echo "iptables is required." >&2; exit 1; }
+command -v ip6tables >/dev/null 2>&1 || { echo "ip6tables is required to prevent IPv6 policy bypass." >&2; exit 1; }
+modprobe br_netfilter
+sysctl -w net.bridge.bridge-nf-call-iptables=1 >/dev/null
+sysctl -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null
 ip link show "$GUEST_BRIDGE" >/dev/null 2>&1 || { echo "Bridge not found: $GUEST_BRIDGE" >&2; exit 1; }
 CHAIN="VQ_GUEST_EGRESS"
 iptables -N "$CHAIN" 2>/dev/null || true
@@ -29,4 +33,18 @@ iptables -A "$CHAIN" -d 127.0.0.0/8 -j DROP
 iptables -A "$CHAIN" -p tcp -m multiport --dports 80,443 -j ACCEPT
 iptables -A "$CHAIN" -j DROP
 iptables -C FORWARD -i "$GUEST_BRIDGE" -j "$CHAIN" 2>/dev/null || iptables -I FORWARD 1 -i "$GUEST_BRIDGE" -j "$CHAIN"
+INPUT_CHAIN="VQ_GUEST_INPUT"
+iptables -N "$INPUT_CHAIN" 2>/dev/null || true
+iptables -F "$INPUT_CHAIN"
+iptables -A "$INPUT_CHAIN" ! -s "$GUEST_CIDR" -j DROP
+iptables -A "$INPUT_CHAIN" -p udp -m multiport --dports 53,67,68 -j ACCEPT
+iptables -A "$INPUT_CHAIN" -p tcp --dport 53 -j ACCEPT
+iptables -A "$INPUT_CHAIN" -j DROP
+iptables -C INPUT -i "$GUEST_BRIDGE" -j "$INPUT_CHAIN" 2>/dev/null || iptables -I INPUT 1 -i "$GUEST_BRIDGE" -j "$INPUT_CHAIN"
+V6_CHAIN="VQ_GUEST_V6_DROP"
+ip6tables -N "$V6_CHAIN" 2>/dev/null || true
+ip6tables -F "$V6_CHAIN"
+ip6tables -A "$V6_CHAIN" -j DROP
+ip6tables -C FORWARD -i "$GUEST_BRIDGE" -j "$V6_CHAIN" 2>/dev/null || ip6tables -I FORWARD 1 -i "$GUEST_BRIDGE" -j "$V6_CHAIN"
+ip6tables -C INPUT -i "$GUEST_BRIDGE" -j "$V6_CHAIN" 2>/dev/null || ip6tables -I INPUT 1 -i "$GUEST_BRIDGE" -j "$V6_CHAIN"
 echo "Guest bridge isolation installed for $GUEST_CIDR on $GUEST_BRIDGE."
