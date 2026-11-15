@@ -362,7 +362,7 @@ exit 1`;
         ? "guest_nic_missing"
         : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_expected_dhcp_ip_and_gateway_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
-      if (stages.dhcp.passed && stages.isolation_preflight.passed) {
+      if (stages.dhcp.passed && stages.resource_preflight?.passed === true) {
         await runStage("tls_download",
           "echo '--- TLS package downloads (bounded CA retries) ---'; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; ca_dl=1; attempt=1; while [ \"$attempt\" -le 3 ]; do echo CA_DOWNLOAD_ATTEMPT=$attempt; timeout 35 tce-load -w ca-certificates.tcz; ca_dl=$?; if [ \"$ca_dl\" -eq 0 ]; then break; fi; echo CA_DOWNLOAD_RETRY_AFTER_RC=$ca_dl; attempt=$((attempt+1)); sleep 2; done; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
           "TLS_DOWNLOAD_DONE", 240000);
@@ -406,7 +406,15 @@ exit 1`;
       attempted: false, saved: false, readback: false, restored: false, marker_verified: false,
     };
     let roundtripPassed = false;
-    if (guestChecksPassed) {
+    // Run the storage round-trip independently of isolation so the test can
+    // report whether v86 save_state and R2 digest verification work even when
+    // the guest lacks delegated cgroup write access. This never marks the guest
+    // ready: the final passed/readiness gate still requires full isolation.
+    const roundtripPrerequisitesPassed = boot.booted &&
+      stages.dhcp?.passed === true && stages.resource_preflight?.passed === true &&
+      stages.tls_download?.passed === true && stages.openssl_install?.passed === true &&
+      stages.ca_install?.passed === true && stages.https_preflight?.passed === true;
+    if (roundtripPrerequisitesPassed) {
       const marker = "V86_SNAPSHOT_PERSISTED_MARKER_7f8d2a";
       const markerStage = await runStage("snapshot_marker", "printf '%s\\n' '" + marker + "' > /tmp/v86-snapshot-roundtrip-marker; test \"$(cat /tmp/v86-snapshot-roundtrip-marker)\" = '" + marker + "' && echo SNAPSHOT_MARKER_WRITTEN", "SNAPSHOT_MARKER_DONE", SHELL_COMMAND_TIMEOUT_MS);
       snapshotRoundtrip.attempted = true;
