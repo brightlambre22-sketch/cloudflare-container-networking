@@ -56,6 +56,7 @@ test("headless TinyCore snapshot acceptance requires cgroups v2, namespaces, and
   const worker = await read("../src/headless-v86-snapshot-roundtrip-worker.ts");
   assert.match(worker, /\/sys\/fs\/cgroup\/cgroup\.controllers/);
   assert.match(worker, /CGROUP_V2_CONTROLLERS_OK/);
+  assert.match(worker, /CGROUP_LIMITS_WRITABLE/);
   assert.match(worker, /NAMESPACES_PRESENT/);
   assert.match(worker, /\/proc\/sys\/kernel\/seccomp\/actions_avail/);
   assert.match(worker, /stages\.isolation_preflight\?\.passed === true/);
