@@ -480,7 +480,7 @@ export class AccountRegistry extends DurableObject {
     if (url.pathname === "/auth/rate-limit" && request.method === "POST") {
       const body = await request.json().catch(() => null) as { ip?: unknown; action?: unknown } | null;
       if (typeof body?.ip !== "string" || body.ip.length < 1 || body.ip.length > 80 ||
-          !["signup", "login", "network-ticket", "network-connect", "vm-agent-ticket", "tunnel-connect"].includes(String(body.action))) {
+          !["signup", "login", "network-ticket", "network-connect", "vm-agent-ticket", "vm-agent-connect", "vm-exec", "tunnel-connect"].includes(String(body.action))) {
         return json({ error: "invalid_rate_limit_key" }, 400);
       }
       const action = body.action as string;
@@ -488,9 +488,10 @@ export class AccountRegistry extends DurableObject {
       const windowMs = action === "signup" ? 60 * 60 * 1000 : 15 * 60 * 1000;
       const limits: Record<string, number> = {
         signup: 5, login: 10, "network-ticket": 12, "network-connect": 60,
-        "vm-agent-ticket": 20, "tunnel-connect": 120,
+        "vm-agent-ticket": 20, "vm-agent-connect": 30, "vm-exec": 60, "tunnel-connect": 120,
       };
       const limit = limits[action];
+      const windowMs = action === "signup" ? 60 * 60 * 1000 : action === "vm-exec" ? 60 * 1000 : 15 * 60 * 1000;
       const key = "auth-rate:" + action + ":" + await this.sha256(body.ip);
       const decision = await this.ctx.storage.transaction(async (txn) => {
         const old = await txn.get<number[]>(key) ?? [];

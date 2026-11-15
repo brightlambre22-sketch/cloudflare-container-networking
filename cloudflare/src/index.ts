@@ -1714,9 +1714,15 @@ export default {
         return json({ error: "websocket_upgrade_required" }, 426);
       }
       const identity = url.searchParams.get("identity") ?? "admin";
-            if (identity !== "admin" && identity !== "oracle") {
+      if (identity !== "admin" && identity !== "oracle") {
         return json({ error: "unknown_agent_identity" }, 400);
       }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const agentLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-agent-connect" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!agentLimit.ok) return json({ error: agentLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, agentLimit.status === 429 ? 429 : 503);
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(identity));
       return coordinator.fetch(request);
     }
@@ -1725,6 +1731,14 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+      if (url.pathname.endsWith("/exec")) {
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const execLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-exec" }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!execLimit.ok) return json({ error: execLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, execLimit.status === 429 ? 429 : 503);
+      }
       const vmId = request.headers.get("x-vm-id") ?? "oracle";
       if (vmId !== "admin" && vmId !== "oracle") {
         return json({ error: "unknown_vm_id", supported_vm_ids: ["admin", "oracle"] }, 404);
