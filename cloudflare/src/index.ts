@@ -1216,11 +1216,6 @@ export default {
         body: JSON.stringify({ account_id: accountId, token: sessionToken }),
       });
       if (!verified.ok) return json({ error: "unauthorized" }, 401);
-      const execLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-exec" }),
-      }).catch(() => new Response(null, { status: 503 }));
-      if (!execLimit.ok) return json({ error: execLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, execLimit.status === 429 ? 429 : 503);
       const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
       const current = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/api-key", { method: "GET" });
       if (!current.ok) return json(await current.json().catch(() => ({ error: "api_key_not_retrievable" })), current.status);
@@ -1680,6 +1675,11 @@ export default {
         body: JSON.stringify({ account_id: accountId, token: sessionToken }),
       });
       if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const execLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-exec" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!execLimit.ok) return json({ error: execLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, execLimit.status === 429 ? 429 : 503);
       const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
       const capability = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/oracle-execution");
       const capabilityData = capability.ok ? await capability.json() as { enabled?: unknown } : {};
