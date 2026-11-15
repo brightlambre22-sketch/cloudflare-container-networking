@@ -54,7 +54,7 @@ test("TinyCore runner requires and sends its dedicated control-plane credential"
 
 test("headless TinyCore snapshot acceptance requires cgroups v2, namespaces, and seccomp capability", async () => {
   const worker = await read("../src/headless-v86-snapshot-roundtrip-worker.ts");
-  assert.match(worker, /(?:root=\\/sys\\/fs\\/cgroup|\\/sys\\/fs\\/cgroup\\/cgroup\\.controllers)/);
+  assert.match(worker, /(?:root=\/sys\/fs\/cgroup|\/sys\/fs\/cgroup\/cgroup\.controllers)/);
   assert.match(worker, /cgroup\.controllers/);
   assert.match(worker, /CGROUP_V2_CONTROLLERS_OK/);
   assert.match(worker, /CGROUP_LIMITS_WRITABLE/);
