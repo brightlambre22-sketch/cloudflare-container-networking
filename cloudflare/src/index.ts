@@ -229,6 +229,23 @@ function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
 
+async function nodeAgentAuthorized(request: Request, env: Env, nodeId: string): Promise<boolean> {
+  const authorization = request.headers.get("authorization") ?? "";
+  if (!authorization.startsWith("Bearer ")) return false;
+  const token = authorization.slice(7);
+  if (!/^[a-f0-9]{64}$/.test(token)) return false;
+  const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+  const response = await registry.fetch(new Request(
+    "https://node-registry.internal/node/" + encodeURIComponent(nodeId) + "/authorize",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    },
+  )).catch(() => new Response(null, { status: 503 }));
+  return response.ok;
+}
+
 async function getOrAllocateAccountNetworkIdentity(
   env: Env, accountId: string,
 ): Promise<{ virtual_ip: string; virtual_mac: string } | null> {
@@ -1924,20 +1941,31 @@ export default {
       if (request.method !== "GET" && request.method !== "POST") {
         return json({ error: "method_not_allowed" }, 405);
       }
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
-
       if (request.method === "GET") {
         return registry.fetch("https://node-registry.internal/list");
       }
+      return registry.fetch(new Request("https://node-registry.internal/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: request.body,
+      }));
+    }
 
-      return registry.fetch(
-        new Request("https://node-registry.internal/create", {
-          method: "POST",
-          headers: request.headers,
-          body: request.body,
-        }),
-      );
+    const agentTokenMatch = url.pathname.match(/^\/v1\/nodes\/([^/]+)\/agent-token$/);
+    if (agentTokenMatch) {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const nodeId = agentTokenMatch[1];
+      if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+      return registry.fetch("https://node-registry.internal/node/" + encodeURIComponent(nodeId) + "/rotate-token", {
+        method: "POST",
+      });
     }
 
     const runtimeMatch = url.pathname.match(
@@ -1947,71 +1975,64 @@ export default {
     if (runtimeMatch) {
       const nodeId = runtimeMatch[1];
       const action = runtimeMatch[2];
-
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
 
-      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      const admin = await adminAuthorized(request, env);
+      const agent = action === "heartbeat" || !action
+        ? await nodeAgentAuthorized(request, env, nodeId)
+        : false;
+      if (action === "heartbeat" ? !agent : (!admin && !agent)) {
+        return json({ error: "unauthorized" }, 401);
+      }
 
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
       if (!action && request.method === "GET") {
         return runtime.fetch("https://node-runtime.internal/status");
       }
-
       if (action === "start") {
-        if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+        if (request.method !== "POST" || !admin) return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/start", { method: "POST" });
       }
-
       if (action === "stop") {
-        if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+        if (request.method !== "POST" || !admin) return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/stop", { method: "POST" });
       }
-
       if (action === "probe") {
-        if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+        if (request.method !== "GET" || !admin) return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/probe");
       }
-
       if (action === "heartbeat") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-        return runtime.fetch(
-          new Request("https://node-runtime.internal/heartbeat", {
-            method: "POST",
-            headers: request.headers,
-            body: request.body,
-          }),
-        );
+        return runtime.fetch(new Request("https://node-runtime.internal/heartbeat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: request.body,
+        }));
       }
-
       return json({ error: "method_not_allowed" }, 405);
     }
 
     const nodeMatch = url.pathname.match(/^\/v1\/nodes\/([^/]+)$/);
-
     if (nodeMatch) {
       const nodeId = nodeMatch[1];
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const admin = await adminAuthorized(request, env);
+      const agent = request.method === "PATCH"
+        ? await nodeAgentAuthorized(request, env, nodeId)
+        : false;
+      if (!admin && !agent) return json({ error: "unauthorized" }, 401);
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
-
       if (request.method === "GET") {
-        return registry.fetch(
-          `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
-        );
+        if (!admin) return json({ error: "unauthorized" }, 401);
+        return registry.fetch("https://node-registry.internal/node/" + encodeURIComponent(nodeId));
       }
-
       if (request.method === "PATCH") {
-        return registry.fetch(
-          new Request(
-            `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
-            {
-              method: "PATCH",
-              headers: request.headers,
-              body: request.body,
-            },
-          ),
-        );
+        return registry.fetch(new Request(
+          "https://node-registry.internal/node/" + encodeURIComponent(nodeId),
+          { method: "PATCH", headers: { "content-type": "application/json" }, body: request.body },
+        ));
       }
-
       return json({ error: "method_not_allowed" }, 405);
     }
 
