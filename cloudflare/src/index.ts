@@ -1726,7 +1726,8 @@ export default {
         return json({ error: "unknown_agent_identity", supported_identities: ["admin", "oracle"] }, 400);
       }
       const vmId = requestedIdentity;
-      const ticket = crypto.randomUUID();
+      const ticketBytes = crypto.getRandomValues(new Uint8Array(32));
+      const ticket = Array.from(ticketBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
       const ticketResponse = await coordinator.fetch("https://vm-execution.internal/ticket", {
         method: "POST",

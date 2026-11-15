@@ -143,3 +143,8 @@ test("VM agent tickets are consumed atomically and cannot be replayed", () => {
   assert.ok(vmExecution.includes('txn.delete(`ticket:${ticket}`)'));
   assert.ok(vmExecution.includes("invalid_or_expired_agent_ticket"));
 });
+
+test("VM agent tickets use 256-bit random tokens", () => {
+  assert.ok(vmExecution.includes("/^[a-f0-9]{64}$/"));
+  assert.ok(worker.includes("crypto.getRandomValues(new Uint8Array(32))"));
+});

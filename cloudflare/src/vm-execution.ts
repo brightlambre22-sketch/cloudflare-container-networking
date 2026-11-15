@@ -41,7 +41,7 @@ export class VmExecution extends DurableObject {
       let body: { ticket?: unknown; identity?: unknown };
       try { body = await request.json() as typeof body; }
       catch { return json({ error: "invalid_json" }, 400); }
-      if (typeof body.ticket !== "string" || !/^[a-f0-9-]{36}$/.test(body.ticket) ||
+      if (typeof body.ticket !== "string" || !/^[a-f0-9]{64}$/.test(body.ticket) ||
           typeof body.identity !== "string" || !validIdentity(body.identity)) {
         return json({ error: "invalid_ticket_request" }, 400);
       }
@@ -57,6 +57,7 @@ export class VmExecution extends DurableObject {
         return json({ error: "websocket_upgrade_required" }, 426);
       }
       const ticket = url.searchParams.get("ticket") ?? "";
+      if (!/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_or_expired_agent_ticket" }, 401);
       const record = await this.ctx.storage.transaction(async (txn) => {
         const stored = await txn.get<Ticket>(`ticket:${ticket}`);
         if (!stored || stored.expiresAt < Date.now()) {
