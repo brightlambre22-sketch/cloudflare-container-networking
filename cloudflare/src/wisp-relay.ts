@@ -39,7 +39,7 @@ export function isAllowedDestination(host: string, port: number): boolean {
   // v86 sends a resolved IPv4 address. Reject non-canonical values and special-use
   // ranges, including Oracle/AWS/Azure/Alibaba metadata destinations.
   const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9]\\d{0,2})$/.test(part))) return false;
+  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part))) return false;
   const octets = parts.map(Number);
   if (octets.some((part) => part < 0 || part > 255)) return false;
   const [a, b, c, d] = octets;

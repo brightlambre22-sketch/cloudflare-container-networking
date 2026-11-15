@@ -1338,7 +1338,7 @@ export default {
       const accountId = typeof body.account_id === "string" ? body.account_id : "";
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
       if (accountId === "admin") {
-                if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+        if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       } else {
         if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
         const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {

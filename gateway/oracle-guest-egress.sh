@@ -13,7 +13,7 @@ iptables -N "$CHAIN" 2>/dev/null || true
 iptables -F "$CHAIN"
 # Anti-spoofing and guest-to-guest isolation.
 iptables -A "$CHAIN" ! -s "$GUEST_CIDR" -j DROP
-iptables -A "$CHAIN" -d "$GUEST_CIDR" -j DROP
+iptables -A "$CHAIN" -d "$GUEST_CIDR" ! -d "$GUEST_GATEWAY" -j DROP
 # Metadata/link-local endpoints, including 169.254.169.254.
 iptables -A "$CHAIN" -d 169.254.0.0/16 -j DROP
 # Only DHCP/DNS may reach the explicitly configured gateway.
