@@ -50,3 +50,12 @@ test("TinyCore runner requires and sends its dedicated control-plane credential"
   assert.ok(bootstrap.includes('NODE_CONTROL_TOKEN="$NODE_CONTROL_TOKEN" nohup'));
   assert.ok(!bootstrap.includes("NODE_CONTROL_TOKEN=$NODE_CONTROL_TOKEN"), "credential must not be written to node.env");
 });
+
+test("headless TinyCore snapshot acceptance requires cgroups v2, namespaces, and seccomp capability", async () => {
+  const worker = await read("../src/headless-v86-snapshot-roundtrip-worker.ts");
+  assert.match(worker, /\/sys\/fs\/cgroup\/cgroup\.controllers/);
+  assert.match(worker, /CGROUP_V2_CONTROLLERS_OK/);
+  assert.match(worker, /NAMESPACES_PRESENT/);
+  assert.match(worker, /\/proc\/sys\/kernel\/seccomp\/actions_avail/);
+  assert.match(worker, /stages\.isolation_preflight\?\.passed === true/);
+});
