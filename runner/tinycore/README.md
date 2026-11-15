@@ -41,8 +41,8 @@ in `/opt/.filetool.lst` (minus exclusions), to the configured TCE backup area.
 The Worker now requires a unique per-node bearer credential for runtime polling,
 heartbeats, and node status updates. Create the node through the authenticated
 admin endpoint; the response contains node_id and agent_token exactly once.
-Store the credential in the persistent node.env file with mode 600 and load it
-before starting bootstrap.sh. Never commit or share that credential. If it is
+Store the credential in /etc/cloudflare-node/node.env with mode 600. bootstrap.sh
+loads that file automatically before starting the runner. Never commit or share that credential. If it is
 lost, an administrator can rotate it through POST /v1/nodes/{node_id}/agent-token;
 the previous token is invalid immediately.
 
