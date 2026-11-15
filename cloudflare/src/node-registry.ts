@@ -110,7 +110,7 @@ export class NodeRegistry extends DurableObject {
           return Response.json({ error: "unsupported_patch_field" }, { status: 400 });
         }
         if (patch.status !== undefined &&
-            !["provisioning", "offline", "online", "error"].includes(String(patch.status))) {
+            !["offline", "online", "error"].includes(String(patch.status))) {
           return Response.json({ error: "invalid_node_status" }, { status: 400 });
         }
         if (patch.error !== undefined &&
