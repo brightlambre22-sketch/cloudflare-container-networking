@@ -11,13 +11,13 @@ The Worker now separates privileged operator actions from TinyCore runner livene
 
 ## Required deployment configuration
 
-Before enabling the runner, provision a high-entropy random value as the Worker secret named `NODE_CONTROL_TOKEN` and inject the corresponding value into the per-node `/etc/cloudflare-node/node.env` file with permissions `0600`. Never put a real token in Git, an ISO, a URL, command-line arguments, logs, or merchant-visible browser code. Do not reuse `TUNNEL_TOKEN`, `CLIENT_TOKEN`, or `ADMIN_ACCESS_KEY`.
+Before enabling the runner, provision a high-entropy random value as the Worker secret named `NODE_CONTROL_TOKEN` and inject the corresponding value into the runner process through a trusted provisioning channel. The current browser bootstrap keeps it in process memory and does not write it to the guest filesystem. Never put a real token in Git, an ISO, a URL, command-line arguments, logs, persistent node.env, or merchant-visible browser code. Do not reuse `TUNNEL_TOKEN`, `CLIENT_TOKEN`, or `ADMIN_ACCESS_KEY`.
 
 This change deliberately does not create or rotate production secrets and does not modify Cloudflare bindings.
 
 ## Remaining security work
 
-The current credential is a platform-wide runner credential. It is an interim control, not the final per-merchant identity design. Before production:
+The current credential is a platform-wide runner credential. It is an interim control, not the final per-merchant identity design. The current bootstrap does not re-inject it automatically after a guest reboot; secure boot-time credential delivery and encrypted credential recovery are still required. Before production:
 
 1. Replace the shared runner credential with short-lived, per-node credentials bound to a specific node ID and role.
 2. Make runner PATCH accept only liveness/status fields and validate state transitions; never allow a runner to modify its node identity, private address, ownership, or runtime class.
