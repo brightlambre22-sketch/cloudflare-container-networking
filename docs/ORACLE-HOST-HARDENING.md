@@ -8,7 +8,7 @@ Authenticated Origin Pulls (mTLS) are not the correct control for this topology:
 
 ## OCI Security Lists / NSGs
 
-1. Remove broad ingress rules such as TCP/22 from `0.0.0.0/0`, all-TCP, all-UDP, and broad ICMP rules. The outbound tunnel requires no new inbound rule.
+1. Remove broad IPv4 and IPv6 ingress rules such as TCP/22 from `0.0.0.0/0` or `::/0`, all-TCP, all-UDP, and broad ICMP rules. The outbound tunnel requires no new inbound rule.
 2. If SSH administration is required, allow TCP/22 only from a fixed administrator IP/CIDR, preferably through OCI Bastion or a private management network.
 3. Keep stateful egress for TCP/443 to Cloudflare and DNS to the configured resolver. Restrict other egress where practical.
 4. Check every attached Security List and NSG; a permissive rule in any attached list can still allow traffic.
@@ -18,7 +18,7 @@ OCI Security Lists and NSGs are allow-lists: remove unwanted ingress allows rath
 
 ## Host firewall
 
-Run `gateway/oracle-host-firewall.sh` from the OCI serial console, or set `SSH_ALLOW_CIDR` to the administrator's fixed source CIDR. It inserts a dedicated INPUT chain without flushing unrelated rules. The policy accepts loopback and established return traffic, optionally permits SSH from that CIDR, and drops all other new inbound connections. Validate a second SSH session before persisting with the host OS firewall manager.
+Run `gateway/oracle-host-firewall.sh` from the OCI serial console, or set `SSH_ALLOW_CIDR` to the administrator's fixed source CIDR. It inserts a dedicated INPUT chain without flushing unrelated rules. The policy accepts loopback and established return traffic, optionally permits SSH from explicitly configured IPv4/IPv6 administrator CIDRs, and drops all other new inbound connections. It installs equivalent IPv4 and IPv6 ingress chains when IPv6 is enabled. Validate a second SSH session before persisting with the host OS firewall manager.
 
 The Oracle gateway's outbound WSS connection continues to work because replies are established traffic. Do not add inbound Cloudflare IP ranges for this outbound-only tunnel.
 
