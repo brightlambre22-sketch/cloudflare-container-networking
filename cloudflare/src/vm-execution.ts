@@ -57,12 +57,16 @@ export class VmExecution extends DurableObject {
         return json({ error: "websocket_upgrade_required" }, 426);
       }
       const ticket = url.searchParams.get("ticket") ?? "";
-      const record = await this.ctx.storage.get<Ticket>(`ticket:${ticket}`);
-      if (!record || record.expiresAt < Date.now()) {
-        if (record) await this.ctx.storage.delete(`ticket:${ticket}`);
-        return json({ error: "invalid_or_expired_agent_ticket" }, 401);
-      }
-      await this.ctx.storage.delete(`ticket:${ticket}`);
+      const record = await this.ctx.storage.transaction(async (txn) => {
+        const stored = await txn.get<Ticket>(`ticket:${ticket}`);
+        if (!stored || stored.expiresAt < Date.now()) {
+          if (stored) await txn.delete(`ticket:${ticket}`);
+          return null;
+        }
+        await txn.delete(`ticket:${ticket}`);
+        return stored;
+      });
+      if (!record) return json({ error: "invalid_or_expired_agent_ticket" }, 401);
       for (const socket of this.ctx.getWebSockets(record.identity)) {
         socket.close(1012, "VM agent replaced");
       }

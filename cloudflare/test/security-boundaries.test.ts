@@ -8,6 +8,7 @@ const tunnelHub = readFileSync(new URL("../src/tunnel-hub.ts", import.meta.url),
 const wispRelay = readFileSync(new URL("../src/wisp-relay.ts", import.meta.url), "utf8");
 const networkSecurity = readFileSync(new URL("../src/network-security.ts", import.meta.url), "utf8");
 const accountRegistry = readFileSync(new URL("../src/account-registry.ts", import.meta.url), "utf8");
+const vmExecution = readFileSync(new URL("../src/vm-execution.ts", import.meta.url), "utf8");
 const tinyRunner = readFileSync(new URL("../../runner/tinycore/cloudflare-runner.sh", import.meta.url), "utf8");
 const tinyBootstrap = readFileSync(new URL("../../runner/tinycore/bootstrap.sh", import.meta.url), "utf8");
 const tinyNodeEnv = readFileSync(new URL("../../runner/tinycore/node.env.example", import.meta.url), "utf8");
@@ -135,4 +136,10 @@ test("each account WISP relay caps TCP connection attempts per minute", () => {
   assert.ok(wispRelay.includes("private async allowTcpConnect()"));
   assert.ok(wispRelay.includes('txn.get<number[]>("wisp-connect-attempts")'));
   assert.ok(wispRelay.includes("if (!await this.allowTcpConnect())"));
+});
+
+test("VM agent tickets are consumed atomically and cannot be replayed", () => {
+  assert.ok(vmExecution.includes("this.ctx.storage.transaction"));
+  assert.ok(vmExecution.includes('txn.delete(`ticket:${ticket}`)'));
+  assert.ok(vmExecution.includes("invalid_or_expired_agent_ticket"));
 });
