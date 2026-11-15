@@ -1510,6 +1510,12 @@ export default {
     if (url.pathname === "/api/admin/reset-snapshots") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const resetLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-provision" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!resetLimit.ok) return json({ error: resetLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, resetLimit.status === 429 ? 429 : 503);
       let body: { confirm?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       if (body.confirm !== "DELETE_ALL_VM_SNAPSHOTS") return json({ error: "confirmation_required", expected: "DELETE_ALL_VM_SNAPSHOTS" }, 400);
