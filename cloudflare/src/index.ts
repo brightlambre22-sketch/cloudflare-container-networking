@@ -39,6 +39,8 @@ export interface Env {
   // Account-scoped WISP networking uses short-lived tickets and does not require these.
   TUNNEL_TOKEN?: string;
   CLIENT_TOKEN?: string;
+  // Dedicated credential for TinyCore runner control-plane calls. Never reuse the tunnel client token.
+  NODE_CONTROL_TOKEN?: string;
   ORACLE_ACCOUNT_EXEC_ENABLED?: string;
   // Optional upstream TinyCore Stockroom. When unset, each merchant uses its isolated
   // BusinessDatabase Durable Object; these values are not generated per merchant.
@@ -1920,98 +1922,85 @@ export default {
       return hub.fetch(request);
     }
 
+    // Node inventory and lifecycle operations are privileged control-plane APIs.
+    // Runner liveness/status updates use a dedicated credential and never receive
+    // permission to create nodes, stop runtimes, or enumerate the registry.
     if (url.pathname === "/v1/nodes") {
       if (request.method !== "GET" && request.method !== "POST") {
         return json({ error: "method_not_allowed" }, 405);
       }
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
-
       if (request.method === "GET") {
         return registry.fetch("https://node-registry.internal/list");
       }
-
-      return registry.fetch(
-        new Request("https://node-registry.internal/create", {
-          method: "POST",
-          headers: request.headers,
-          body: request.body,
-        }),
-      );
+      return registry.fetch(new Request("https://node-registry.internal/create", {
+        method: "POST",
+        headers: request.headers,
+        body: request.body,
+      }));
     }
 
     const runtimeMatch = url.pathname.match(
-      /^\/v1\/nodes\/([^/]+)\/runtime(?:\/(start|stop|probe|heartbeat))?$/,
+      /^\\/v1\\/nodes\\/([^/]+)\\/runtime(?:\\/(start|stop|probe|heartbeat))?$/,
     );
-
     if (runtimeMatch) {
       const nodeId = runtimeMatch[1];
       const action = runtimeMatch[2];
-
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
 
-      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      const runnerCall = action === "heartbeat" || (!action && request.method === "GET");
+      if (runnerCall) {
+        if (!authorized(request.headers.get("authorization"), env.NODE_CONTROL_TOKEN)) {
+          return json({ error: env.NODE_CONTROL_TOKEN ? "unauthorized" : "node_control_token_not_configured" }, env.NODE_CONTROL_TOKEN ? 401 : 503);
+        }
+      } else if (!await adminAuthorized(request, env)) {
+        return json({ error: "unauthorized" }, 401);
+      }
 
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
       if (!action && request.method === "GET") {
         return runtime.fetch("https://node-runtime.internal/status");
       }
-
       if (action === "start") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/start", { method: "POST" });
       }
-
       if (action === "stop") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/stop", { method: "POST" });
       }
-
       if (action === "probe") {
         if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/probe");
       }
-
       if (action === "heartbeat") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-        return runtime.fetch(
-          new Request("https://node-runtime.internal/heartbeat", {
-            method: "POST",
-            headers: request.headers,
-            body: request.body,
-          }),
-        );
+        return runtime.fetch("https://node-runtime.internal/heartbeat", { method: "POST" });
       }
-
       return json({ error: "method_not_allowed" }, 405);
     }
 
-    const nodeMatch = url.pathname.match(/^\/v1\/nodes\/([^/]+)$/);
-
+    const nodeMatch = url.pathname.match(/^\\/v1\\/nodes\\/([^/]+)$/);
     if (nodeMatch) {
       const nodeId = nodeMatch[1];
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
-
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
 
       if (request.method === "GET") {
-        return registry.fetch(
-          `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
-        );
+        if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+        return registry.fetch(`https://node-registry.internal/node/${encodeURIComponent(nodeId)}`);
       }
-
       if (request.method === "PATCH") {
-        return registry.fetch(
-          new Request(
-            `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
-            {
-              method: "PATCH",
-              headers: request.headers,
-              body: request.body,
-            },
-          ),
-        );
+        if (!authorized(request.headers.get("authorization"), env.NODE_CONTROL_TOKEN)) {
+          return json({ error: env.NODE_CONTROL_TOKEN ? "unauthorized" : "node_control_token_not_configured" }, env.NODE_CONTROL_TOKEN ? 401 : 503);
+        }
+        return registry.fetch(new Request(
+          `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
+          { method: "PATCH", headers: request.headers, body: request.body },
+        ));
       }
-
       return json({ error: "method_not_allowed" }, 405);
     }
 
