@@ -34,7 +34,7 @@ The proxied Vampirequid zone has the Cloudflare Managed Free Ruleset deployed. T
 - Block common secret-file and unused CMS probes (`.env`, `.git`, WordPress login/XML-RPC, and phpMyAdmin paths).
 - Block TRACE and CONNECT methods on `/api/*` routes.
 
-A zone rate-limiting rule is active for `/api/network/ticket`, `/api/vm/agent-ticket`, and `/tunnel`: five requests per 10 seconds per source IP, with a 10-second block. This is the single rate-limiting rule configured for the current Free Website plan. The Worker also has independent atomic per-IP limits for authentication, ticket minting, WISP handshakes, and tunnel reconnects.
+A zone rate-limiting rule is active for guest network tickets, VM agent tickets/WebSockets, admin/account command execution, VM node creation/start, runtime diagnostics, and tunnel handshakes: five matching requests per 10 seconds per source IP, with a 10-second block. This is the single rate-limiting rule configured for the current Free Website plan. The Worker also has independent atomic per-IP limits: signup 5/hour, login 10/15 minutes, network tickets 12/15 minutes, WISP connects 60/15 minutes, VM agent tickets 20/15 minutes, VM agent connects 30/15 minutes, command execution 60/minute, VM provisioning 5/15 minutes, diagnostics 10/15 minutes, and tunnel connects 120/15 minutes.
 
 Cloudflare WAF applies to proxied traffic. Keep the public hostname proxied, and re-check the zone's WAF entry-point rulesets after any zone migration or DNS change. The managed free ruleset is maintained by Cloudflare; do not replace it with a hand-maintained static signature list.
 
