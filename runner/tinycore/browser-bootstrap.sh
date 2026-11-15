@@ -78,7 +78,6 @@ fetch_verified cloudflare-runner.sh b715a416bec45ce4627dea698949c5c37dad9b4523b9
 
 cat >"$ENV/node.env" <<EOF
 NODE_ID=$NODE_ID
-NODE_CONTROL_TOKEN=$NODE_CONTROL_TOKEN
 CLOUDFLARE_API_URL=$API_URL
 NODE_INTERFACE=eth0
 MYST_BIN=/opt/mysterium/myst
@@ -87,6 +86,15 @@ RUNNER_POLL_SECONDS=5
 RUNNER_HEARTBEAT_SECONDS=10
 EOF
 chmod 600 "$ENV/node.env"
+
+# Keep the bearer credential in process memory only. Do not write it to the
+# Tiny Core backup list, guest filesystem, URL, or log.
+if [ -f /var/run/cloudflare-runner.pid ] && kill -0 "$(cat /var/run/cloudflare-runner.pid)" 2>/dev/null; then
+  echo "Cloudflare runner is already running."
+else
+  nohup env NODE_CONTROL_TOKEN="$NODE_CONTROL_TOKEN" "$ROOT/cloudflare-runner.sh" >>/var/log/cloudflare-runner.log 2>&1 &
+  echo "$!" >/var/run/cloudflare-runner.pid
+fi
 
 echo "Pinned Tiny Core runner installed for $NODE_ID"
 echo "The runner will use the dedicated NODE_CONTROL_TOKEN; operator lifecycle actions remain admin-only."
