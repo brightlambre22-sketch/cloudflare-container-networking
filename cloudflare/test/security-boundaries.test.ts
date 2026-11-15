@@ -9,6 +9,7 @@ const wispRelay = readFileSync(new URL("../src/wisp-relay.ts", import.meta.url),
 const networkSecurity = readFileSync(new URL("../src/network-security.ts", import.meta.url), "utf8");
 const accountRegistry = readFileSync(new URL("../src/account-registry.ts", import.meta.url), "utf8");
 const vmExecution = readFileSync(new URL("../src/vm-execution.ts", import.meta.url), "utf8");
+const snapshotRoundtrip = readFileSync(new URL("../src/headless-v86-snapshot-roundtrip-worker.ts", import.meta.url), "utf8");
 const tinyRunner = readFileSync(new URL("../../runner/tinycore/cloudflare-runner.sh", import.meta.url), "utf8");
 const tinyBootstrap = readFileSync(new URL("../../runner/tinycore/bootstrap.sh", import.meta.url), "utf8");
 const tinyNodeEnv = readFileSync(new URL("../../runner/tinycore/node.env.example", import.meta.url), "utf8");
@@ -146,4 +147,9 @@ test("VM agent tickets are consumed atomically and cannot be replayed", () => {
 test("VM agent tickets use 256-bit random tokens", () => {
   assert.ok(vmExecution.includes("/^[a-f0-9]{64}$/"));
   assert.ok(worker.includes("crypto.getRandomValues(new Uint8Array(32))"));
+});
+
+test("snapshot round-trip CA installation is bounded and avoids zombie polling", () => {
+  assert.ok(snapshotRoundtrip.includes("timeout 180 tce-load -i ca-certificates"));
+  assert.ok(!snapshotRoundtrip.includes("kill -0 \\"$install_pid\\""));
 });
