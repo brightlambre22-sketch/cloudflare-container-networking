@@ -309,11 +309,12 @@ exit 1`;
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
 
       await runStage("isolation_preflight",
-        "set -e; echo '--- ISOLATION PREFLIGHT ---'; if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then echo CGROUP_V2_MISSING; exit 1; fi; controllers=\$(cat /sys/fs/cgroup/cgroup.controllers); for controller in cpu memory pids; do echo \"\$controllers\" | grep -qw \"\$controller\" || { echo CGROUP_CONTROLLER_MISSING=\$controller; exit 1; }; done; for namespace in user mnt pid net ipc uts; do [ -e \"/proc/self/ns/\$namespace\" ] || { echo NAMESPACE_MISSING=\$namespace; exit 1; }; done; [ -r /proc/sys/kernel/seccomp/actions_avail ] || { echo SECCOMP_UNAVAILABLE; exit 1; }; echo CGROUP_V2_CONTROLLERS_OK; echo NAMESPACES_PRESENT; echo SECCOMP_AVAILABLE",
-        "ISOLATION_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
+        "set -e; echo '--- ISOLATION PREFLIGHT ---'; root=/sys/fs/cgroup; if [ ! -r \"\$root/cgroup.controllers\" ]; then echo CGROUP_V2_MISSING; exit 1; fi; controllers=\$(cat \"\$root/cgroup.controllers\"); for controller in cpu memory pids; do echo \"\$controllers\" | grep -qw \"\$controller\" || { echo CGROUP_CONTROLLER_MISSING=\$controller; exit 1; }; done; cg=\"\$root/vq-isolation-probe-\$\$\"; mkdir \"\$cg\"; trap 'rmdir \"\$cg\" 2>/dev/null || true' EXIT; echo '50000 100000' > \"\$cg/cpu.max\"; echo 268435456 > \"\$cg/memory.max\"; echo 64 > \"\$cg/pids.max\"; grep -qx '50000 100000' \"\$cg/cpu.max\"; grep -qx 268435456 \"\$cg/memory.max\"; grep -qx 64 \"\$cg/pids.max\"; rmdir \"\$cg\"; trap - EXIT; for namespace in user mnt pid net ipc uts; do [ -e \"/proc/self/ns/\$namespace\" ] || { echo NAMESPACE_MISSING=\$namespace; exit 1; }; done; [ -r /proc/sys/kernel/seccomp/actions_avail ] || { echo SECCOMP_UNAVAILABLE; exit 1; }; echo CGROUP_V2_CONTROLLERS_OK; echo CGROUP_LIMITS_WRITABLE; echo NAMESPACES_PRESENT; echo SECCOMP_AVAILABLE",
+        "ISOLATION_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS, true);
       const isolationOutput = stages.isolation_preflight.output ?? "";
       stages.isolation_preflight.passed = stages.isolation_preflight.passed &&
         /CGROUP_V2_CONTROLLERS_OK/.test(isolationOutput) &&
+        /CGROUP_LIMITS_WRITABLE/.test(isolationOutput) &&
         /NAMESPACES_PRESENT/.test(isolationOutput) &&
         /SECCOMP_AVAILABLE/.test(isolationOutput);
       if (!stages.isolation_preflight.passed) {
