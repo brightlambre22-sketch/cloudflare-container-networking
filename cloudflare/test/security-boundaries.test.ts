@@ -120,7 +120,9 @@ test("Oracle host and guest firewall scripts fail closed", () => {
   assert.ok(hostFirewall.includes("-j DROP"));
   assert.ok(hostFirewall.includes("SSH_ALLOW_CIDR"));
   assert.ok(guestFirewall.includes("169.254.0.0/16"));
-  assert.ok(guestFirewall.includes(' -d "$GUEST_CIDR" -j DROP'));
+  assert.ok(guestFirewall.includes(' -d "$GUEST_CIDR" ! -d "$GUEST_GATEWAY" -j DROP'));
+  assert.ok(guestFirewall.includes("net.bridge.bridge-nf-call-iptables=1"));
+  assert.ok(guestFirewall.includes("VQ_GUEST_V6_DROP"));
   assert.ok(guestFirewall.includes("--dports 80,443"));
   assert.ok(guide.includes("Authenticated Origin Pulls (mTLS) are not the correct control"));
 });
