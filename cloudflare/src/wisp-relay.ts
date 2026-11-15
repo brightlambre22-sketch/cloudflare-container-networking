@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { connect } from "cloudflare:sockets";
 import { closeTcpResources } from "./wisp-stream";
+import { isAllowedDestination } from "./network-security";
 
 interface TicketRecord { ticket: string; expires_at: number; }
 interface TcpStream {
@@ -35,28 +36,6 @@ function closePacket(streamId: number, reason: number): ArrayBuffer {
   return packet(0x04, streamId, new Uint8Array([reason]));
 }
 
-export function isAllowedDestination(host: string, port: number): boolean {
-  if (port !== 80 && port !== 443) return false;
-  // v86 sends a resolved IPv4 address. Reject non-canonical values and special-use
-  // ranges, including Oracle/AWS/Azure/Alibaba metadata destinations.
-  const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part))) return false;
-  const octets = parts.map(Number);
-  if (octets.some((part) => part < 0 || part > 255)) return false;
-  const [a, b, c, d] = octets;
-  const blocked =
-    a === 0 || a === 10 || a === 127 || a >= 224 || a === 255 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0) ||
-    (a === 192 && b === 88 && c === 99) ||
-    (a === 198 && (b === 18 || b === 19 || b === 51 && c === 100)) ||
-    (a === 203 && b === 0 && c === 113) ||
-    (a === 168 && b === 63 && c === 129 && d === 16);
-  return !blocked;
-}
 /**
  * Authenticated WISP-v1 TCP relay for v86. The synthetic DHCP/DNS/router are provided
  * by v86's WISP backend; this Durable Object only forwards authenticated TCP streams.

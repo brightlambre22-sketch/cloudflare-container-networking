@@ -6,6 +6,7 @@ const worker = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8")
 const registry = readFileSync(new URL("../src/node-registry.ts", import.meta.url), "utf8");
 const tunnelHub = readFileSync(new URL("../src/tunnel-hub.ts", import.meta.url), "utf8");
 const wispRelay = readFileSync(new URL("../src/wisp-relay.ts", import.meta.url), "utf8");
+const networkSecurity = readFileSync(new URL("../src/network-security.ts", import.meta.url), "utf8");
 const accountRegistry = readFileSync(new URL("../src/account-registry.ts", import.meta.url), "utf8");
 const tinyRunner = readFileSync(new URL("../../runner/tinycore/cloudflare-runner.sh", import.meta.url), "utf8");
 const tinyBootstrap = readFileSync(new URL("../../runner/tinycore/bootstrap.sh", import.meta.url), "utf8");
@@ -91,11 +92,11 @@ test("tunnel Durable Object independently authenticates gateway, client, and nod
 });
 
 test("WISP egress blocks private, link-local, metadata, and non-HTTP(S) destinations", () => {
-  assert.ok(wispRelay.includes("export function isAllowedDestination"));
-  assert.ok(wispRelay.includes("(a === 169 && b === 254)"));
-  assert.ok(wispRelay.includes("(a === 168 && b === 63 && c === 129 && d === 16)"));
-  assert.ok(wispRelay.includes("a === 10"));
-  assert.ok(wispRelay.includes("port !== 80 && port !== 443"));
+  assert.ok(networkSecurity.includes("export function isAllowedDestination"));
+  assert.ok(networkSecurity.includes("(a === 169 && b === 254)"));
+  assert.ok(networkSecurity.includes("(a === 168 && b === 63 && c === 129 && d === 16)"));
+  assert.ok(networkSecurity.includes("a === 10"));
+  assert.ok(networkSecurity.includes("port !== 80 && port !== 443"));
 });
 
 test("WISP tickets expire quickly and are atomically consumed once", () => {
