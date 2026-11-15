@@ -1943,7 +1943,7 @@ export default {
     }
 
     const runtimeMatch = url.pathname.match(
-      /^\\/v1\\/nodes\\/([^/]+)\\/runtime(?:\\/(start|stop|probe|heartbeat))?$/,
+      /^\/v1\/nodes\/([^/]+)\/runtime(?:\/(start|stop|probe|heartbeat))?$/,
     );
     if (runtimeMatch) {
       const nodeId = runtimeMatch[1];
@@ -1982,7 +1982,7 @@ export default {
       return json({ error: "method_not_allowed" }, 405);
     }
 
-    const nodeMatch = url.pathname.match(/^\\/v1\\/nodes\\/([^/]+)$/);
+    const nodeMatch = url.pathname.match(/^\/v1\/nodes\/([^/]+)$/);
     if (nodeMatch) {
       const nodeId = nodeMatch[1];
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
