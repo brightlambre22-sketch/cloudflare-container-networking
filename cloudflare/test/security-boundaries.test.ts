@@ -47,6 +47,7 @@ test("Tiny Core and amd64 runners authenticate control-plane traffic", () => {
   assert.ok(tinyRunner.includes("NODE_AGENT_TOKEN"));
   assert.ok(tinyRunner.includes('Authorization: Bearer ${NODE_AGENT_TOKEN}'));
   assert.ok(tinyBootstrap.includes("NODE_AGENT_TOKEN"));
+  assert.ok(tinyBootstrap.includes(". \"$NODE_ENV_FILE\""));
   assert.ok(tinyNodeEnv.includes("NODE_AGENT_TOKEN="));
   assert.ok(containerEntrypoint.includes("NODE_AGENT_TOKEN"));
   assert.ok(containerEntrypoint.includes("Authorization: Bearer $NODE_AGENT_TOKEN"));
