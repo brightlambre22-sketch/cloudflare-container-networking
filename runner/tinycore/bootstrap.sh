@@ -17,8 +17,8 @@ fi
 
 "$SCRIPT_DIR/configure-node-ips.sh" "$IFACE"
 
-if [ -z "${CLOUDFLARE_API_URL:-}" ] || [ -z "${NODE_ID:-}" ]; then
-  echo "Set CLOUDFLARE_API_URL and NODE_ID before starting the runner." >&2
+if [ -z "${CLOUDFLARE_API_URL:-}" ] || [ -z "${NODE_ID:-}" ] || [ -z "${NODE_AGENT_TOKEN:-}" ]; then
+  echo "Set CLOUDFLARE_API_URL, NODE_ID, and NODE_AGENT_TOKEN before starting the runner." >&2
   exit 1
 fi
 
