@@ -27,7 +27,7 @@ patch_node() {
   status="$1"
   error="${2:-}"
   if [ -n "$error" ]; then error_json="\"$error\""; else error_json="null"; fi
-  payload="{\"status\":\"$status\",\"runtime\":\"tinycore-persistent\",\"error\":$error_json}"
+  payload="{\"status\":\"$status\",\"error\":$error_json}"
   curl -fsS -X PATCH     -H "Authorization: Bearer ${NODE_CONTROL_TOKEN}"     -H "content-type: application/json"     --data "$payload"     "${API_URL}/v1/nodes/${NODE_ID}" >/dev/null || true
 }
 
