@@ -126,3 +126,10 @@ test("Oracle host and guest firewall scripts fail closed", () => {
   assert.ok(guestFirewall.includes("--dports 80,443"));
   assert.ok(guide.includes("Authenticated Origin Pulls (mTLS) are not the correct control"));
 });
+
+test("each account WISP relay caps TCP connection attempts per minute", () => {
+  assert.ok(wispRelay.includes("MAX_TCP_CONNECTS_PER_MINUTE = 30"));
+  assert.ok(wispRelay.includes("private async allowTcpConnect()"));
+  assert.ok(wispRelay.includes('txn.get<number[]>("wisp-connect-attempts")'));
+  assert.ok(wispRelay.includes("if (!await this.allowTcpConnect())"));
+});

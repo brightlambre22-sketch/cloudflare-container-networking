@@ -11,6 +11,7 @@ interface TcpStream {
 
 const INITIAL_BUFFER = 64;
 const MAX_STREAMS = 32;
+const MAX_TCP_CONNECTS_PER_MINUTE = 30;
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store" } });
@@ -204,6 +205,21 @@ export class WispRelay extends DurableObject {
     if (type !== 0x05 && streamId !== 0) socket.send(closePacket(streamId, 0x01));
   }
 
+  private async allowTcpConnect(): Promise<boolean> {
+    return this.ctx.storage.transaction(async (txn) => {
+      const now = Date.now();
+      const old = await txn.get<number[]>("wisp-connect-attempts") ?? [];
+      const recent = old.filter((timestamp) => Number.isFinite(timestamp) && now - timestamp < 60_000);
+      if (recent.length >= MAX_TCP_CONNECTS_PER_MINUTE) {
+        await txn.put("wisp-connect-attempts", recent);
+        return false;
+      }
+      recent.push(now);
+      await txn.put("wisp-connect-attempts", recent);
+      return true;
+    });
+  }
+
   private async openTcp(socket: WebSocket, streamId: number, payload: Uint8Array): Promise<void> {
     this.closedStreams.delete(streamId);
     if (streamId === 0 || payload.byteLength < 4 || this.streams.size + this.pendingStreams.size >= MAX_STREAMS) {
@@ -215,6 +231,10 @@ export class WispRelay extends DurableObject {
     if (payload[0] !== 0x01 || !isAllowedDestination(host, port)) {
       console.warn("WISP_CONNECT_REJECTED", JSON.stringify({ streamId, host, port, protocol: payload[0] }));
       socket.send(closePacket(streamId, 0x48));
+      return;
+    }
+    if (!await this.allowTcpConnect()) {
+      socket.send(closePacket(streamId, 0x41));
       return;
     }
     console.log("WISP_CONNECT_REQUEST", JSON.stringify({ streamId, host, port }));

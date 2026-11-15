@@ -24,7 +24,7 @@ The Oracle gateway's outbound WSS connection continues to work because replies a
 
 ## Guest network isolation
 
-The headless TinyCore path runs v86/WebAssembly in the Cloudflare Worker and uses an account-scoped WISP relay; it is not a set of QEMU/Firecracker guests attached to an Oracle Linux bridge. WISP now permits only public IPv4 TCP/80 and TCP/443 and rejects RFC1918, loopback, link-local (including `169.254.169.254`), CGNAT, documentation, benchmarking, multicast/reserved ranges, and Azure's `168.63.129.16` platform address. Account-specific Durable Objects isolate each account's WISP ticket/session. Tickets expire after two minutes and are single-use.
+The headless TinyCore path runs v86/WebAssembly in the Cloudflare Worker and uses an account-scoped WISP relay; it is not a set of QEMU/Firecracker guests attached to an Oracle Linux bridge. WISP now permits only public IPv4 TCP/80 and TCP/443 and rejects RFC1918, loopback, link-local (including `169.254.169.254`), CGNAT, documentation, benchmarking, multicast/reserved ranges, and Azure's `168.63.129.16` platform address. Account-specific Durable Objects isolate each account's WISP ticket/session. Tickets expire after two minutes and are single-use. Each account relay also caps new TCP connection attempts at 30 per minute and concurrent streams at 32.
 
 `gateway/oracle-guest-egress.sh` is a fail-closed template for a future dedicated Linux guest bridge. It is deliberately not auto-applied: configure the actual bridge, guest CIDR, and gateway only after that network exists. It blocks guest-to-guest traffic, metadata, private host networks, and non-HTTP(S) egress. Do not attach merchant guests to the Oracle host network namespace.
 
