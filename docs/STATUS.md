@@ -3,13 +3,14 @@
 ## Implemented
 
 - Private GitHub repository with a Wrangler Worker and SQLite-backed Durable Object configuration.
-- Public GET /health, bearer-protected GET /v1/nodes, and authenticated /tunnel WebSocket route.
+- Public GET /health, admin-protected node registry/control routes, per-node 256-bit agent credentials for runner status/heartbeat, and authenticated /tunnel WebSocket route.
 - Separate gateway and test-client tokens and session roles.
 - Version 1 binary frame codec in TypeScript and Python with size, version, node ID, and length validation.
 - Durable Object routing of bounded frames between the matching client/gateway roles for a node.
 - Python gateway client with reconnect, heartbeat, up to 32 TCP streams, and an exact TCP_ALLOWLIST. Default allowlist is only 127.0.0.1:9000.
 - Loopback TCP echo service, two-stream smoke-test client, and Python codec unit tests.
 - Oracle gateway public IP supplied for this project: 141.148.53.68.
+- Linux amd64 node container has cgroup-backed CPU, memory, and PID limits plus dropped capabilities and no-new-privileges. These limits apply per node container, not per merchant.
 
 ## Proof procedure
 
@@ -25,8 +26,12 @@ Cloudflare documents HTTP/WebSocket ingress and outbound TCP sockets, while inbo
 
 1. Harden stream lifecycle: half-close, per-stream sequence checks, idle deadlines, and bounded send queues/backpressure.
 2. Add UDP associations only after selecting and testing an actual UDP-capable gateway/proxy path.
-3. Add isolated Docker workloads, unique private addresses, fail-closed egress enforcement, proxy adapters, and public-IP verification on Oracle Linux.
-4. Add signed per-component identities, nonce replay defense, key rotation, operations metrics, and deployment/recovery tests before production use.
+3. Add separate per-account Docker workloads, unique namespaces/cgroups, unique private addresses, fail-closed egress enforcement, proxy adapters, and public-IP verification on Oracle Linux.
+4. Add signed per-component identities, nonce replay defense, credential rotation automation, operations metrics, and deployment/recovery tests before production use.
+
+## Vampirequid Shield security baseline
+
+The Worker now blocks anonymous node inventory and node lifecycle operations. Admin operations use ADMIN_ACCESS_KEY; each node receives a unique random agent token at creation, while only its SHA-256 digest is stored. Existing nodes require one-time credential rotation and local runner configuration. The Linux Compose runtime applies cgroup resource limits to each node container and reduces Linux capabilities. This is an initial hardening step, not a completed Shield service or a claim of per-merchant isolation.
 
 ## Plan constraint
 
