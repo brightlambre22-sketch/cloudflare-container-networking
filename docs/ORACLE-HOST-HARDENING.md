@@ -18,7 +18,7 @@ OCI Security Lists and NSGs are allow-lists: remove unwanted ingress allows rath
 
 ## Host firewall
 
-Run `gateway/oracle-host-firewall.sh` from the OCI serial console, or set `SSH_ALLOW_CIDR` to the administrator's fixed source CIDR. It inserts a dedicated INPUT chain without flushing unrelated rules. The policy accepts loopback and established return traffic, optionally permits SSH from explicitly configured IPv4/IPv6 administrator CIDRs, and drops all other new inbound connections. It installs equivalent IPv4 and IPv6 ingress chains when IPv6 is enabled. Validate a second SSH session before persisting with the host OS firewall manager.
+Run `gateway/oracle-host-firewall.sh` from the OCI serial console, or set `SSH_ALLOW_CIDR` and/or `SSH_ALLOW_CIDR6` to the administrator's fixed IPv4/IPv6 source CIDR. It inserts a dedicated INPUT chain without flushing unrelated rules. The policy accepts loopback and established return traffic, optionally permits SSH from explicitly configured IPv4/IPv6 administrator CIDRs, and drops all other new inbound connections. It installs equivalent IPv4 and IPv6 ingress chains when IPv6 is enabled. Validate a second SSH session before persisting with the host OS firewall manager.
 
 The Oracle gateway's outbound WSS connection continues to work because replies are established traffic. Do not add inbound Cloudflare IP ranges for this outbound-only tunnel.
 
