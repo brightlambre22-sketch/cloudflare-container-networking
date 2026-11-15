@@ -107,7 +107,7 @@ test("WISP tickets expire quickly and are atomically consumed once", () => {
 });
 
 test("network, VM ticket, and tunnel endpoints enforce per-IP rate limits", () => {
-  for (const action of ["network-ticket", "network-connect", "vm-agent-ticket", "tunnel-connect"]) {
+  for (const action of ["network-ticket", "network-connect", "vm-agent-ticket", "vm-agent-connect", "vm-exec", "tunnel-connect"]) {
     assert.ok(accountRegistry.includes('"' + action + '"'));
     assert.ok(worker.includes('action: "' + action + '"'));
   }
