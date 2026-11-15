@@ -41,6 +41,7 @@ fi
   while kill -0 "$MYST_PID" 2>/dev/null; do
     curl -fsS --max-time 5 -X POST \
       -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $NODE_AGENT_TOKEN" \
       "$CLOUDFLARE_API_URL/v1/nodes/$NODE_ID/runtime/heartbeat" >/dev/null 2>&1 || true
     sleep "${RUNNER_HEARTBEAT_SECONDS:-10}"
   done
