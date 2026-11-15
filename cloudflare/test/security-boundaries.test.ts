@@ -123,6 +123,7 @@ test("Oracle host and guest firewall scripts fail closed", () => {
   assert.ok(hostFirewall.includes("SSH_ALLOW_CIDR"));
   assert.ok(hostFirewall.includes("ip6tables"));
   assert.ok(hostFirewall.includes("VQ_ORIGIN_IN6"));
+  assert.ok(hostFirewall.indexOf('iptables -A "$CHAIN" -j DROP') < hostFirewall.indexOf('iptables -I "$CHAIN" 3'));
   assert.ok(guestFirewall.includes("169.254.0.0/16"));
   assert.ok(guestFirewall.includes(' -d "$GUEST_CIDR" ! -d "$GUEST_GATEWAY" -j DROP'));
   assert.ok(guestFirewall.includes("net.bridge.bridge-nf-call-iptables=1"));
