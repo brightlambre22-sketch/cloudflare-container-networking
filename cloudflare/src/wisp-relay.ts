@@ -12,7 +12,7 @@ interface TcpStream {
 
 const INITIAL_BUFFER = 64;
 const MAX_STREAMS = 32;
-const MAX_TCP_CONNECTS_PER_MINUTE = 30;
+const MAX_TCP_CONNECTS_PER_MINUTE = 120;
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store" } });

@@ -132,7 +132,7 @@ test("Oracle host and guest firewall scripts fail closed", () => {
 });
 
 test("each account WISP relay caps TCP connection attempts per minute", () => {
-  assert.ok(wispRelay.includes("MAX_TCP_CONNECTS_PER_MINUTE = 30"));
+  assert.ok(wispRelay.includes("MAX_TCP_CONNECTS_PER_MINUTE = 120"));
   assert.ok(wispRelay.includes("private async allowTcpConnect()"));
   assert.ok(wispRelay.includes('txn.get<number[]>("wisp-connect-attempts")'));
   assert.ok(wispRelay.includes("if (!await this.allowTcpConnect())"));
