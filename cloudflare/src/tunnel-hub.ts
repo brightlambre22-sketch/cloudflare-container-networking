@@ -37,13 +37,7 @@ function errorFrame(nodeId: string, streamId: number, code: string): Uint8Array 
   });
 }
 
-export class TunnelHub extends DurableObject {
-  private readonly env: TunnelHubEnv;
-
-  constructor(ctx: DurableObjectState, env: TunnelHubEnv) {
-    super(ctx, env);
-    this.env = env;
-  }
+export class TunnelHub extends DurableObject<TunnelHubEnv> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
