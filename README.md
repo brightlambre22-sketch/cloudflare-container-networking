@@ -17,7 +17,7 @@ Testing has verified that a user's public IP address changes after that user log
 
 ## Architecture boundary
 
-Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
+Cloudflare is the HTTP/WebSocket control and tunnel layer. The Oracle gateway is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Keep its public IP out of public documentation and store it only in private deployment configuration. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
 
 ## Deploy the Worker
 
