@@ -485,7 +485,6 @@ export class AccountRegistry extends DurableObject {
       }
       const action = body.action as string;
       const now = Date.now();
-      const windowMs = action === "signup" ? 60 * 60 * 1000 : 15 * 60 * 1000;
       const limits: Record<string, number> = {
         signup: 5, login: 10, "network-ticket": 12, "network-connect": 60,
         "vm-agent-ticket": 20, "vm-agent-connect": 30, "vm-exec": 60, "tunnel-connect": 120,
