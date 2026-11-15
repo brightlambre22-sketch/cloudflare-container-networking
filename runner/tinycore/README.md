@@ -36,8 +36,16 @@ On the next boot, inspect `/var/log/tinycore-final-boot.log` for the readiness
 checks and backup result. Tiny Core's `filetool.sh -b` saves only paths listed
 in `/opt/.filetool.lst` (minus exclusions), to the configured TCE backup area.
 
-## Later stages
+## Authenticated control runner
 
-Fineproxy, Mysterium, private node address setup, and the Cloudflare control runner
-are intentionally not started by this milestone. They can be added after the
-base boot and persistence cycle is verified.
+The Worker now requires a unique per-node bearer credential for runtime polling,
+heartbeats, and node status updates. Create the node through the authenticated
+admin endpoint; the response contains node_id and agent_token exactly once.
+Store the credential in the persistent node.env file with mode 600 and load it
+before starting bootstrap.sh. Never commit or share that credential. If it is
+lost, an administrator can rotate it through POST /v1/nodes/{node_id}/agent-token;
+the previous token is invalid immediately.
+
+The boot/persistence gate above remains separate from this runner. Do not start
+network services or account execution until the base boot, persistence, and
+per-node authentication checks pass.
