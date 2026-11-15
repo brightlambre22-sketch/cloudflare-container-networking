@@ -6,6 +6,7 @@ set -eu
 
 API_URL="${CLOUDFLARE_API_URL:?Set CLOUDFLARE_API_URL, e.g. https://your-worker.workers.dev}"
 NODE_ID="${NODE_ID:?Set NODE_ID}"
+NODE_CONTROL_TOKEN="${NODE_CONTROL_TOKEN:?Set NODE_CONTROL_TOKEN (dedicated Worker NODE_CONTROL_TOKEN secret)}"
 MYST_BIN="${MYST_BIN:-/opt/mysterium/myst}"
 DATA_DIR="${MYST_DATA_DIR:-/var/lib/mysterium-node}"
 LOG_FILE="${MYST_LOG_FILE:-/var/log/mysterium-node.log}"
@@ -15,18 +16,18 @@ DESIRED_FILE="${MYST_DESIRED_FILE:-/var/run/mysterium.desired}"
 SUPERVISOR="${MYST_SUPERVISOR:-/opt/cloudflare-node/myst-supervisor.sh}"
 
 api() {
-  curl -fsS "${API_URL}/v1/nodes/${NODE_ID}/runtime"
+  curl -fsS -H "Authorization: Bearer ${NODE_CONTROL_TOKEN}" "${API_URL}/v1/nodes/${NODE_ID}/runtime"
 }
 
 heartbeat() {
-  curl -fsS -X POST "${API_URL}/v1/nodes/${NODE_ID}/runtime/heartbeat" >/dev/null 2>&1 || true
+  curl -fsS -H "Authorization: Bearer ${NODE_CONTROL_TOKEN}" -X POST "${API_URL}/v1/nodes/${NODE_ID}/runtime/heartbeat" >/dev/null 2>&1 || true
 }
 
 patch_node() {
   status="$1"
   error="${2:-}"
   payload="{\"status\":\"$status\",\"runtime\":\"tinycore-persistent\",\"error\":${error:+\"$error\"}${error:-null}}"
-  curl -fsS -X PATCH     -H "content-type: application/json"     --data "$payload"     "${API_URL}/v1/nodes/${NODE_ID}" >/dev/null || true
+  curl -fsS -X PATCH     -H "Authorization: Bearer ${NODE_CONTROL_TOKEN}"     -H "content-type: application/json"     --data "$payload"     "${API_URL}/v1/nodes/${NODE_ID}" >/dev/null || true
 }
 
 running() {
