@@ -6,6 +6,7 @@ mkdir -p "$DATA_DIR"
 
 : "${NODE_ID:?NODE_ID is required}"
 : "${CLOUDFLARE_API_URL:?CLOUDFLARE_API_URL is required}"
+: "${NODE_AGENT_TOKEN:?NODE_AGENT_TOKEN is required}"
 
 export MYST_DATA_DIR="$DATA_DIR"
 
