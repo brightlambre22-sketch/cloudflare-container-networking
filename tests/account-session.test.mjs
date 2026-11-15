@@ -7,6 +7,7 @@ const worker = readFileSync(new URL("../cloudflare/src/index.ts", import.meta.ur
 const dashboard = readFileSync(new URL("../public/vm.html", import.meta.url), "utf8");
 const stockroom = readFileSync(new URL("../cloudflare/src/business-database.ts", import.meta.url), "utf8");
 const wispRelay = readFileSync(new URL("../cloudflare/src/wisp-relay.ts", import.meta.url), "utf8");
+const networkSecurity = readFileSync(new URL("../cloudflare/src/network-security.ts", import.meta.url), "utf8");
 const virtualNetwork = readFileSync(new URL("../cloudflare/src/virtual-network.ts", import.meta.url), "utf8");
 const headlessRoundtrip = readFileSync(new URL("../cloudflare/src/headless-v86-snapshot-roundtrip-worker.ts", import.meta.url), "utf8");
 const headlessRoundtripConfig = readFileSync(new URL("../cloudflare/wrangler.headless-v86-roundtrip.toml", import.meta.url), "utf8");
@@ -93,7 +94,7 @@ test("each merchant receives a stable private network identity and authenticated
   assert.ok(wispRelay.includes("active-ticket"));
   assert.ok(wispRelay.includes("record.ticket !== ticket"));
   assert.ok(wispRelay.includes("connect({ hostname: host, port })"));
-  assert.ok(wispRelay.includes("port !== 80 && port !== 443"));
+  assert.ok(networkSecurity.includes("port !== 80 && port !== 443"));
   assert.ok(wispRelay.includes("INITIAL_BUFFER"));
   assert.ok(dashboard.includes("vm_ip:virtualIp"));
   assert.ok(dashboard.includes("router_ip:routerIp"));
