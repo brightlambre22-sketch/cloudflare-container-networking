@@ -28,6 +28,16 @@ The headless TinyCore path runs v86/WebAssembly in the Cloudflare Worker and use
 
 `gateway/oracle-guest-egress.sh` is a fail-closed template for a future dedicated Linux guest bridge. It is deliberately not auto-applied: configure the actual bridge, guest CIDR, and gateway only after that network exists. It blocks guest-to-guest traffic, metadata, private host networks, and non-HTTP(S) egress. Do not attach merchant guests to the Oracle host network namespace.
 
+## Cloudflare WAF and edge rate limiting
+
+The proxied Vampirequid zone has the Cloudflare Managed Free Ruleset deployed. Two zone custom rules are active:
+- Block common secret-file and unused CMS probes (`.env`, `.git`, WordPress login/XML-RPC, and phpMyAdmin paths).
+- Block TRACE and CONNECT methods on `/api/*` routes.
+
+A zone rate-limiting rule is active for `/api/network/ticket`, `/api/vm/agent-ticket`, and `/tunnel`: five requests per 10 seconds per source IP, with a 10-second block. This is the single rate-limiting rule configured for the current Free Website plan. The Worker also has independent atomic per-IP limits for authentication, ticket minting, WISP handshakes, and tunnel reconnects.
+
+Cloudflare WAF applies to proxied traffic. Keep the public hostname proxied, and re-check the zone's WAF entry-point rulesets after any zone migration or DNS change. The managed free ruleset is maintained by Cloudflare; do not replace it with a hand-maintained static signature list.
+
 ## Credential operations
 
 - Keep `TUNNEL_TOKEN`, `CLIENT_TOKEN`, and `ADMIN_ACCESS_KEY` in Worker secrets, never in Git.
