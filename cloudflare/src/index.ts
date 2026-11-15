@@ -1337,11 +1337,6 @@ export default {
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const accountId = typeof body.account_id === "string" ? body.account_id : "";
       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
-      const ticketLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "network-ticket" }),
-      }).catch(() => new Response(null, { status: 503 }));
-      if (!ticketLimit.ok) return json({ error: ticketLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, ticketLimit.status === 429 ? 429 : 503);
       if (accountId === "admin") {
                 if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       } else {
@@ -1352,6 +1347,11 @@ export default {
         });
         if (!verified.ok) return json({ error: "unauthorized" }, 401);
       }
+      const ticketLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "network-ticket" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!ticketLimit.ok) return json({ error: ticketLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, ticketLimit.status === 429 ? 429 : 503);
       const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
       const ticketResponse = await relay.fetch("https://wisp-relay.internal/ticket", { method: "POST" });
       if (!ticketResponse.ok) return json({ error: "network_ticket_unavailable" }, 503);
