@@ -307,6 +307,18 @@ exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
+
+      await runStage("isolation_preflight",
+        "set -e; echo '--- ISOLATION PREFLIGHT ---'; if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then echo CGROUP_V2_MISSING; exit 1; fi; controllers=\$(cat /sys/fs/cgroup/cgroup.controllers); for controller in cpu memory pids; do echo \"\$controllers\" | grep -qw \"\$controller\" || { echo CGROUP_CONTROLLER_MISSING=\$controller; exit 1; }; done; for namespace in user mnt pid net ipc uts; do [ -e \"/proc/self/ns/\$namespace\" ] || { echo NAMESPACE_MISSING=\$namespace; exit 1; }; done; [ -r /proc/sys/kernel/seccomp/actions_avail ] || { echo SECCOMP_UNAVAILABLE; exit 1; }; echo CGROUP_V2_CONTROLLERS_OK; echo NAMESPACES_PRESENT; echo SECCOMP_AVAILABLE",
+        "ISOLATION_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
+      const isolationOutput = stages.isolation_preflight.output ?? "";
+      stages.isolation_preflight.passed = stages.isolation_preflight.passed &&
+        /CGROUP_V2_CONTROLLERS_OK/.test(isolationOutput) &&
+        /NAMESPACES_PRESENT/.test(isolationOutput) &&
+        /SECCOMP_AVAILABLE/.test(isolationOutput);
+      if (!stages.isolation_preflight.passed) {
+        stages.isolation_preflight.error = "required_cgroups_v2_namespaces_or_seccomp_unavailable";
+      }
       const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 360000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
@@ -350,7 +362,8 @@ exit 1`;
     }
 
     const guestChecksPassed = boot.booted && stages.dhcp?.passed === true &&
-      stages.resource_preflight?.passed === true && stages.tls_download?.passed === true &&
+      stages.resource_preflight?.passed === true && stages.isolation_preflight?.passed === true &&
+      stages.tls_download?.passed === true &&
       stages.openssl_install?.passed === true && stages.ca_install?.passed === true &&
       stages.https_preflight?.passed === true;
     let snapshotRoundtrip: Record<string, unknown> = {
