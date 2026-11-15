@@ -311,6 +311,7 @@ exit 1`;
       // Keep guest isolation probes short: Tiny Core's emulated TTY consumes
       // injected characters slowly, so one monolithic script can time out while
       // it is still being transferred. Each probe has its own completion marker.
+      // Keep guest preflight commands on explicit paths to avoid TTY-side variable escaping.
       await runStage("cgroup_controllers",
         "set -e; test -d /sys/fs/cgroup || mkdir -p /sys/fs/cgroup; if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then mount -t cgroup2 cgroup2 /sys/fs/cgroup || { echo CGROUP_V2_MOUNT_FAILED; exit 1; }; fi; test -r /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_V2_MOUNT_INVISIBLE; exit 1; }; grep -qw cpu /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_CONTROLLER_MISSING=cpu; cat /sys/fs/cgroup/cgroup.controllers; exit 1; }; grep -qw memory /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_CONTROLLER_MISSING=memory; cat /sys/fs/cgroup/cgroup.controllers; cat /proc/cmdline; grep '^memory' /proc/cgroups; exit 1; }; grep -qw pids /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_CONTROLLER_MISSING=pids; cat /sys/fs/cgroup/cgroup.controllers; exit 1; }; echo +cpu +memory +pids > /sys/fs/cgroup/cgroup.subtree_control || { echo CGROUP_CONTROLLER_ENABLE_FAILED; cat /sys/fs/cgroup/cgroup.subtree_control; exit 1; }; echo CGROUP_V2_CONTROLLERS_OK",
         "CGROUP_CONTROLLERS_DONE", 60000, true);
