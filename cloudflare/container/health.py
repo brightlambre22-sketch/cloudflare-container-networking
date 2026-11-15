@@ -24,4 +24,4 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         return
 
-HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()
