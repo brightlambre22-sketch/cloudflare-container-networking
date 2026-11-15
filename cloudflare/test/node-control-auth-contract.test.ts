@@ -59,6 +59,8 @@ test("headless TinyCore snapshot acceptance requires cgroups v2, namespaces, and
   assert.match(worker, /CGROUP_V2_CONTROLLERS_OK/);
   assert.match(worker, /CGROUP_LIMITS_WRITABLE/);
   assert.match(worker, /NAMESPACES_PRESENT/);
+  assert.match(worker, /unshare -m -n true/);
+  assert.match(worker, /NAMESPACE_CREATE_OK/);
   assert.match(worker, /\/proc\/sys\/kernel\/seccomp\/actions_avail/);
   assert.match(worker, /stages\.isolation_preflight\?\.passed === true/);
 });
