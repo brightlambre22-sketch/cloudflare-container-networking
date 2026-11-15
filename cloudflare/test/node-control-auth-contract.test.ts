@@ -48,5 +48,5 @@ test("TinyCore runner requires and sends its dedicated control-plane credential"
   assert.doesNotMatch(envExample, /^NODE_CONTROL_TOKEN=/m);
   const bootstrap = await read("../../runner/tinycore/browser-bootstrap.sh");
   assert.ok(bootstrap.includes('NODE_CONTROL_TOKEN="$NODE_CONTROL_TOKEN" nohup'));
-  assert.ok(!bootstrap.includes("NODE_CONTROL_TOKEN=$NODE_CONTROL_TOKEN\\n"), "credential must not be written to node.env");
+  assert.ok(!bootstrap.includes("NODE_CONTROL_TOKEN=$NODE_CONTROL_TOKEN"), "credential must not be written to node.env");
 });
