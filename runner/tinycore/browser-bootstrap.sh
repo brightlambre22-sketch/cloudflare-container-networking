@@ -6,7 +6,7 @@ set -eu
 
 API_URL="${1:-}"
 NODE_ID="${2:-}"
-PINNED_REF="1b80963f0498194f38a358aeefc4630666b4be5e"
+PINNED_REF="cad4061e18ce9064c8a26aa1b25112e4c815826f"
 RAW_BASE="https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/$PINNED_REF/runner/tinycore"
 MYST_VERSION="1.38.5"
 MYST_URL="https://github.com/mysteriumnetwork/node/releases/download/$MYST_VERSION/myst_linux_amd64.tar.gz"
@@ -74,7 +74,7 @@ fetch_verified() {
 # SHA-256 values for the exact pinned files.
 fetch_verified configure-node-ips.sh 517a07914d213d7c1e5b7b77b5fe10a3bf8f996f1600eaad515f82374429f5d4
 fetch_verified myst-supervisor.sh 717c3100ca11e525912cd422701174d0cad9cf7db5fc5e92d16cf2a5f67db56a
-fetch_verified cloudflare-runner.sh b715a416bec45ce4627dea698949c5c37dad9b4523b9a3e40ab59fa3e4797341
+fetch_verified cloudflare-runner.sh dabd4ff9807533fe9abe012564a54a92f943ec862cd3a95017a78ca05927265d
 
 cat >"$ENV/node.env" <<EOF
 NODE_ID=$NODE_ID
