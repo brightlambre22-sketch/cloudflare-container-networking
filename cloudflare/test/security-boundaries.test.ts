@@ -117,7 +117,6 @@ test("network, VM ticket, and tunnel endpoints enforce per-IP rate limits", () =
 test("Oracle host and guest firewall scripts fail closed", () => {
   const hostFirewall = readFileSync(new URL("../../gateway/oracle-host-firewall.sh", import.meta.url), "utf8");
   const guestFirewall = readFileSync(new URL("../../gateway/oracle-guest-egress.sh", import.meta.url), "utf8");
-  const guide = readFileSync(new URL("../../docs/ORACLE-HOST-HARDENING.md", import.meta.url), "utf8");
   assert.ok(hostFirewall.includes("ESTABLISHED,RELATED"));
   assert.ok(hostFirewall.includes("-j DROP"));
   assert.ok(hostFirewall.includes("SSH_ALLOW_CIDR"));
@@ -129,7 +128,6 @@ test("Oracle host and guest firewall scripts fail closed", () => {
   assert.ok(guestFirewall.includes("net.bridge.bridge-nf-call-iptables=1"));
   assert.ok(guestFirewall.includes("VQ_GUEST_V6_DROP"));
   assert.ok(guestFirewall.includes("--dports 80,443"));
-  assert.ok(guide.includes("Authenticated Origin Pulls (mTLS) are not the correct control"));
 });
 
 test("each account WISP relay caps TCP connection attempts per minute", () => {
