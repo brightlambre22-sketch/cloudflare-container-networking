@@ -5,7 +5,7 @@ import test from "node:test";
 const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
 test("node inventory and lifecycle routes fail closed for unauthenticated callers", async () => {
-  const worker = await read("../src/index.ts");
+  const [worker, registry] = await Promise.all([read("../src/index.ts"), read("../src/node-registry.ts")]);
   const start = worker.indexOf('// Node inventory and lifecycle operations are privileged control-plane APIs.');
   const end = worker.indexOf('if (url.pathname === "/" || url.pathname === "")', start);
   assert.ok(start >= 0 && end > start, "node route block must be present");
@@ -19,6 +19,11 @@ test("node inventory and lifecycle routes fail closed for unauthenticated caller
   assert.match(routes, /action === "stop"/);
   assert.match(routes, /action === "probe"/);
   assert.match(routes, /action === "heartbeat"/);
+  assert.match(registry, /unsupported_patch_field/);
+  assert.match(registry, /invalid_node_status/);
+  assert.match(registry, /invalid_node_runtime/);
+  assert.match(registry, /new Set\(\["status", "runtime", "error"\]\)/);
+  assert.doesNotMatch(registry, /egress_ip: patch/);
 
   // Only authenticated routes may reach the registry/runtime Durable Objects.
   const registryList = routes.indexOf('registry.fetch("https://node-registry.internal/list")');
