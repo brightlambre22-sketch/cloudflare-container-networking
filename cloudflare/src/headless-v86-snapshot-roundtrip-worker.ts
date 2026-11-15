@@ -308,20 +308,46 @@ exit 1`;
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
 
-      await runStage("isolation_preflight",
-        "set -e; echo '--- ISOLATION PREFLIGHT ---'; root=/sys/fs/cgroup; mkdir -p \"\$root\"; if [ ! -r \"\$root/cgroup.controllers\" ]; then if grep -qw cgroup2 /proc/filesystems; then mount -t cgroup2 none \"\$root\" 2>&1 || { echo CGROUP_V2_MOUNT_FAILED; exit 1; }; else echo CGROUP_V2_KERNEL_UNSUPPORTED; cat /proc/filesystems; exit 1; fi; fi; [ -r \"\$root/cgroup.controllers\" ] || { echo CGROUP_V2_MOUNT_INVISIBLE; mount; exit 1; }; controllers=\$(cat \"\$root/cgroup.controllers\"); if ! echo \"\$controllers\" | grep -qw memory; then echo CGROUP_DIAGNOSTICS_BEGIN; uname -a; echo KERNEL_CMDLINE; cat /proc/cmdline 2>&1; echo PROC_CGROUPS; cat /proc/cgroups 2>&1; echo CGROUP_CONTROLLERS; cat \"\$root/cgroup.controllers\" 2>&1; echo CGROUP_MOUNT; grep -E \"cgroup|cgroup2\" /proc/mounts 2>&1; echo KERNEL_CONFIG_FLAGS; if [ -r /proc/config.gz ]; then zcat /proc/config.gz | grep -E \"^(CONFIG_CGROUPS=|CONFIG_MEMCG=|CONFIG_MEMCG_SWAP=|CONFIG_MEMCG_KMEM=|# CONFIG_MEMCG is not set$)\"; elif [ -r /boot/config-\$(uname -r) ]; then grep -E \"^(CONFIG_CGROUPS=|CONFIG_MEMCG=|CONFIG_MEMCG_SWAP=|CONFIG_MEMCG_KMEM=|# CONFIG_MEMCG is not set$)\" \"/boot/config-\$(uname -r)\"; else echo KERNEL_CONFIG_UNAVAILABLE; fi; echo CGROUP_DIAGNOSTICS_END; echo CGROUP_CONTROLLER_MISSING=memory; exit 1; fi; for controller in cpu memory pids; do echo \"\$controllers\" | grep -qw \"\$controller\" || { echo CGROUP_CONTROLLER_MISSING=\$controller; exit 1; }; done; enabled=\$(cat \"\$root/cgroup.subtree_control\" 2>/dev/null || true); for controller in cpu memory pids; do echo \"\$enabled\" | grep -qw \"+\$controller\" || echo +\$controller >> \"\$root/cgroup.subtree_control\" || { echo CGROUP_CONTROLLER_ENABLE_FAILED=\$controller; exit 1; }; done; controllers=\$(cat \"\$root/cgroup.controllers\"); for controller in cpu memory pids; do echo \"\$controllers\" | grep -qw \"\$controller\" || { echo CGROUP_CONTROLLER_MISSING=\$controller; exit 1; }; done; cg=\"\$root/vq-isolation-probe-\$\$\"; mkdir \"\$cg\"; probe_pid=; trap 'if [ -n \"\$probe_pid\" ]; then kill \"\$probe_pid\" 2>/dev/null || true; wait \"\$probe_pid\" 2>/dev/null || true; fi; rmdir \"\$cg\" 2>/dev/null || true' EXIT; echo '50000 100000' > \"\$cg/cpu.max\"; echo 268435456 > \"\$cg/memory.max\"; echo 64 > \"\$cg/pids.max\"; grep -qx '50000 100000' \"\$cg/cpu.max\"; grep -qx 268435456 \"\$cg/memory.max\"; grep -qx 64 \"\$cg/pids.max\"; sleep 5 & probe_pid=\$!; echo \"\$probe_pid\" > \"\$cg/cgroup.procs\"; grep -q \"\$cg\" \"/proc/\$probe_pid/cgroup\"; kill \"\$probe_pid\" 2>/dev/null || true; wait \"\$probe_pid\" 2>/dev/null || true; probe_pid=; echo CGROUP_PROCESS_ATTACH_OK; rmdir \"\$cg\"; trap - EXIT; for namespace in user mnt pid net ipc uts; do [ -e \"/proc/self/ns/\$namespace\" ] || { echo NAMESPACE_MISSING=\$namespace; exit 1; }; done; command -v unshare >/dev/null 2>&1 || { echo UNSHARE_TOOL_MISSING; exit 1; }; unshare -m -n true || { echo NAMESPACE_CREATE_FAILED; exit 1; }; [ -r /proc/sys/kernel/seccomp/actions_avail ] || { echo SECCOMP_UNAVAILABLE; exit 1; }; echo NAMESPACE_CREATE_OK; echo CGROUP_V2_CONTROLLERS_OK; echo CGROUP_LIMITS_WRITABLE; echo NAMESPACES_PRESENT; echo SECCOMP_AVAILABLE",
-        "ISOLATION_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS, true);
-      const isolationOutput = stages.isolation_preflight.output ?? "";
-      stages.isolation_preflight.passed = stages.isolation_preflight.passed &&
-        /CGROUP_V2_CONTROLLERS_OK/.test(isolationOutput) &&
-        /CGROUP_LIMITS_WRITABLE/.test(isolationOutput) &&
-        /CGROUP_PROCESS_ATTACH_OK/.test(isolationOutput) &&
-        /NAMESPACES_PRESENT/.test(isolationOutput) &&
-        /NAMESPACE_CREATE_OK/.test(isolationOutput) &&
-        /SECCOMP_AVAILABLE/.test(isolationOutput);
-      if (!stages.isolation_preflight.passed) {
-        stages.isolation_preflight.error = "required_cgroups_v2_namespaces_or_seccomp_unavailable";
-      }
+      // Keep guest isolation probes short: Tiny Core's emulated TTY consumes
+      // injected characters slowly, so one monolithic script can time out while
+      // it is still being transferred. Each probe has its own completion marker.
+      await runStage("cgroup_controllers",
+        "set -e; root=/sys/fs/cgroup; mkdir -p \"\$root\"; if [ ! -r \"\$root/cgroup.controllers\" ]; then grep -qw cgroup2 /proc/filesystems || { echo CGROUP_V2_KERNEL_UNSUPPORTED; exit 1; }; mount -t cgroup2 none \"\$root\" 2>&1 || { echo CGROUP_V2_MOUNT_FAILED; exit 1; }; fi; controllers=\$(cat \"\$root/cgroup.controllers\"); echo CGROUP_CONTROLLERS=\$controllers; for c in cpu memory pids; do echo \"\$controllers\" | grep -qw \"\$c\" || { echo CGROUP_CONTROLLER_MISSING=\$c; if [ \"\$c\" = memory ]; then echo KERNEL_CMDLINE; cat /proc/cmdline; grep '^memory' /proc/cgroups 2>/dev/null || true; fi; exit 1; done; enabled=\$(cat \"\$root/cgroup.subtree_control\" 2>/dev/null || true); for c in cpu memory pids; do echo \"\$enabled\" | grep -qw +\$c || echo +\$c >> \"\$root/cgroup.subtree_control\" || { echo CGROUP_CONTROLLER_ENABLE_FAILED=\$c; exit 1; }; done; echo CGROUP_V2_CONTROLLERS_OK",
+        "CGROUP_CONTROLLERS_DONE", 60000, true);
+      await runStage("cgroup_limits",
+        "set -e; root=/sys/fs/cgroup; cg=\"\$root/vq-probe-\$\$\"; mkdir \"\$cg\"; echo '50000 100000' > \"\$cg/cpu.max\"; echo 268435456 > \"\$cg/memory.max\"; echo 64 > \"\$cg/pids.max\"; grep -qx '50000 100000' \"\$cg/cpu.max\"; grep -qx 268435456 \"\$cg/memory.max\"; grep -qx 64 \"\$cg/pids.max\"; sleep 5 & pid=\$!; echo \$pid > \"\$cg/cgroup.procs\"; grep -q \"\$cg\" /proc/\$pid/cgroup; kill \$pid 2>/dev/null || true; wait \$pid 2>/dev/null || true; rmdir \"\$cg\"; echo CGROUP_PROCESS_ATTACH_OK; echo CGROUP_LIMITS_WRITABLE",
+        "CGROUP_LIMITS_DONE", 60000, true);
+      await runStage("namespace_preflight",
+        "set -e; for n in user mnt pid net ipc uts; do [ -e /proc/self/ns/\$n ] || { echo NAMESPACE_MISSING=\$n; exit 1; }; done; command -v unshare >/dev/null 2>&1 || { echo UNSHARE_TOOL_MISSING; exit 1; }; unshare -m -n true || { echo NAMESPACE_CREATE_FAILED; exit 1; }; echo NAMESPACES_PRESENT; echo NAMESPACE_CREATE_OK",
+        "NAMESPACE_PREFLIGHT_DONE", 60000, true);
+      await runStage("seccomp_preflight",
+        "[ -r /proc/sys/kernel/seccomp/actions_avail ] || { echo SECCOMP_UNAVAILABLE; exit 1; }; echo SECCOMP_AVAILABLE",
+        "SECCOMP_PREFLIGHT_DONE", 30000, true);
+      const cgroupControllersOut = stages.cgroup_controllers.output ?? "";
+      const cgroupLimitsOut = stages.cgroup_limits.output ?? "";
+      const namespaceOut = stages.namespace_preflight.output ?? "";
+      const seccompOut = stages.seccomp_preflight.output ?? "";
+      const isolationOutput = [cgroupControllersOut, cgroupLimitsOut, namespaceOut, seccompOut].join("\n");
+      const isolationPassed =
+        stages.cgroup_controllers.passed && /CGROUP_V2_CONTROLLERS_OK/.test(cgroupControllersOut) &&
+        stages.cgroup_limits.passed && /CGROUP_LIMITS_WRITABLE/.test(cgroupLimitsOut) &&
+        /CGROUP_PROCESS_ATTACH_OK/.test(cgroupLimitsOut) &&
+        stages.namespace_preflight.passed && /NAMESPACES_PRESENT/.test(namespaceOut) &&
+        /NAMESPACE_CREATE_OK/.test(namespaceOut) &&
+        stages.seccomp_preflight.passed && /SECCOMP_AVAILABLE/.test(seccompOut);
+      stages.isolation_preflight = {
+        attempted: true,
+        passed: isolationPassed,
+        marker: "ISOLATION_PREFLIGHT_DONE",
+        output: isolationOutput.slice(-5000),
+        error: isolationPassed ? undefined : "required_cgroups_v2_namespaces_or_seccomp_unavailable",
+      };
+      await writeProgress("running", "isolation_preflight", {
+        stage: "isolation_preflight",
+        stage_status: isolationPassed ? "passed" : "failed",
+        stage_error: stages.isolation_preflight.error ?? null,
+        stage_results: Object.fromEntries(Object.entries(stages).map(([name, item]) => [name, { attempted: item.attempted, passed: item.passed, error: item.error ?? null }])),
+      });
       const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 360000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
