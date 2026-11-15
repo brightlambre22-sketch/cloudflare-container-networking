@@ -492,14 +492,18 @@ export class AccountRegistry extends DurableObject {
       };
       const limit = limits[action];
       const key = "auth-rate:" + action + ":" + await this.sha256(body.ip);
-      const old = await this.ctx.storage.get<number[]>(key) ?? [];
-      const recent = old.filter((time) => Number.isFinite(time) && now - time < windowMs);
-      if (recent.length >= limit) {
-        await this.ctx.storage.put(key, recent);
-        return json({ error: "rate_limited", retry_after_seconds: Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000)) }, 429);
-      }
-      recent.push(now);
-      await this.ctx.storage.put(key, recent);
+      const decision = await this.ctx.storage.transaction(async (txn) => {
+        const old = await txn.get<number[]>(key) ?? [];
+        const recent = old.filter((time) => Number.isFinite(time) && now - time < windowMs);
+        if (recent.length >= limit) {
+          await txn.put(key, recent);
+          return { allowed: false, retry_after_seconds: Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000)) };
+        }
+        recent.push(now);
+        await txn.put(key, recent);
+        return { allowed: true, retry_after_seconds: 0 };
+      });
+      if (!decision.allowed) return json({ error: "rate_limited", retry_after_seconds: decision.retry_after_seconds }, 429);
       return json({ ok: true });
     }
 
