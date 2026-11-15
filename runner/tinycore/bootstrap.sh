@@ -6,6 +6,14 @@ set -eu
 PERSIST="/etc/cloudflare-node"
 mkdir -p "$PERSIST"
 
+# Load the root-owned persistent node credentials/configuration before validation.
+NODE_ENV_FILE="${NODE_ENV_FILE:-$PERSIST/node.env}"
+if [ -r "$NODE_ENV_FILE" ]; then
+  set -a
+  . "$NODE_ENV_FILE"
+  set +a
+fi
+
 IFACE="${NODE_INTERFACE:-eth0}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
