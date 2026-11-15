@@ -13,6 +13,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       NODE_ID: ${NODE_ID}
+      NODE_AGENT_TOKEN: ${NODE_AGENT_TOKEN}
       CLOUDFLARE_API_URL: ${CLOUDFLARE_API_URL}
       RUNNER_HEARTBEAT_SECONDS: ${RUNNER_HEARTBEAT_SECONDS:-10}
     volumes:
