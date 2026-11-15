@@ -27,6 +27,11 @@ jobs:
       - name: Run Worker and commerce contract tests
         working-directory: cloudflare
         run: npm run test:headless
+      - name: Validate Tiny Core shell script syntax
+        run: |
+          for script in runner/tinycore/cloudflare-runner.sh public/runner/tinycore/cloudflare-runner.sh runner/tinycore/browser-bootstrap.sh runner/tinycore/bootlocal.sh; do
+            sh -n "$script"
+          done
       - name: Validate Worker build
         working-directory: cloudflare
         run: npm run check
