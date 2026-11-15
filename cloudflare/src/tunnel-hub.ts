@@ -1,11 +1,29 @@
 import { DurableObject } from "cloudflare:workers";
 import { decodeFrame, encodeFrame, FrameType, MAX_PAYLOAD_BYTES } from "./protocol";
 
+interface TunnelHubEnv {
+  TUNNEL_TOKEN?: string;
+  CLIENT_TOKEN?: string;
+  ADMIN_ACCESS_KEY?: string;
+}
+
 interface SessionInfo {
   nodeId: string;
   role: "gateway" | "client";
   connectedAt: number;
   lastSeenAt: number;
+}
+
+function secureEqual(left: string, right: string): boolean {
+  if (!left || left.length !== right.length) return false;
+  let difference = 0;
+  for (let i = 0; i < left.length; i += 1) difference |= left.charCodeAt(i) ^ right.charCodeAt(i);
+  return difference === 0;
+}
+
+function bearerMatches(request: Request, expected: string | undefined): boolean {
+  const header = request.headers.get("authorization") ?? "";
+  return !!expected && header.startsWith("Bearer ") && secureEqual(header.slice(7), expected);
 }
 
 function errorFrame(nodeId: string, streamId: number, code: string): Uint8Array {
@@ -20,6 +38,13 @@ function errorFrame(nodeId: string, streamId: number, code: string): Uint8Array 
 }
 
 export class TunnelHub extends DurableObject {
+  private readonly env: TunnelHubEnv;
+
+  constructor(ctx: DurableObjectState, env: TunnelHubEnv) {
+    super(ctx, env);
+    this.env = env;
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/tunnel") {
@@ -28,9 +53,12 @@ export class TunnelHub extends DurableObject {
       }
       const nodeId = request.headers.get("x-node-id") ?? "";
       const role = request.headers.get("x-tunnel-role");
+      const expected = role === "gateway" ? this.env.TUNNEL_TOKEN
+        : role === "client" ? this.env.CLIENT_TOKEN : undefined;
       if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId) || (role !== "gateway" && role !== "client")) {
         return Response.json({ error: "invalid_session" }, { status: 400 });
       }
+      if (!bearerMatches(request, expected)) return Response.json({ error: "unauthorized" }, { status: 401 });
       for (const existing of this.ctx.getWebSockets(nodeId)) {
         const attachment = existing.deserializeAttachment() as SessionInfo | null;
         if (attachment?.role === role) existing.close(1012, "session replaced");
@@ -44,6 +72,9 @@ export class TunnelHub extends DurableObject {
     }
 
     if (url.pathname === "/nodes" && request.method === "GET") {
+      if (!bearerMatches(request, this.env.ADMIN_ACCESS_KEY)) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
       const active = new Map<string, SessionInfo>();
       for (const socket of this.ctx.getWebSockets()) {
         try {
