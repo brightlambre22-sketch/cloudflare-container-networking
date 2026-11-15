@@ -15,31 +15,27 @@ ip link show "$GUEST_BRIDGE" >/dev/null 2>&1 || { echo "Bridge not found: $GUEST
 CHAIN="VQ_GUEST_EGRESS"
 iptables -N "$CHAIN" 2>/dev/null || true
 iptables -F "$CHAIN"
-# Anti-spoofing and guest-to-guest isolation.
-iptables -A "$CHAIN" ! -s "$GUEST_CIDR" -j DROP
-iptables -A "$CHAIN" -d "$GUEST_CIDR" ! -d "$GUEST_GATEWAY" -j DROP
-# Metadata/link-local endpoints, including 169.254.169.254.
-iptables -A "$CHAIN" -d 169.254.0.0/16 -j DROP
-# Only DHCP/DNS may reach the explicitly configured gateway.
-iptables -A "$CHAIN" -d "$GUEST_GATEWAY" -p udp -m multiport --dports 53,67,68 -j ACCEPT
-iptables -A "$CHAIN" -d "$GUEST_GATEWAY" -p tcp --dport 53 -j ACCEPT
-# Block private host networks and carrier-grade NAT.
-iptables -A "$CHAIN" -d 10.0.0.0/8 -j DROP
-iptables -A "$CHAIN" -d 172.16.0.0/12 -j DROP
-iptables -A "$CHAIN" -d 192.168.0.0/16 -j DROP
-iptables -A "$CHAIN" -d 100.64.0.0/10 -j DROP
-iptables -A "$CHAIN" -d 127.0.0.0/8 -j DROP
-# Public guest egress is limited to HTTP(S); everything else fails closed.
-iptables -A "$CHAIN" -p tcp -m multiport --dports 80,443 -j ACCEPT
+# Install the terminal drop first so a partial rerun remains fail-closed.
 iptables -A "$CHAIN" -j DROP
+iptables -I "$CHAIN" 1 ! -s "$GUEST_CIDR" -j DROP
+iptables -I "$CHAIN" 2 -d "$GUEST_CIDR" ! -d "$GUEST_GATEWAY" -j DROP
+iptables -I "$CHAIN" 3 -d 169.254.0.0/16 -j DROP
+iptables -I "$CHAIN" 4 -d "$GUEST_GATEWAY" -p udp -m multiport --dports 53,67,68 -j ACCEPT
+iptables -I "$CHAIN" 5 -d "$GUEST_GATEWAY" -p tcp --dport 53 -j ACCEPT
+iptables -I "$CHAIN" 6 -d 10.0.0.0/8 -j DROP
+iptables -I "$CHAIN" 7 -d 172.16.0.0/12 -j DROP
+iptables -I "$CHAIN" 8 -d 192.168.0.0/16 -j DROP
+iptables -I "$CHAIN" 9 -d 100.64.0.0/10 -j DROP
+iptables -I "$CHAIN" 10 -d 127.0.0.0/8 -j DROP
+iptables -I "$CHAIN" 11 -p tcp -m multiport --dports 80,443 -j ACCEPT
 iptables -C FORWARD -i "$GUEST_BRIDGE" -j "$CHAIN" 2>/dev/null || iptables -I FORWARD 1 -i "$GUEST_BRIDGE" -j "$CHAIN"
 INPUT_CHAIN="VQ_GUEST_INPUT"
 iptables -N "$INPUT_CHAIN" 2>/dev/null || true
 iptables -F "$INPUT_CHAIN"
-iptables -A "$INPUT_CHAIN" ! -s "$GUEST_CIDR" -j DROP
-iptables -A "$INPUT_CHAIN" -p udp -m multiport --dports 53,67,68 -j ACCEPT
-iptables -A "$INPUT_CHAIN" -p tcp --dport 53 -j ACCEPT
 iptables -A "$INPUT_CHAIN" -j DROP
+iptables -I "$INPUT_CHAIN" 1 ! -s "$GUEST_CIDR" -j DROP
+iptables -I "$INPUT_CHAIN" 2 -p udp -m multiport --dports 53,67,68 -j ACCEPT
+iptables -I "$INPUT_CHAIN" 3 -p tcp --dport 53 -j ACCEPT
 iptables -C INPUT -i "$GUEST_BRIDGE" -j "$INPUT_CHAIN" 2>/dev/null || iptables -I INPUT 1 -i "$GUEST_BRIDGE" -j "$INPUT_CHAIN"
 V6_CHAIN="VQ_GUEST_V6_DROP"
 ip6tables -N "$V6_CHAIN" 2>/dev/null || true

@@ -10,15 +10,20 @@ if [ -z "$SSH_ALLOW_CIDR" ] && [ -z "$SSH_ALLOW_CIDR6" ] && [ "${CONFIRM_NO_SSH:
   echo "Set SSH_ALLOW_CIDR/SSH_ALLOW_CIDR6 or CONFIRM_NO_SSH=YES when using OCI console." >&2
   exit 2
 fi
+if [ -e /proc/net/if_inet6 ] && ! command -v ip6tables >/dev/null 2>&1; then
+  echo "IPv6 is enabled but ip6tables is unavailable." >&2
+  exit 1
+fi
+
 CHAIN="VQ_ORIGIN_IN"
 iptables -N "$CHAIN" 2>/dev/null || true
 iptables -F "$CHAIN"
 iptables -A "$CHAIN" -i lo -j ACCEPT
 iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-if [ -n "$SSH_ALLOW_CIDR" ]; then
-  iptables -A "$CHAIN" -p tcp --dport 22 -s "$SSH_ALLOW_CIDR" -m conntrack --ctstate NEW -j ACCEPT
-fi
 iptables -A "$CHAIN" -j DROP
+if [ -n "$SSH_ALLOW_CIDR" ]; then
+  iptables -I "$CHAIN" 3 -p tcp --dport 22 -s "$SSH_ALLOW_CIDR" -m conntrack --ctstate NEW -j ACCEPT
+fi
 iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
 
 # Apply the same default-deny policy to IPv6 so a public IPv6 address cannot bypass IPv4 rules.
@@ -29,10 +34,10 @@ if [ -e /proc/net/if_inet6 ]; then
   ip6tables -F "$CHAIN6"
   ip6tables -A "$CHAIN6" -i lo -j ACCEPT
   ip6tables -A "$CHAIN6" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  if [ -n "$SSH_ALLOW_CIDR6" ]; then
-    ip6tables -A "$CHAIN6" -p tcp --dport 22 -s "$SSH_ALLOW_CIDR6" -m conntrack --ctstate NEW -j ACCEPT
-  fi
   ip6tables -A "$CHAIN6" -j DROP
+  if [ -n "$SSH_ALLOW_CIDR6" ]; then
+    ip6tables -I "$CHAIN6" 3 -p tcp --dport 22 -s "$SSH_ALLOW_CIDR6" -m conntrack --ctstate NEW -j ACCEPT
+  fi
   ip6tables -C INPUT -j "$CHAIN6" 2>/dev/null || ip6tables -I INPUT 1 -j "$CHAIN6"
 fi
 
