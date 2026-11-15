@@ -11,14 +11,14 @@ This checklist distinguishes source changes from verified runtime behavior. A ch
 - [x] Apply the 30-second heartbeat expiry when reading runtime state.
 - [x] Update both runner copies and browser bootstrap to send the credential without writing it to the persistent node configuration.
 - [x] Add source-contract tests and CI shell syntax checks.
-- [x] Add a headless guest preflight gate for cgroups v2 CPU/memory/PID controllers, namespace handles, and seccomp kernel capability before a snapshot can be marked ready.
+- [x] Add a headless guest preflight gate that mounts cgroup v2 when the kernel supports it, enables CPU/memory/PID controllers, verifies writable limits and process attachment, and checks namespace creation and seccomp capability before a snapshot can be marked ready.
 - [x] Shell syntax check performed in the working environment for the updated runner/bootstrap scripts.
 
 ## Not yet accepted for production
 
 - [ ] Run the branch's Worker contract tests and Wrangler dry-run build. They have not been executed for this branch.
 - [ ] Run the actual Workerd TinyCore guest boot workflow and capture its isolation preflight output. No completed guest round-trip workflow run was found in the repository's recent Actions history.
-- [ ] Demonstrate cgroups v2 controllers are present in the actual TinyCore kernel and that resource limits can be applied to a real merchant service process. The new preflight only detects kernel capabilities; it does not enforce limits.
+- [ ] Demonstrate cgroups v2 controllers are present in the actual TinyCore kernel and that resource limits can be applied to a real merchant service process. The preflight now attempts to mount cgroup2 and enable controllers when supported; it remains a capability probe and does not enforce limits for merchant workloads.
 - [ ] Demonstrate namespace creation and an installed seccomp filter on the real guest. The preflight detects namespace handles and seccomp kernel support; it does not yet install policy.
 - [ ] Replace the shared platform-wide runner credential with short-lived per-node credentials, scoped to a node ID and revocable independently.
 - [ ] Deliver runner credentials securely after every reboot without storing a reusable bearer secret in an unencrypted guest backup.
