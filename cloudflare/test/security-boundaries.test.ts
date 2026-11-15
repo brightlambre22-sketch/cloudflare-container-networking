@@ -111,3 +111,16 @@ test("network, VM ticket, and tunnel endpoints enforce per-IP rate limits", () =
     assert.ok(worker.includes('action: "' + action + '"'));
   }
 });
+
+test("Oracle host and guest firewall scripts fail closed", () => {
+  const hostFirewall = readFileSync(new URL("../../gateway/oracle-host-firewall.sh", import.meta.url), "utf8");
+  const guestFirewall = readFileSync(new URL("../../gateway/oracle-guest-egress.sh", import.meta.url), "utf8");
+  const guide = readFileSync(new URL("../../docs/ORACLE-HOST-HARDENING.md", import.meta.url), "utf8");
+  assert.ok(hostFirewall.includes("ESTABLISHED,RELATED"));
+  assert.ok(hostFirewall.includes("-j DROP"));
+  assert.ok(hostFirewall.includes("SSH_ALLOW_CIDR"));
+  assert.ok(guestFirewall.includes("169.254.0.0/16"));
+  assert.ok(guestFirewall.includes(' -d "$GUEST_CIDR" -j DROP'));
+  assert.ok(guestFirewall.includes("--dports 80,443"));
+  assert.ok(guide.includes("Authenticated Origin Pulls (mTLS) are not the correct control"));
+});
