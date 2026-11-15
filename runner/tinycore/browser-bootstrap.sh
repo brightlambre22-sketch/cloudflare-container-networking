@@ -92,6 +92,8 @@ chmod 600 "$ENV/node.env"
 if [ -f /var/run/cloudflare-runner.pid ] && kill -0 "$(cat /var/run/cloudflare-runner.pid)" 2>/dev/null; then
   echo "Cloudflare runner is already running."
 else
+  export NODE_ID
+  export CLOUDFLARE_API_URL="$API_URL"
   NODE_CONTROL_TOKEN="$NODE_CONTROL_TOKEN" nohup "$ROOT/cloudflare-runner.sh" >>/var/log/cloudflare-runner.log 2>&1 &
   echo "$!" >/var/run/cloudflare-runner.pid
 fi
