@@ -6,6 +6,14 @@ set -eu
 PERSIST="/etc/cloudflare-node"
 mkdir -p "$PERSIST"
 
+# Load the root-owned persistent node credentials/configuration before validation.
+NODE_ENV_FILE="${NODE_ENV_FILE:-$PERSIST/node.env}"
+if [ -r "$NODE_ENV_FILE" ]; then
+  set -a
+  . "$NODE_ENV_FILE"
+  set +a
+fi
+
 IFACE="${NODE_INTERFACE:-eth0}"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
@@ -17,8 +25,8 @@ fi
 
 "$SCRIPT_DIR/configure-node-ips.sh" "$IFACE"
 
-if [ -z "${CLOUDFLARE_API_URL:-}" ] || [ -z "${NODE_ID:-}" ]; then
-  echo "Set CLOUDFLARE_API_URL and NODE_ID before starting the runner." >&2
+if [ -z "${CLOUDFLARE_API_URL:-}" ] || [ -z "${NODE_ID:-}" ] || [ -z "${NODE_AGENT_TOKEN:-}" ]; then
+  echo "Set CLOUDFLARE_API_URL, NODE_ID, and NODE_AGENT_TOKEN before starting the runner." >&2
   exit 1
 fi
 

@@ -17,7 +17,7 @@ Testing has verified that a user's public IP address changes after that user log
 
 ## Architecture boundary
 
-Cloudflare is the HTTP/WebSocket control and tunnel layer. The gateway at 141.148.53.68 is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
+Cloudflare is the HTTP/WebSocket control and tunnel layer. The Oracle gateway is a separate Linux host and remains responsible for Docker, raw networking, and any eventual TCP/UDP bridge. Keep its public IP out of public documentation and store it only in private deployment configuration. Workers accept HTTP and WebSockets; Workers can open outbound TCP sockets, but Cloudflare documents inbound direct TCP as not yet supported. Do not assume an HTTP/WebSocket endpoint can accept arbitrary public UDP. No IP spoofing is used.
 
 ## Deploy the Worker
 
@@ -29,10 +29,11 @@ On a development machine with Node.js, clone this repository, then run:
    npx wrangler login
    npx wrangler secret put TUNNEL_TOKEN
    npx wrangler secret put CLIENT_TOKEN
+   npx wrangler secret put ADMIN_ACCESS_KEY
    npm run deploy
    ~~~
 
-Use two independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN and the smoke-test client uses CLIENT_TOKEN. The node registry is temporarily unauthenticated while we finish the node lifecycle implementation.
+Use two independently generated random values. Never commit them. Wrangler prints the deployed Workers URL. The gateway role uses TUNNEL_TOKEN and the smoke-test client uses CLIENT_TOKEN. Node creation/listing and administrative runtime controls require the configured admin access key. Each created node receives a unique 256-bit agent_token, returned only once. The Worker stores only its SHA-256 digest; the node uses its token for status polling, heartbeats, and status updates. Store it in the node's protected local environment file. Existing nodes without a token must have an administrator rotate one before their runner can reconnect.
 
 ## Run the TCP proof on the Oracle gateway
 
@@ -64,7 +65,7 @@ Start three terminals on the Oracle host:
 
 The echo target binds only to 127.0.0.1:9000. The gateway client defaults to allowing only that exact TCP destination. The smoke test opens two TCP streams across the same WebSocket and verifies echoed payloads. No inbound port on Oracle is needed for this proof; the gateway opens outbound TLS/WebSocket traffic to Cloudflare. Set TCP_ALLOWLIST only to explicit host:port destinations you intend to permit.
 
-Check GET /health on the deployed URL. Node registry endpoints are temporarily unauthenticated during this PoC phase.
+Check GET /health on the deployed URL. /v1/nodes is admin-protected; node runtime heartbeat/status updates require the per-node agent credential.
 
 For local Worker development, copy cloudflare/.dev.vars.example to cloudflare/.dev.vars, set disposable local-only secrets, and run npm run dev. The Python clients must be able to reach Wrangler's local WebSocket endpoint.
 

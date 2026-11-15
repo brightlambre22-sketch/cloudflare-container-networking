@@ -480,20 +480,30 @@ export class AccountRegistry extends DurableObject {
     if (url.pathname === "/auth/rate-limit" && request.method === "POST") {
       const body = await request.json().catch(() => null) as { ip?: unknown; action?: unknown } | null;
       if (typeof body?.ip !== "string" || body.ip.length < 1 || body.ip.length > 80 ||
-          (body.action !== "signup" && body.action !== "login")) return json({ error: "invalid_rate_limit_key" }, 400);
-      const now = Date.now();
-      const windowMs = body.action === "signup" ? 60 * 60 * 1000 : 15 * 60 * 1000;
-      // Per-IP limits keep automated signup and password guessing bounded.
-      const limit = body.action === "signup" ? 5 : 10;
-      const key = "auth-rate:" + body.action + ":" + await this.sha256(body.ip);
-      const old = await this.ctx.storage.get<number[]>(key) ?? [];
-      const recent = old.filter((time) => Number.isFinite(time) && now - time < windowMs);
-      if (recent.length >= limit) {
-        await this.ctx.storage.put(key, recent);
-        return json({ error: "rate_limited", retry_after_seconds: Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000)) }, 429);
+          !["signup", "login", "network-ticket", "network-connect", "vm-agent-ticket", "vm-agent-connect", "vm-exec", "vm-provision", "vm-diagnostic", "tunnel-connect"].includes(String(body.action))) {
+        return json({ error: "invalid_rate_limit_key" }, 400);
       }
-      recent.push(now);
-      await this.ctx.storage.put(key, recent);
+      const action = body.action as string;
+      const now = Date.now();
+      const limits: Record<string, number> = {
+        signup: 5, login: 10, "network-ticket": 12, "network-connect": 60,
+        "vm-agent-ticket": 20, "vm-agent-connect": 30, "vm-exec": 60, "vm-provision": 5, "vm-diagnostic": 10, "tunnel-connect": 120,
+      };
+      const limit = limits[action];
+      const windowMs = action === "signup" ? 60 * 60 * 1000 : action === "vm-exec" ? 60 * 1000 : 15 * 60 * 1000;
+      const key = "auth-rate:" + action + ":" + await this.sha256(body.ip);
+      const decision = await this.ctx.storage.transaction(async (txn) => {
+        const old = await txn.get<number[]>(key) ?? [];
+        const recent = old.filter((time) => Number.isFinite(time) && now - time < windowMs);
+        if (recent.length >= limit) {
+          await txn.put(key, recent);
+          return { allowed: false, retry_after_seconds: Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000)) };
+        }
+        recent.push(now);
+        await txn.put(key, recent);
+        return { allowed: true, retry_after_seconds: 0 };
+      });
+      if (!decision.allowed) return json({ error: "rate_limited", retry_after_seconds: decision.retry_after_seconds }, 429);
       return json({ ok: true });
     }
 

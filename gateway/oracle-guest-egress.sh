@@ -1,0 +1,46 @@
+#!/bin/sh
+set -eu
+# Optional policy for an actual dedicated Linux guest bridge (not applied automatically).
+# Usage: GUEST_BRIDGE=br-guests GUEST_CIDR=10.240.0.0/16 GUEST_GATEWAY=10.240.0.1 ./oracle-guest-egress.sh
+if [ "$(id -u)" -ne 0 ]; then echo "Run as root." >&2; exit 1; fi
+: "${GUEST_BRIDGE:?Set GUEST_BRIDGE}"
+: "${GUEST_CIDR:?Set GUEST_CIDR}"
+: "${GUEST_GATEWAY:?Set GUEST_GATEWAY}"
+command -v iptables >/dev/null 2>&1 || { echo "iptables is required." >&2; exit 1; }
+command -v ip6tables >/dev/null 2>&1 || { echo "ip6tables is required to prevent IPv6 policy bypass." >&2; exit 1; }
+modprobe br_netfilter
+sysctl -w net.bridge.bridge-nf-call-iptables=1 >/dev/null
+sysctl -w net.bridge.bridge-nf-call-ip6tables=1 >/dev/null
+ip link show "$GUEST_BRIDGE" >/dev/null 2>&1 || { echo "Bridge not found: $GUEST_BRIDGE" >&2; exit 1; }
+CHAIN="VQ_GUEST_EGRESS"
+iptables -N "$CHAIN" 2>/dev/null || true
+iptables -F "$CHAIN"
+# Install the terminal drop first so a partial rerun remains fail-closed.
+iptables -A "$CHAIN" -j DROP
+iptables -I "$CHAIN" 1 ! -s "$GUEST_CIDR" -j DROP
+iptables -I "$CHAIN" 2 -d "$GUEST_CIDR" ! -d "$GUEST_GATEWAY" -j DROP
+iptables -I "$CHAIN" 3 -d 169.254.0.0/16 -j DROP
+iptables -I "$CHAIN" 4 -d "$GUEST_GATEWAY" -p udp -m multiport --dports 53,67,68 -j ACCEPT
+iptables -I "$CHAIN" 5 -d "$GUEST_GATEWAY" -p tcp --dport 53 -j ACCEPT
+iptables -I "$CHAIN" 6 -d 10.0.0.0/8 -j DROP
+iptables -I "$CHAIN" 7 -d 172.16.0.0/12 -j DROP
+iptables -I "$CHAIN" 8 -d 192.168.0.0/16 -j DROP
+iptables -I "$CHAIN" 9 -d 100.64.0.0/10 -j DROP
+iptables -I "$CHAIN" 10 -d 127.0.0.0/8 -j DROP
+iptables -I "$CHAIN" 11 -p tcp -m multiport --dports 80,443 -j ACCEPT
+iptables -C FORWARD -i "$GUEST_BRIDGE" -j "$CHAIN" 2>/dev/null || iptables -I FORWARD 1 -i "$GUEST_BRIDGE" -j "$CHAIN"
+INPUT_CHAIN="VQ_GUEST_INPUT"
+iptables -N "$INPUT_CHAIN" 2>/dev/null || true
+iptables -F "$INPUT_CHAIN"
+iptables -A "$INPUT_CHAIN" -j DROP
+iptables -I "$INPUT_CHAIN" 1 ! -s "$GUEST_CIDR" -j DROP
+iptables -I "$INPUT_CHAIN" 2 -p udp -m multiport --dports 53,67,68 -j ACCEPT
+iptables -I "$INPUT_CHAIN" 3 -p tcp --dport 53 -j ACCEPT
+iptables -C INPUT -i "$GUEST_BRIDGE" -j "$INPUT_CHAIN" 2>/dev/null || iptables -I INPUT 1 -i "$GUEST_BRIDGE" -j "$INPUT_CHAIN"
+V6_CHAIN="VQ_GUEST_V6_DROP"
+ip6tables -N "$V6_CHAIN" 2>/dev/null || true
+ip6tables -F "$V6_CHAIN"
+ip6tables -A "$V6_CHAIN" -j DROP
+ip6tables -C FORWARD -i "$GUEST_BRIDGE" -j "$V6_CHAIN" 2>/dev/null || ip6tables -I FORWARD 1 -i "$GUEST_BRIDGE" -j "$V6_CHAIN"
+ip6tables -C INPUT -i "$GUEST_BRIDGE" -j "$V6_CHAIN" 2>/dev/null || ip6tables -I INPUT 1 -i "$GUEST_BRIDGE" -j "$V6_CHAIN"
+echo "Guest bridge isolation installed for $GUEST_CIDR on $GUEST_BRIDGE."

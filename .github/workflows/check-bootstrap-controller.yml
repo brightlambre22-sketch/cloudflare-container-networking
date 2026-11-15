@@ -9,6 +9,8 @@ on:
       - "cloudflare/src/account-registry.ts"
       - "tests/bootstrap-controller.test.mjs"
       - "tests/account-session.test.mjs"
+      - "gateway/oracle-host-firewall.sh"
+      - "gateway/oracle-guest-egress.sh"
       - ".github/workflows/check-bootstrap-controller.yml"
   pull_request:
     paths:
@@ -33,3 +35,7 @@ jobs:
           node-version: 22
       - name: Validate bootstrap controller
         run: node --test tests/*.test.mjs
+      - name: Validate Oracle firewall script syntax
+        run: |
+          sh -n gateway/oracle-host-firewall.sh
+          sh -n gateway/oracle-guest-egress.sh

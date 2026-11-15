@@ -6,6 +6,14 @@ services:
     container_name: mysterium-node-${NODE_ID}
     restart: unless-stopped
     network_mode: host
+    # Docker enforces these limits through the host cgroup controller.
+    cpus: ${NODE_CPU_LIMIT:-2.0}
+    mem_limit: ${NODE_MEMORY_LIMIT:-2g}
+    pids_limit: ${NODE_PIDS_LIMIT:-512}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -13,6 +21,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       NODE_ID: ${NODE_ID}
+      NODE_AGENT_TOKEN: ${NODE_AGENT_TOKEN}
       CLOUDFLARE_API_URL: ${CLOUDFLARE_API_URL}
       RUNNER_HEARTBEAT_SECONDS: ${RUNNER_HEARTBEAT_SECONDS:-10}
     volumes:

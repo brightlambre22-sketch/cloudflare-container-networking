@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { connect } from "cloudflare:sockets";
 import { closeTcpResources } from "./wisp-stream";
+import { isAllowedDestination } from "./network-security";
 
 interface TicketRecord { ticket: string; expires_at: number; }
 interface TcpStream {
@@ -11,6 +12,7 @@ interface TcpStream {
 
 const INITIAL_BUFFER = 64;
 const MAX_STREAMS = 32;
+const MAX_TCP_CONNECTS_PER_MINUTE = 120;
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store" } });
@@ -32,22 +34,6 @@ function continuePacket(streamId: number, count: number): ArrayBuffer {
 
 function closePacket(streamId: number, reason: number): ArrayBuffer {
   return packet(0x04, streamId, new Uint8Array([reason]));
-}
-
-function isAllowedDestination(host: string, port: number): boolean {
-  if (port !== 80 && port !== 443) return false;
-  // v86's WISP adapter sends the resolved IPv4 destination, not the original hostname.
-  const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part))) return false;
-  const octets = parts.map(Number);
-  if (octets.some((part) => part < 0 || part > 255)) return false;
-  const [a, b, c] = octets;
-  if (a === 0 || a === 10 || a === 127 || a >= 224 || a === 169 && b === 254 ||
-      a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 ||
-      a === 100 && b >= 64 && b <= 127 || a === 192 && b === 0 ||
-      a === 192 && b === 2 || a === 198 && (b === 18 || b === 19 || b === 51 && c === 100) ||
-      a === 203 && b === 0 && c === 113 || a === 198 && b === 51 && c === 100) return false;
-  return true;
 }
 
 /**
@@ -84,16 +70,21 @@ export class WispRelay extends DurableObject {
     if (url.pathname === "/ticket" && request.method === "POST") {
       const tokenBytes = crypto.getRandomValues(new Uint8Array(32));
       const ticket = Array.from(tokenBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-      await this.ctx.storage.put("active-ticket", { ticket, expires_at: Date.now() + 8 * 60 * 60 * 1000 } satisfies TicketRecord);
-      return json({ ticket, expires_in_seconds: 8 * 60 * 60 }, 201);
+      await this.ctx.storage.put("active-ticket", { ticket, expires_at: Date.now() + 2 * 60 * 1000 } satisfies TicketRecord);
+      return json({ ticket, expires_in_seconds: 120 }, 201);
     }
 
     if ((url.pathname !== "/wisp" && url.pathname !== "/api/network/wisp/") || request.method !== "GET") return json({ error: "not_found" }, 404);
     if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "websocket_upgrade_required" }, 426);
     const ticket = url.searchParams.get("ticket") ?? "";
     if (!/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
-    const record = await this.ctx.storage.get<TicketRecord>("active-ticket");
-    if (!record || record.ticket !== ticket || record.expires_at <= Date.now()) return json({ error: "expired_network_ticket" }, 401);
+    const consumed = await this.ctx.storage.transaction(async (txn) => {
+      const record = await txn.get<TicketRecord>("active-ticket");
+      if (!record || record.ticket !== ticket || record.expires_at <= Date.now()) return false;
+      await txn.delete("active-ticket");
+      return true;
+    });
+    if (!consumed) return json({ error: "expired_or_replayed_network_ticket" }, 401);
 
     for (const existing of this.clients) {
       try { existing.close(1012, "network session replaced"); } catch { /* already closed */ }
@@ -193,6 +184,21 @@ export class WispRelay extends DurableObject {
     if (type !== 0x05 && streamId !== 0) socket.send(closePacket(streamId, 0x01));
   }
 
+  private async allowTcpConnect(): Promise<boolean> {
+    return this.ctx.storage.transaction(async (txn) => {
+      const now = Date.now();
+      const old = await txn.get<number[]>("wisp-connect-attempts") ?? [];
+      const recent = old.filter((timestamp) => Number.isFinite(timestamp) && now - timestamp < 60_000);
+      if (recent.length >= MAX_TCP_CONNECTS_PER_MINUTE) {
+        await txn.put("wisp-connect-attempts", recent);
+        return false;
+      }
+      recent.push(now);
+      await txn.put("wisp-connect-attempts", recent);
+      return true;
+    });
+  }
+
   private async openTcp(socket: WebSocket, streamId: number, payload: Uint8Array): Promise<void> {
     this.closedStreams.delete(streamId);
     if (streamId === 0 || payload.byteLength < 4 || this.streams.size + this.pendingStreams.size >= MAX_STREAMS) {
@@ -204,6 +210,10 @@ export class WispRelay extends DurableObject {
     if (payload[0] !== 0x01 || !isAllowedDestination(host, port)) {
       console.warn("WISP_CONNECT_REJECTED", JSON.stringify({ streamId, host, port, protocol: payload[0] }));
       socket.send(closePacket(streamId, 0x48));
+      return;
+    }
+    if (!await this.allowTcpConnect()) {
+      socket.send(closePacket(streamId, 0x41));
       return;
     }
     console.log("WISP_CONNECT_REQUEST", JSON.stringify({ streamId, host, port }));

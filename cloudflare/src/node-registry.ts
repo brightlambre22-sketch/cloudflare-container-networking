@@ -48,6 +48,7 @@ export class NodeRegistry extends DurableObject {
 
       const now = new Date().toISOString();
       const records: VirtualNodeRecord[] = [];
+      const issuedTokens: string[] = [];
 
       for (let i = 0; i < count; i += 1) {
         const nodeId = body.node_id ?? crypto.randomUUID();
@@ -72,12 +73,16 @@ export class NodeRegistry extends DurableObject {
           error: null,
         };
 
+        const agentToken = randomToken();
+        await this.ctx.storage.put("agent-token:" + nodeId, await sha256(agentToken));
         records.push(record);
+        issuedTokens.push(agentToken);
         await this.ctx.storage.put(key, record);
       }
 
       await this.ctx.storage.put(NEXT_HOST_KEY, nextHost + count);
-      return Response.json(count === 1 ? records[0] : { nodes: records }, { status: 201 });
+      const issuedRecords = records.map((record, index) => ({ ...record, agent_token: issuedTokens[index] }));
+      return Response.json(count === 1 ? issuedRecords[0] : { nodes: issuedRecords }, { status: 201 });
     }
 
     if (url.pathname === "/list" && request.method === "GET") {
@@ -87,6 +92,37 @@ export class NodeRegistry extends DurableObject {
       }
       nodes.sort((a, b) => a.created_at.localeCompare(b.created_at));
       return Response.json({ nodes });
+    }
+
+    const authorizeMatch = url.pathname.match(/^\/node\/([^/]+)\/authorize$/);
+    if (authorizeMatch && request.method === "POST") {
+      const nodeId = decodeURIComponent(authorizeMatch[1]);
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) {
+        return Response.json({ error: "invalid_node_id" }, { status: 400 });
+      }
+      const body = await request.json().catch(() => null) as { token?: unknown } | null;
+      if (typeof body?.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token)) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+      const expected = await this.ctx.storage.get<string>("agent-token:" + nodeId);
+      const supplied = await sha256(body.token);
+      if (!expected || !constantTimeEqual(expected, supplied)) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+      return Response.json({ ok: true, node_id: nodeId });
+    }
+
+    const rotateMatch = url.pathname.match(/^\/node\/([^/]+)\/rotate-token$/);
+    if (rotateMatch && request.method === "POST") {
+      const nodeId = decodeURIComponent(rotateMatch[1]);
+      if (!/^[a-zA-Z0-9._-]{1,64}$/.test(nodeId)) {
+        return Response.json({ error: "invalid_node_id" }, { status: 400 });
+      }
+      const exists = await this.ctx.storage.get<VirtualNodeRecord>(NODE_KEY_PREFIX + nodeId);
+      if (!exists) return Response.json({ error: "node_not_found" }, { status: 404 });
+      const token = randomToken();
+      await this.ctx.storage.put("agent-token:" + nodeId, await sha256(token));
+      return Response.json({ node_id: nodeId, agent_token: token, rotated: true });
     }
 
     if (url.pathname.startsWith("/node/")) {
@@ -123,4 +159,23 @@ export class NodeRegistry extends DurableObject {
 
 function hostToIp(host: number): string {
   return `10.240.${Math.floor(host / 256)}.${host % 256}`;
+}
+
+function randomToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
 }

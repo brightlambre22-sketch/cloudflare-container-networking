@@ -229,6 +229,23 @@ function validNodeId(nodeId: string): boolean {
   return /^[a-zA-Z0-9._-]{1,64}$/.test(nodeId);
 }
 
+async function nodeAgentAuthorized(request: Request, env: Env, nodeId: string): Promise<boolean> {
+  const authorization = request.headers.get("authorization") ?? "";
+  if (!authorization.startsWith("Bearer ")) return false;
+  const token = authorization.slice(7);
+  if (!/^[a-f0-9]{64}$/.test(token)) return false;
+  const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+  const response = await registry.fetch(new Request(
+    "https://node-registry.internal/node/" + encodeURIComponent(nodeId) + "/authorize",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    },
+  )).catch(() => new Response(null, { status: 503 }));
+  return response.ok;
+}
+
 async function getOrAllocateAccountNetworkIdentity(
   env: Env, accountId: string,
 ): Promise<{ virtual_ip: string; virtual_mac: string } | null> {
@@ -641,6 +658,12 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+       const diagnosticLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+         method: "POST", headers: { "content-type": "application/json" },
+         body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-diagnostic" }),
+       }).catch(() => new Response(null, { status: 503 }));
+       if (!diagnosticLimit.ok) return json({ error: diagnosticLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, diagnosticLimit.status === 429 ? 429 : 503);
       let body: { identity?: unknown };
       try { body = await request.json() as typeof body; }
       catch { return json({ error: "invalid_json" }, 400); }
@@ -669,6 +692,12 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+       const diagnosticLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+         method: "POST", headers: { "content-type": "application/json" },
+         body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-diagnostic" }),
+       }).catch(() => new Response(null, { status: 503 }));
+       if (!diagnosticLimit.ok) return json({ error: diagnosticLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, diagnosticLimit.status === 429 ? 429 : 503);
 
       let body: { compile_wasm?: unknown };
       try { body = await request.json() as typeof body; }
@@ -1319,17 +1348,22 @@ export default {
       let body: { account_id?: unknown; session_token?: unknown; admin_key?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       const accountId = typeof body.account_id === "string" ? body.account_id : "";
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
       if (accountId === "admin") {
-                if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+        if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       } else {
         if (!/^acct-[a-f0-9-]{36}$/.test(accountId) || typeof body.session_token !== "string") return json({ error: "unauthorized" }, 401);
-        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
         const verified = await authRegistry.fetch("https://account-registry.internal/auth/verify", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ account_id: accountId, token: body.session_token }),
         });
         if (!verified.ok) return json({ error: "unauthorized" }, 401);
       }
+      const ticketLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "network-ticket" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!ticketLimit.ok) return json({ error: ticketLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, ticketLimit.status === 429 ? 429 : 503);
       const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
       const ticketResponse = await relay.fetch("https://wisp-relay.internal/ticket", { method: "POST" });
       if (!ticketResponse.ok) return json({ error: "network_ticket_unavailable" }, 503);
@@ -1341,6 +1375,12 @@ export default {
       const accountId = url.searchParams.get("account_id") ?? "";
       const ticket = url.searchParams.get("ticket") ?? "";
       if (!(accountId === "admin" || /^acct-[a-f0-9-]{36}$/.test(accountId)) || !/^[a-f0-9]{64}$/.test(ticket)) return json({ error: "invalid_network_ticket" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const connectLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "network-connect" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!connectLimit.ok) return json({ error: connectLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, connectLimit.status === 429 ? 429 : 503);
       const relay = env.WISP_RELAY.get(env.WISP_RELAY.idFromName(accountId));
       return relay.fetch(request);
     }
@@ -1465,6 +1505,12 @@ export default {
     if (url.pathname === "/api/admin/reset-snapshots") {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const resetLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-provision" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!resetLimit.ok) return json({ error: resetLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, resetLimit.status === 429 ? 429 : 503);
       let body: { confirm?: unknown };
       try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
       if (body.confirm !== "DELETE_ALL_VM_SNAPSHOTS") return json({ error: "confirmation_required", expected: "DELETE_ALL_VM_SNAPSHOTS" }, 400);
@@ -1547,6 +1593,12 @@ export default {
       if (!await adminAuthorized(request, env)) {
         return json({ error: "unauthorized" }, 401);
       }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const execLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-exec" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!execLimit.ok) return json({ error: execLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, execLimit.status === 429 ? 429 : 503);
       let body: { command?: unknown; timeout_ms?: unknown };
       try { body = await request.json() as typeof body; }
       catch { return json({ error: "invalid_json" }, 400); }
@@ -1623,6 +1675,11 @@ export default {
         body: JSON.stringify({ account_id: accountId, token: sessionToken }),
       });
       if (!verified.ok) return json({ error: "unauthorized" }, 401);
+      const execLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-exec" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!execLimit.ok) return json({ error: execLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, execLimit.status === 429 ? 429 : 503);
       const accountRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName(accountId));
       const capability = await accountRegistry.fetch("https://account-registry.internal/account/" + accountId + "/oracle-execution");
       const capabilityData = capability.ok ? await capability.json() as { enabled?: unknown } : {};
@@ -1648,6 +1705,8 @@ export default {
     // connectivity only; command execution remains behind the authenticated route.
     if (url.pathname === "/api/vm/oracle-status") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("oracle"));
       return coordinator.fetch("https://vm-execution.internal/status?identity=oracle");
     }
@@ -1656,12 +1715,19 @@ export default {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
             if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
       if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const ticketLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-agent-ticket" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!ticketLimit.ok) return json({ error: ticketLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, ticketLimit.status === 429 ? 429 : 503);
       const requestedIdentity = request.headers.get("x-agent-identity") ?? "admin";
       if (requestedIdentity !== "admin" && requestedIdentity !== "oracle") {
         return json({ error: "unknown_agent_identity", supported_identities: ["admin", "oracle"] }, 400);
       }
       const vmId = requestedIdentity;
-      const ticket = crypto.randomUUID();
+      const ticketBytes = crypto.getRandomValues(new Uint8Array(32));
+      const ticket = Array.from(ticketBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(vmId));
       const ticketResponse = await coordinator.fetch("https://vm-execution.internal/ticket", {
         method: "POST",
@@ -1678,9 +1744,15 @@ export default {
         return json({ error: "websocket_upgrade_required" }, 426);
       }
       const identity = url.searchParams.get("identity") ?? "admin";
-            if (identity !== "admin" && identity !== "oracle") {
+      if (identity !== "admin" && identity !== "oracle") {
         return json({ error: "unknown_agent_identity" }, 400);
       }
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const agentLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-agent-connect" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!agentLimit.ok) return json({ error: agentLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, agentLimit.status === 429 ? 429 : 503);
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName(identity));
       return coordinator.fetch(request);
     }
@@ -1689,6 +1761,14 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+      if (url.pathname.endsWith("/exec")) {
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const execLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-exec" }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!execLimit.ok) return json({ error: execLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, execLimit.status === 429 ? 429 : 503);
+      }
       const vmId = request.headers.get("x-vm-id") ?? "oracle";
       if (vmId !== "admin" && vmId !== "oracle") {
         return json({ error: "unknown_vm_id", supported_vm_ids: ["admin", "oracle"] }, 404);
@@ -1835,6 +1915,8 @@ export default {
 
     if (url.pathname === "/debug/egress-ip") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       try {
         const response = await fetch("https://api4.ipify.org?format=json");
@@ -1854,6 +1936,8 @@ export default {
 
     if (url.pathname === "/debug/fineproxy-tcp") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       const target = { hostname: "104.245.241.241", port: 1085 };
 
@@ -1915,6 +1999,12 @@ export default {
         return json({ error: "unauthorized" }, 401);
       }
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+      const tunnelLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "tunnel-connect" }),
+      }).catch(() => new Response(null, { status: 503 }));
+      if (!tunnelLimit.ok) return json({ error: tunnelLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, tunnelLimit.status === 429 ? 429 : 503);
 
       const hub = env.TUNNEL_HUB.get(env.TUNNEL_HUB.idFromName("global"));
       return hub.fetch(request);
@@ -1924,20 +2014,39 @@ export default {
       if (request.method !== "GET" && request.method !== "POST") {
         return json({ error: "method_not_allowed" }, 405);
       }
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (request.method === "POST") {
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const provisionLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-provision" }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!provisionLimit.ok) return json({ error: provisionLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, provisionLimit.status === 429 ? 429 : 503);
+      }
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
-
       if (request.method === "GET") {
         return registry.fetch("https://node-registry.internal/list");
       }
+      return registry.fetch(new Request("https://node-registry.internal/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: request.body,
+      }));
+    }
 
-      return registry.fetch(
-        new Request("https://node-registry.internal/create", {
-          method: "POST",
-          headers: request.headers,
-          body: request.body,
-        }),
-      );
+    const agentTokenMatch = url.pathname.match(/^\/v1\/nodes\/([^/]+)\/agent-token$/);
+    if (agentTokenMatch) {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const nodeId = agentTokenMatch[1];
+      if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
+      return registry.fetch("https://node-registry.internal/node/" + encodeURIComponent(nodeId) + "/rotate-token", {
+        method: "POST",
+      });
     }
 
     const runtimeMatch = url.pathname.match(
@@ -1947,71 +2056,70 @@ export default {
     if (runtimeMatch) {
       const nodeId = runtimeMatch[1];
       const action = runtimeMatch[2];
-
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
 
-      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
+      const admin = await adminAuthorized(request, env);
+      const agent = action === "heartbeat" || !action
+        ? await nodeAgentAuthorized(request, env, nodeId)
+        : false;
+      if (action === "heartbeat" ? !agent : (!admin && !agent)) {
+        return json({ error: "unauthorized" }, 401);
+      }
 
+      const runtime = env.NODE_RUNTIME.get(env.NODE_RUNTIME.idFromName(nodeId));
       if (!action && request.method === "GET") {
         return runtime.fetch("https://node-runtime.internal/status");
       }
-
       if (action === "start") {
-        if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+        if (request.method !== "POST" || !admin) return json({ error: "method_not_allowed" }, 405);
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const startLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-provision" }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!startLimit.ok) return json({ error: startLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, startLimit.status === 429 ? 429 : 503);
         return runtime.fetch("https://node-runtime.internal/start", { method: "POST" });
       }
-
       if (action === "stop") {
-        if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+        if (request.method !== "POST" || !admin) return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/stop", { method: "POST" });
       }
-
       if (action === "probe") {
-        if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+        if (request.method !== "GET" || !admin) return json({ error: "method_not_allowed" }, 405);
         return runtime.fetch("https://node-runtime.internal/probe");
       }
-
       if (action === "heartbeat") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-        return runtime.fetch(
-          new Request("https://node-runtime.internal/heartbeat", {
-            method: "POST",
-            headers: request.headers,
-            body: request.body,
-          }),
-        );
+        return runtime.fetch(new Request("https://node-runtime.internal/heartbeat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: request.body,
+        }));
       }
-
       return json({ error: "method_not_allowed" }, 405);
     }
 
     const nodeMatch = url.pathname.match(/^\/v1\/nodes\/([^/]+)$/);
-
     if (nodeMatch) {
       const nodeId = nodeMatch[1];
       if (!validNodeId(nodeId)) return json({ error: "invalid_node_id" }, 400);
+      const admin = await adminAuthorized(request, env);
+      const agent = request.method === "PATCH"
+        ? await nodeAgentAuthorized(request, env, nodeId)
+        : false;
+      if (!admin && !agent) return json({ error: "unauthorized" }, 401);
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
-
       if (request.method === "GET") {
-        return registry.fetch(
-          `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
-        );
+        if (!admin) return json({ error: "unauthorized" }, 401);
+        return registry.fetch("https://node-registry.internal/node/" + encodeURIComponent(nodeId));
       }
-
       if (request.method === "PATCH") {
-        return registry.fetch(
-          new Request(
-            `https://node-registry.internal/node/${encodeURIComponent(nodeId)}`,
-            {
-              method: "PATCH",
-              headers: request.headers,
-              body: request.body,
-            },
-          ),
-        );
+        return registry.fetch(new Request(
+          "https://node-registry.internal/node/" + encodeURIComponent(nodeId),
+          { method: "PATCH", headers: { "content-type": "application/json" }, body: request.body },
+        ));
       }
-
       return json({ error: "method_not_allowed" }, 405);
     }
 
