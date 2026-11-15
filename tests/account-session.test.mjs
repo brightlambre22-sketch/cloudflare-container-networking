@@ -63,7 +63,7 @@ test("missing or unreadable account snapshots fail closed instead of booting a f
 
 test("public auth routes are rate-limited and browser credentials are not persisted in localStorage", () => {
   assert.match(registry, /auth-rate:/);
-  assert.match(registry, /body\.action === "signup" \? 5 : 10/);
+  assert.match(registry, /signup: 5, login: 10/);
   assert.match(worker, /auth\/rate-limit/);
   assert.match(dashboard, /sessionStorage\.setItem\('vm-session-token'/);
   assert.doesNotMatch(dashboard, /localStorage\.setItem\(ACCOUNTS_KEY/);
