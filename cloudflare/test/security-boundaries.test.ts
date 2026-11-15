@@ -6,6 +6,7 @@ const worker = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8")
 const registry = readFileSync(new URL("../src/node-registry.ts", import.meta.url), "utf8");
 const tinyRunner = readFileSync(new URL("../../runner/tinycore/cloudflare-runner.sh", import.meta.url), "utf8");
 const tinyBootstrap = readFileSync(new URL("../../runner/tinycore/bootstrap.sh", import.meta.url), "utf8");
+const tinyNodeEnv = readFileSync(new URL("../../runner/tinycore/node.env.example", import.meta.url), "utf8");
 const containerEntrypoint = readFileSync(new URL("../container/myst-entrypoint.sh", import.meta.url), "utf8");
 const health = readFileSync(new URL("../container/health.py", import.meta.url), "utf8");
 const compose = readFileSync(new URL("../../runner/amd64/docker-compose.yml", import.meta.url), "utf8");
@@ -46,6 +47,7 @@ test("Tiny Core and amd64 runners authenticate control-plane traffic", () => {
   assert.ok(tinyRunner.includes("NODE_AGENT_TOKEN"));
   assert.ok(tinyRunner.includes('Authorization: Bearer ${NODE_AGENT_TOKEN}'));
   assert.ok(tinyBootstrap.includes("NODE_AGENT_TOKEN"));
+  assert.ok(tinyNodeEnv.includes("NODE_AGENT_TOKEN="));
   assert.ok(containerEntrypoint.includes("NODE_AGENT_TOKEN"));
   assert.ok(containerEntrypoint.includes("Authorization: Bearer $NODE_AGENT_TOKEN"));
 });
