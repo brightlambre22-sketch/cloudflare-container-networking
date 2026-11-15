@@ -1665,6 +1665,8 @@ export default {
     // connectivity only; command execution remains behind the authenticated route.
     if (url.pathname === "/api/vm/oracle-status") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
       const coordinator = env.VM_EXECUTION.get(env.VM_EXECUTION.idFromName("oracle"));
       return coordinator.fetch("https://vm-execution.internal/status?identity=oracle");
     }
@@ -1852,6 +1854,8 @@ export default {
 
     if (url.pathname === "/debug/egress-ip") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       try {
         const response = await fetch("https://api4.ipify.org?format=json");
@@ -1871,6 +1875,8 @@ export default {
 
     if (url.pathname === "/debug/fineproxy-tcp") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
 
       const target = { hostname: "104.245.241.241", port: 1085 };
 
