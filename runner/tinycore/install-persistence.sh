@@ -16,7 +16,7 @@ DEST="/opt/bootlocal.sh"
 cp "$BOOT_SRC" "$DEST"
 chmod 755 "$DEST"
 
-# Ensure /opt is included in Tiny Core's filetool backup list so this boot hook
+# Ensure the boot hook and private node configuration are included in Tiny Core's filetool backup list so this boot hook
 # itself and the node's private configuration survive the successful save. Do not
 # trigger a backup during install: the boot hook performs it only after checks pass.
 mkdir -p /etc/cloudflare-node
@@ -26,7 +26,7 @@ if [ ! -f /opt/.filetool.lst ]; then
 fi
 for path in opt etc/cloudflare-node; do
   if ! grep -qx "$path" /opt/.filetool.lst; then
-    printf '%s\\n' "$path" >> /opt/.filetool.lst
+    printf '%s\n' "$path" >> /opt/.filetool.lst
   fi
 done
 if [ -f /etc/cloudflare-node/node.env ]; then
