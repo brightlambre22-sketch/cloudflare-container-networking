@@ -105,17 +105,13 @@ export class NodeRegistry extends DurableObject {
         if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
           return Response.json({ error: "invalid_patch" }, { status: 400 });
         }
-        const allowed = new Set(["status", "runtime", "error"]);
+        const allowed = new Set(["status", "error"]);
         if (Object.keys(patch).some((field) => !allowed.has(field))) {
           return Response.json({ error: "unsupported_patch_field" }, { status: 400 });
         }
         if (patch.status !== undefined &&
             !["provisioning", "offline", "online", "error"].includes(String(patch.status))) {
           return Response.json({ error: "invalid_node_status" }, { status: 400 });
-        }
-        if (patch.runtime !== undefined &&
-            !["control-plane-only", "container-pending", "external-gateway", "tinycore-persistent"].includes(String(patch.runtime))) {
-          return Response.json({ error: "invalid_node_runtime" }, { status: 400 });
         }
         if (patch.error !== undefined &&
             !(patch.error === null || (typeof patch.error === "string" && patch.error.length <= 512))) {
@@ -124,7 +120,6 @@ export class NodeRegistry extends DurableObject {
         const updated: VirtualNodeRecord = {
           ...existing,
           ...(patch.status !== undefined ? { status: patch.status as NodeStatus } : {}),
-          ...(patch.runtime !== undefined ? { runtime: patch.runtime as VirtualNodeRecord["runtime"] } : {}),
           ...(patch.error !== undefined ? { error: patch.error as string | null } : {}),
           updated_at: new Date().toISOString(),
         };
