@@ -21,9 +21,9 @@ test("node inventory and lifecycle routes fail closed for unauthenticated caller
   assert.match(routes, /action === "heartbeat"/);
   assert.match(registry, /unsupported_patch_field/);
   assert.match(registry, /invalid_node_status/);
-  assert.match(registry, /invalid_node_runtime/);
-  assert.match(registry, /new Set\(\["status", "runtime", "error"\]\)/);
+  assert.match(registry, /new Set\(\["status", "error"\]\)/);
   assert.doesNotMatch(registry, /egress_ip: patch/);
+  assert.doesNotMatch(registry, /runtime: patch/);
 
   // Only authenticated routes may reach the registry/runtime Durable Objects.
   const registryList = routes.indexOf('registry.fetch("https://node-registry.internal/list")');
