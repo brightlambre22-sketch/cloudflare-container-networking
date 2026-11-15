@@ -151,5 +151,5 @@ test("VM agent tickets use 256-bit random tokens", () => {
 
 test("snapshot round-trip CA installation is bounded and avoids zombie polling", () => {
   assert.ok(snapshotRoundtrip.includes("timeout 180 tce-load -i ca-certificates"));
-  assert.ok(!snapshotRoundtrip.includes("kill -0 \\"$install_pid\\""));
+  assert.ok(!snapshotRoundtrip.includes("kill -0"));
 });
