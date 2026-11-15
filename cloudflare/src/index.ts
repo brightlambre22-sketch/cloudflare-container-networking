@@ -658,6 +658,12 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+       const diagnosticLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+         method: "POST", headers: { "content-type": "application/json" },
+         body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-diagnostic" }),
+       }).catch(() => new Response(null, { status: 503 }));
+       if (!diagnosticLimit.ok) return json({ error: diagnosticLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, diagnosticLimit.status === 429 ? 429 : 503);
       let body: { identity?: unknown };
       try { body = await request.json() as typeof body; }
       catch { return json({ error: "invalid_json" }, 400); }
@@ -686,6 +692,12 @@ export default {
       const vmApiToken = await getVmApiToken(env);
       if (!vmApiToken) return json({ error: "vm_api_not_configured" }, 503);
       if (!authorized(request.headers.get("authorization"), vmApiToken)) return json({ error: "unauthorized" }, 401);
+       const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+       const diagnosticLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+         method: "POST", headers: { "content-type": "application/json" },
+         body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-diagnostic" }),
+       }).catch(() => new Response(null, { status: 503 }));
+       if (!diagnosticLimit.ok) return json({ error: diagnosticLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, diagnosticLimit.status === 429 ? 429 : 503);
 
       let body: { compile_wasm?: unknown };
       try { body = await request.json() as typeof body; }
@@ -1986,6 +1998,14 @@ export default {
       }
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
       if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      if (request.method === "POST") {
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const provisionLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-provision" }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!provisionLimit.ok) return json({ error: provisionLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, provisionLimit.status === 429 ? 429 : 503);
+      }
 
       const registry = env.NODE_REGISTRY.get(env.NODE_REGISTRY.idFromName("global"));
       if (request.method === "GET") {
@@ -2034,6 +2054,12 @@ export default {
       }
       if (action === "start") {
         if (request.method !== "POST" || !admin) return json({ error: "method_not_allowed" }, 405);
+        const authRegistry = env.ACCOUNT_REGISTRY.get(env.ACCOUNT_REGISTRY.idFromName("auth-users"));
+        const startLimit = await authRegistry.fetch("https://account-registry.internal/auth/rate-limit", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ip: request.headers.get("cf-connecting-ip") ?? "unknown", action: "vm-provision" }),
+        }).catch(() => new Response(null, { status: 503 }));
+        if (!startLimit.ok) return json({ error: startLimit.status === 429 ? "rate_limited" : "rate_limit_unavailable" }, startLimit.status === 429 ? 429 : 503);
         return runtime.fetch("https://node-runtime.internal/start", { method: "POST" });
       }
       if (action === "stop") {
