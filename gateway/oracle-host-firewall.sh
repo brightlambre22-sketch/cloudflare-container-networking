@@ -21,10 +21,10 @@ iptables -F "$CHAIN"
 iptables -A "$CHAIN" -i lo -j ACCEPT
 iptables -A "$CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A "$CHAIN" -j DROP
+iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
 if [ -n "$SSH_ALLOW_CIDR" ]; then
   iptables -I "$CHAIN" 3 -p tcp --dport 22 -s "$SSH_ALLOW_CIDR" -m conntrack --ctstate NEW -j ACCEPT
 fi
-iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
 
 # Apply the same default-deny policy to IPv6 so a public IPv6 address cannot bypass IPv4 rules.
 if [ -e /proc/net/if_inet6 ]; then
@@ -35,10 +35,10 @@ if [ -e /proc/net/if_inet6 ]; then
   ip6tables -A "$CHAIN6" -i lo -j ACCEPT
   ip6tables -A "$CHAIN6" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
   ip6tables -A "$CHAIN6" -j DROP
+  ip6tables -C INPUT -j "$CHAIN6" 2>/dev/null || ip6tables -I INPUT 1 -j "$CHAIN6"
   if [ -n "$SSH_ALLOW_CIDR6" ]; then
     ip6tables -I "$CHAIN6" 3 -p tcp --dport 22 -s "$SSH_ALLOW_CIDR6" -m conntrack --ctstate NEW -j ACCEPT
   fi
-  ip6tables -C INPUT -j "$CHAIN6" 2>/dev/null || ip6tables -I INPUT 1 -j "$CHAIN6"
 fi
 
 echo "New inbound IPv4 and IPv6 connections are blocked except SSH from configured trusted CIDRs."
