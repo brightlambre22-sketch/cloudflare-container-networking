@@ -8,8 +8,10 @@ export class MerchantFeedback extends DurableObject {
       role TEXT NOT NULL, business_type TEXT NOT NULL, biggest_challenge TEXT NOT NULL,
       usefulness_rating INTEGER NOT NULL CHECK(usefulness_rating BETWEEN 1 AND 5),
       would_use TEXT NOT NULL CHECK(would_use IN ('yes','maybe','no')), honest_opinion TEXT NOT NULL,
-      launch_interest INTEGER NOT NULL CHECK(launch_interest IN (0,1)), contact_email TEXT NOT NULL DEFAULT '',
+      launch_interest INTEGER NOT NULL CHECK(launch_interest IN (0,1)), public_consent INTEGER NOT NULL DEFAULT 0 CHECK(public_consent IN (0,1)), contact_email TEXT NOT NULL DEFAULT '',
       ip_hash TEXT NOT NULL, created_at TEXT NOT NULL)`);
+    const columns=this.ctx.storage.sql.exec("PRAGMA table_info(merchant_feedback)").toArray() as Array<{name?:string}>;
+    if(!columns.some(column=>column.name==="public_consent")) this.ctx.storage.sql.exec("ALTER TABLE merchant_feedback ADD COLUMN public_consent INTEGER NOT NULL DEFAULT 0 CHECK(public_consent IN (0,1))");
     this.ctx.storage.sql.exec("CREATE INDEX IF NOT EXISTS merchant_feedback_created ON merchant_feedback(created_at DESC)");
     this.ctx.storage.sql.exec("CREATE INDEX IF NOT EXISTS merchant_feedback_ip_created ON merchant_feedback(ip_hash, created_at DESC)");
   }
@@ -23,20 +25,24 @@ export class MerchantFeedback extends DurableObject {
       const email=clean(v.contact_email,254),rating=Number(v.usefulness_rating),would=clean(v.would_use,10),ip=clean(request.headers.get("x-feedback-ip-hash"),64);
       if(store.length<2||address.length<5||contact.length<2||!["owner","manager"].includes(role)||type.length<2||challenge.length<10||
         !Number.isInteger(rating)||rating<1||rating>5||!["yes","maybe","no"].includes(would)||opinion.length<20||
-        typeof v.launch_interest!=="boolean"||(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))return json({error:"please_complete_required_fields"},400);
+        typeof v.launch_interest!=="boolean"||typeof v.public_consent!=="boolean"||(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))return json({error:"please_complete_required_fields"},400);
       if(!/^[a-f0-9]{64}$/.test(ip))return json({error:"request_invalid"},400);
       const prior=this.ctx.storage.sql.exec("SELECT created_at,(SELECT COUNT(*) FROM merchant_feedback WHERE ip_hash=? AND created_at>=?) AS daily_count FROM merchant_feedback WHERE ip_hash=? ORDER BY created_at DESC LIMIT 1",
         ip,new Date(Date.now()-86400000).toISOString(),ip).toArray()[0] as {created_at?:string;daily_count?:number}|undefined;
       if(prior?.created_at&&Date.now()-Date.parse(prior.created_at)<45000)return json({error:"please_wait_before_submitting_again"},429);
       if(Number(prior?.daily_count??0)>=5)return json({error:"daily_submission_limit_reached"},429);
       const id=crypto.randomUUID(),created=new Date().toISOString();
-      this.ctx.storage.sql.exec("INSERT INTO merchant_feedback (id,store_name,address,contact_name,role,business_type,biggest_challenge,usefulness_rating,would_use,honest_opinion,launch_interest,contact_email,ip_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        id,store,address,contact,role,type,challenge,rating,would,opinion,v.launch_interest?1:0,email,ip,created);
+      this.ctx.storage.sql.exec("INSERT INTO merchant_feedback (id,store_name,address,contact_name,role,business_type,biggest_challenge,usefulness_rating,would_use,honest_opinion,launch_interest,public_consent,contact_email,ip_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        id,store,address,contact,role,type,challenge,rating,would,opinion,v.launch_interest?1:0,v.public_consent?1:0,email,ip,created);
       return json({ok:true,id,created_at:created},201);
     }
+    if(url.pathname==="/public"&&request.method==="GET"){
+      const rows=this.ctx.storage.sql.exec("SELECT store_name,business_type,usefulness_rating,would_use,honest_opinion,created_at FROM merchant_feedback WHERE public_consent=1 ORDER BY created_at DESC LIMIT 200").toArray();
+      return json({ok:true,count:rows.length,reviews:rows});
+    }
     if(url.pathname==="/list"&&request.method==="GET"){
-      const rows=this.ctx.storage.sql.exec("SELECT id,store_name,address,contact_name,role,business_type,biggest_challenge,usefulness_rating,would_use,honest_opinion,launch_interest,contact_email,created_at FROM merchant_feedback ORDER BY created_at DESC LIMIT 500").toArray() as Array<Record<string,unknown>>;
-      return json({ok:true,count:rows.length,submissions:rows.map(r=>({...r,launch_interest:Number(r.launch_interest)===1}))});
+      const rows=this.ctx.storage.sql.exec("SELECT id,store_name,address,contact_name,role,business_type,biggest_challenge,usefulness_rating,would_use,honest_opinion,launch_interest,public_consent,contact_email,created_at FROM merchant_feedback ORDER BY created_at DESC LIMIT 500").toArray() as Array<Record<string,unknown>>;
+      return json({ok:true,count:rows.length,submissions:rows.map(r=>({...r,launch_interest:Number(r.launch_interest)===1,public_consent:Number(r.public_consent)===1}))});
     }
     const match=url.pathname.match(/^\/([a-f0-9-]{36})$/);
     if(match&&request.method==="DELETE"){const result=this.ctx.storage.sql.exec("DELETE FROM merchant_feedback WHERE id=?",match[1]);return json({ok:true,deleted:result.rowsWritten>0});}
