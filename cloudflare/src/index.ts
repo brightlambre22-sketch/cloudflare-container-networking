@@ -267,12 +267,13 @@ async function getOrAllocateAccountNetworkIdentity(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const publicPagePath = url.pathname.replace(/\/+$/, "") || "/";
 
     // Public merchant research intake. Submissions are immutable; admin can only list/delete.
-    if (url.pathname === "/merchant-feedback" && (request.method === "GET" || request.method === "HEAD")) {
+    if (publicPagePath === "/merchant-feedback" && (request.method === "GET" || request.method === "HEAD")) {
       return env.ASSETS.fetch(new Request(new URL("/merchant-feedback.html", request.url), request));
     }
-    if (url.pathname === "/merchant-feedback-admin" && (request.method === "GET" || request.method === "HEAD")) {
+    if (publicPagePath === "/merchant-feedback-admin" && (request.method === "GET" || request.method === "HEAD")) {
       return env.ASSETS.fetch(new Request(new URL("/merchant-feedback-admin.html", request.url), request));
     }
     if (url.pathname === "/api/merchant-feedback" && request.method === "POST") {
