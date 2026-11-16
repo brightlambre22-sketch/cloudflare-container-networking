@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-const root=new URL("../",import.meta.url);\nconst repoRoot=new URL("../../",import.meta.url);
+const root=new URL("../",import.meta.url);
+const repoRoot=new URL("../../",import.meta.url);
 const [worker,config,form,admin,durable]=await Promise.all([
  readFile(new URL("src/index.ts",root),"utf8"),readFile(new URL("wrangler.toml",root),"utf8"),
  readFile(new URL("public/merchant-feedback.html",repoRoot),"utf8"),
