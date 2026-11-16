@@ -287,6 +287,10 @@ export default {
       }).catch(() => new Response(null, { status: 503 }));
       return new Response(response.body, { status: response.status, headers: response.headers });
     }
+    if (url.pathname === "/api/merchant-feedback/public" && request.method === "GET") {
+      const feedback = env.MERCHANT_FEEDBACK.get(env.MERCHANT_FEEDBACK.idFromName("merchant-feedback"));
+      return feedback.fetch("https://merchant-feedback.internal/public", { method: "GET" });
+    }
     if (url.pathname === "/api/admin/merchant-feedback" && request.method === "GET") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
       if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
