@@ -13,7 +13,8 @@ import { BusinessDatabase, businessDatabaseFetch, handleBusinessDatabaseRequest 
 import { InventoryLedger } from "./inventory-ledger";
 import { handleMarketplaceRequest } from "./marketplace-directory";
 import { handleDoorDashRequest } from "./doordash";
-export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner, WispRelay, BusinessDatabase, InventoryLedger };
+import { MerchantFeedback } from "./merchant-feedback";
+export { TunnelHub, NodeRegistry, NodeRuntime, VmExecution, AccountRegistry, AccountProvisioner, WispRelay, BusinessDatabase, InventoryLedger, MerchantFeedback };
 
 export interface Env {
   TUNNEL_HUB: DurableObjectNamespace<TunnelHub>;
@@ -24,6 +25,7 @@ export interface Env {
   ACCOUNT_PROVISIONER: DurableObjectNamespace<AccountProvisioner>;
   BUSINESS_DATABASE: DurableObjectNamespace<BusinessDatabase>;
   INVENTORY_LEDGER: DurableObjectNamespace<InventoryLedger>;
+  MERCHANT_FEEDBACK: DurableObjectNamespace<MerchantFeedback>;
   WISP_RELAY: DurableObjectNamespace<WispRelay>;
   VM_BASELINE_ID?: string;
   ADMIN_ACCESS_KEY?: string;
@@ -265,6 +267,43 @@ async function getOrAllocateAccountNetworkIdentity(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const publicPagePath = url.pathname.replace(/\/+$/, "") || "/";
+
+    // Public merchant research intake. Submissions are immutable; admin can only list/delete.
+    if (publicPagePath === "/merchant-feedback" && (request.method === "GET" || request.method === "HEAD")) {
+      return env.ASSETS.fetch(new Request(new URL("/merchant-feedback.html", request.url), request));
+    }
+    if (publicPagePath === "/merchant-feedback-admin" && (request.method === "GET" || request.method === "HEAD")) {
+      return env.ASSETS.fetch(new Request(new URL("/merchant-feedback-admin.html", request.url), request));
+    }
+    if (url.pathname === "/api/merchant-feedback" && request.method === "POST") {
+      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
+      const ipHash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+      const feedback = env.MERCHANT_FEEDBACK.get(env.MERCHANT_FEEDBACK.idFromName("merchant-feedback"));
+      const response = await feedback.fetch("https://merchant-feedback.internal/submit", {
+        method: "POST", headers: { "content-type": "application/json", "x-feedback-ip-hash": ipHash },
+        body: await request.text(),
+      }).catch(() => new Response(null, { status: 503 }));
+      return new Response(response.body, { status: response.status, headers: response.headers });
+    }
+    if (url.pathname === "/api/admin/merchant-feedback" && request.method === "GET") {
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      const feedback = env.MERCHANT_FEEDBACK.get(env.MERCHANT_FEEDBACK.idFromName("merchant-feedback"));
+      return feedback.fetch("https://merchant-feedback.internal/list", { method: "GET" });
+    }
+    const feedbackDeleteMatch = url.pathname.match(/^\/api\/admin\/merchant-feedback\/([a-f0-9-]{36})$/);
+    if (feedbackDeleteMatch && request.method === "DELETE") {
+      if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
+      if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
+      let body: { confirm?: unknown };
+      try { body = await request.json() as typeof body; } catch { return json({ error: "invalid_json" }, 400); }
+      if (body.confirm !== true) return json({ error: "confirmation_required" }, 400);
+      const feedback = env.MERCHANT_FEEDBACK.get(env.MERCHANT_FEEDBACK.idFromName("merchant-feedback"));
+      return feedback.fetch("https://merchant-feedback.internal/" + feedbackDeleteMatch[1], { method: "DELETE" });
+    }
+
 
     // These pages contain account-specific dashboards and controls. Enforce the
     // session at the Worker edge so an unauthenticated visitor never receives
