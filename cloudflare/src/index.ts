@@ -293,7 +293,7 @@ export default {
       const feedback = env.MERCHANT_FEEDBACK.get(env.MERCHANT_FEEDBACK.idFromName("merchant-feedback"));
       return feedback.fetch("https://merchant-feedback.internal/list", { method: "GET" });
     }
-    const feedbackDeleteMatch = url.pathname.match(/^\\/api\\/admin\\/merchant-feedback\\/([a-f0-9-]{36})$/);
+    const feedbackDeleteMatch = url.pathname.match(/^\/api\/admin\/merchant-feedback\/([a-f0-9-]{36})$/);
     if (feedbackDeleteMatch && request.method === "DELETE") {
       if (!env.ADMIN_ACCESS_KEY) return json({ error: "admin_access_key_not_configured" }, 503);
       if (!await adminAuthorized(request, env)) return json({ error: "unauthorized" }, 401);
