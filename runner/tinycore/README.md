@@ -36,8 +36,22 @@ On the next boot, inspect `/var/log/tinycore-final-boot.log` for the readiness
 checks and backup result. Tiny Core's `filetool.sh -b` saves only paths listed
 in `/opt/.filetool.lst` (minus exclusions), to the configured TCE backup area.
 
-## Later stages
+## Authenticated control runner
 
-Fineproxy, Mysterium, private node address setup, and the Cloudflare control runner
-are intentionally not started by this milestone. They can be added after the
-base boot and persistence cycle is verified.
+The browser bootstrap can install and start the Mysterium/Cloudflare runner after
+the base network setup. It requires a high-entropy `NODE_CONTROL_TOKEN` supplied
+through a trusted provisioning environment variable. The token is passed to the
+runner process without being written into `node.env`, the ISO, or the Tiny Core
+backup list. The Worker must have the matching `NODE_CONTROL_TOKEN` secret.
+
+The runner's node-status polling, heartbeat, and status PATCH calls are
+authenticated. It cannot enumerate or create nodes or start/stop runtimes.
+
+**Reboot limitation:** the current boot hook does not reissue the runner token or
+automatically relaunch the runner after a guest reboot. A trusted, short-lived
+per-node credential-delivery mechanism is required before this can be considered
+persistent production operation. Do not persist the shared runner token in
+`node.env` or the guest backup.
+
+Fineproxy routing, per-merchant isolation, cgroups, seccomp, and a verified
+headless merchant shell remain separate acceptance gates.

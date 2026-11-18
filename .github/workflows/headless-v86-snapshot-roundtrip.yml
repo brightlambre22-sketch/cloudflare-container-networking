@@ -2,6 +2,8 @@ name: Workerd guest snapshot round-trip
 
 on:
   workflow_dispatch:
+  push:
+    branches: [security/tinycore-node-control-hardening]
   pull_request:
     branches: [main]
     paths:

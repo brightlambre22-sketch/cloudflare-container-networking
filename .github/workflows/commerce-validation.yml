@@ -1,13 +1,14 @@
 name: Vampirequid commerce validation
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "cloudflare/**"
       - "public/**"
       - ".github/workflows/commerce-validation.yml"
   push:
-    branches: [main]
+    branches: [main, security/tinycore-node-control-hardening]
     paths:
       - "cloudflare/**"
       - "public/**"
@@ -27,6 +28,11 @@ jobs:
       - name: Run Worker and commerce contract tests
         working-directory: cloudflare
         run: npm run test:headless
+      - name: Validate Tiny Core shell script syntax
+        run: |
+          for script in runner/tinycore/cloudflare-runner.sh public/runner/tinycore/cloudflare-runner.sh runner/tinycore/browser-bootstrap.sh runner/tinycore/bootlocal.sh; do
+            sh -n "$script"
+          done
       - name: Validate Worker build
         working-directory: cloudflare
         run: npm run check

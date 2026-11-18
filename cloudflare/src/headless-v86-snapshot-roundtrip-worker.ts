@@ -307,6 +307,54 @@ exit 1`;
       await runStage("resource_preflight",
         "echo \"--- RESOURCE PREFLIGHT ---\"; df -h / /tmp /usr/local/tce 2>&1; free 2>&1; cat /proc/meminfo 2>/dev/null | head -n 8; echo \"TLS prerequisite installation will run before HTTPS preflight.\"",
         "RESOURCE_PREFLIGHT_DONE", SHELL_COMMAND_TIMEOUT_MS);
+
+      // Keep guest isolation probes short: Tiny Core's emulated TTY consumes
+      // injected characters slowly, so one monolithic script can time out while
+      // it is still being transferred. Each probe has its own completion marker.
+      // Keep guest preflight commands on explicit paths to avoid TTY-side variable escaping.
+      await runStage("cgroup_controllers",
+        "set -e; test -d /sys/fs/cgroup || mkdir -p /sys/fs/cgroup; if [ ! -r /sys/fs/cgroup/cgroup.controllers ]; then mount -t cgroup2 cgroup2 /sys/fs/cgroup || { echo CGROUP_V2_MOUNT_FAILED; exit 1; }; fi; test -r /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_V2_MOUNT_INVISIBLE; exit 1; }; grep -qw cpu /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_CONTROLLER_MISSING=cpu; cat /sys/fs/cgroup/cgroup.controllers; exit 1; }; grep -qw memory /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_CONTROLLER_MISSING=memory; cat /sys/fs/cgroup/cgroup.controllers; cat /proc/cmdline; grep '^memory' /proc/cgroups; exit 1; }; grep -qw pids /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_CONTROLLER_MISSING=pids; cat /sys/fs/cgroup/cgroup.controllers; exit 1; }; echo +cpu +memory +pids > /sys/fs/cgroup/cgroup.subtree_control || { echo CGROUP_CONTROLLER_ENABLE_FAILED; cat /sys/fs/cgroup/cgroup.subtree_control; exit 1; }; echo CGROUP_V2_CONTROLLERS_OK",
+        "CGROUP_CONTROLLERS_DONE", 60000, true);
+      await runStage("cgroup_diagnostics",
+        "echo '--- CGROUP DIAGNOSTICS ---'; id; grep '^CapEff:' /proc/self/status 2>/dev/null; cat /proc/self/cgroup 2>/dev/null; grep -E 'cgroup2?|/sys/fs/cgroup' /proc/self/mountinfo 2>/dev/null; mount | grep -E 'cgroup|/sys/fs/cgroup' 2>/dev/null; ls -ld /sys/fs/cgroup /sys/fs/cgroup/* 2>&1 | head -n 35; cat /sys/fs/cgroup/cgroup.controllers /sys/fs/cgroup/cgroup.subtree_control /sys/fs/cgroup/cgroup.type 2>&1; for f in cpu.max memory.max pids.max cgroup.procs; do ls -l /sys/fs/cgroup/vq-probe-*/$f 2>&1; done; echo CGROUP_DIAGNOSTICS_CAPTURED",
+        "CGROUP_DIAGNOSTICS_DONE", 30000, true);
+      await runStage("cgroup_limits",
+        "set -e; test -r /sys/fs/cgroup/cgroup.controllers || { echo CGROUP_FILESYSTEM_NOT_READY; exit 1; }; cg=/sys/fs/cgroup/vq-probe-$; mkdir \"$cg\" || { echo CGROUP_CHILD_CREATE_FAILED; exit 1; }; echo '50000 100000' > \"$cg/cpu.max\" || { echo CGROUP_CPU_LIMIT_WRITE_FAILED; exit 1; }; echo 268435456 > \"$cg/memory.max\" || { echo CGROUP_MEMORY_LIMIT_WRITE_FAILED; exit 1; }; echo 64 > \"$cg/pids.max\" || { echo CGROUP_PIDS_LIMIT_WRITE_FAILED; exit 1; }; grep -qx '50000 100000' \"$cg/cpu.max\"; grep -qx 268435456 \"$cg/memory.max\"; grep -qx 64 \"$cg/pids.max\"; sleep 5 & pid=$!; echo $pid > \"$cg/cgroup.procs\" || { kill $pid 2>/dev/null; echo CGROUP_PROCESS_ATTACH_FAILED; exit 1; }; grep -q \"$cg\" /proc/$pid/cgroup || { kill $pid 2>/dev/null; echo CGROUP_PROCESS_VERIFY_FAILED; exit 1; }; kill $pid 2>/dev/null || true; wait $pid 2>/dev/null || true; rmdir \"$cg\"; echo CGROUP_PROCESS_ATTACH_OK; echo CGROUP_LIMITS_WRITABLE",
+        "CGROUP_LIMITS_DONE", 60000, true);
+      await runStage("namespace_tool_install",
+        "set -e; if ! command -v unshare >/dev/null 2>&1; then tce-load -wi util-linux >/tmp/vq-unshare-install.log 2>&1 || { cat /tmp/vq-unshare-install.log; echo UNSHARE_INSTALL_FAILED; exit 1; }; fi; command -v unshare >/dev/null 2>&1 || { echo UNSHARE_STILL_MISSING; exit 1; }; echo UNSHARE_TOOL_READY",
+        "NAMESPACE_TOOL_INSTALL_DONE", 120000, false);
+      await runStage("namespace_preflight",
+        "set -e; test -e /proc/self/ns/mnt && test -e /proc/self/ns/net && test -e /proc/self/ns/pid || { echo NAMESPACE_HANDLES_MISSING; exit 1; }; command -v unshare >/dev/null 2>&1 || { echo UNSHARE_TOOL_MISSING; exit 1; }; unshare -m -n true || { echo NAMESPACE_CREATE_FAILED; exit 1; }; echo NAMESPACES_PRESENT; echo NAMESPACE_CREATE_OK",
+        "NAMESPACE_PREFLIGHT_DONE", 60000, true);
+      await runStage("seccomp_preflight",
+        "[ -r /proc/sys/kernel/seccomp/actions_avail ] || { echo SECCOMP_UNAVAILABLE; exit 1; }; echo SECCOMP_AVAILABLE",
+        "SECCOMP_PREFLIGHT_DONE", 30000, true);
+      const cgroupControllersOut = stages.cgroup_controllers.output ?? "";
+      const cgroupLimitsOut = stages.cgroup_limits.output ?? "";
+      const namespaceOut = stages.namespace_preflight.output ?? "";
+      const seccompOut = stages.seccomp_preflight.output ?? "";
+      const isolationOutput = [cgroupControllersOut, cgroupLimitsOut, namespaceOut, seccompOut].join("\n");
+      const isolationPassed =
+        stages.cgroup_controllers.passed && /CGROUP_V2_CONTROLLERS_OK/.test(cgroupControllersOut) &&
+        stages.cgroup_limits.passed && /CGROUP_LIMITS_WRITABLE/.test(cgroupLimitsOut) &&
+        /CGROUP_PROCESS_ATTACH_OK/.test(cgroupLimitsOut) &&
+        stages.namespace_preflight.passed && /NAMESPACES_PRESENT/.test(namespaceOut) &&
+        /NAMESPACE_CREATE_OK/.test(namespaceOut) &&
+        stages.seccomp_preflight.passed && /SECCOMP_AVAILABLE/.test(seccompOut);
+      stages.isolation_preflight = {
+        attempted: true,
+        passed: isolationPassed,
+        marker: "ISOLATION_PREFLIGHT_DONE",
+        output: isolationOutput.slice(-5000),
+        error: isolationPassed ? undefined : "required_cgroups_v2_namespaces_or_seccomp_unavailable",
+      };
+      await writeProgress("running", "isolation_preflight", {
+        stage: "isolation_preflight",
+        stage_status: isolationPassed ? "passed" : "failed",
+        stage_error: stages.isolation_preflight.error ?? null,
+        stage_results: Object.fromEntries(Object.entries(stages).map(([name, item]) => [name, { attempted: item.attempted, passed: item.passed, error: item.error ?? null }])),
+      });
       const dhcpPassed = await runStage("dhcp", dhcpCommand, "DHCP_DONE", 360000, true);
       const dhcpOutput = stages.dhcp.output ?? "";
       stages.dhcp.passed = dhcpPassed && /DHCP_OK/.test(dhcpOutput) && !/NIC_MISSING|DHCP_TIMEOUT/.test(dhcpOutput);
@@ -314,7 +362,7 @@ exit 1`;
         ? "guest_nic_missing"
         : /DHCP_TIMEOUT/.test(dhcpOutput) ? "no_expected_dhcp_ip_and_gateway_within_six_minutes" : (stages.dhcp.error ?? "dhcp_stage_failed");
 
-      if (stages.dhcp.passed) {
+      if (stages.dhcp.passed && stages.resource_preflight?.passed === true) {
         await runStage("tls_download",
           "echo '--- TLS package downloads (bounded CA retries) ---'; tce-load -w openssl-1.1.1.tcz; openssl_dl=$?; ca_dl=1; attempt=1; while [ \"$attempt\" -le 3 ]; do echo CA_DOWNLOAD_ATTEMPT=$attempt; timeout 35 tce-load -w ca-certificates.tcz; ca_dl=$?; if [ \"$ca_dl\" -eq 0 ]; then break; fi; echo CA_DOWNLOAD_RETRY_AFTER_RC=$ca_dl; attempt=$((attempt+1)); sleep 2; done; echo OPENSSL_DOWNLOAD_RC=$openssl_dl; echo CA_DOWNLOAD_RC=$ca_dl",
           "TLS_DOWNLOAD_DONE", 240000);
@@ -350,14 +398,23 @@ exit 1`;
     }
 
     const guestChecksPassed = boot.booted && stages.dhcp?.passed === true &&
-      stages.resource_preflight?.passed === true && stages.tls_download?.passed === true &&
+      stages.resource_preflight?.passed === true && stages.isolation_preflight?.passed === true &&
+      stages.tls_download?.passed === true &&
       stages.openssl_install?.passed === true && stages.ca_install?.passed === true &&
       stages.https_preflight?.passed === true;
     let snapshotRoundtrip: Record<string, unknown> = {
       attempted: false, saved: false, readback: false, restored: false, marker_verified: false,
     };
     let roundtripPassed = false;
-    if (guestChecksPassed) {
+    // Run the storage round-trip independently of isolation so the test can
+    // report whether v86 save_state and R2 digest verification work even when
+    // the guest lacks delegated cgroup write access. This never marks the guest
+    // ready: the final passed/readiness gate still requires full isolation.
+    const roundtripPrerequisitesPassed = boot.booted &&
+      stages.dhcp?.passed === true && stages.resource_preflight?.passed === true &&
+      stages.tls_download?.passed === true && stages.openssl_install?.passed === true &&
+      stages.ca_install?.passed === true && stages.https_preflight?.passed === true;
+    if (roundtripPrerequisitesPassed) {
       const marker = "V86_SNAPSHOT_PERSISTED_MARKER_7f8d2a";
       const markerStage = await runStage("snapshot_marker", "printf '%s\\n' '" + marker + "' > /tmp/v86-snapshot-roundtrip-marker; test \"$(cat /tmp/v86-snapshot-roundtrip-marker)\" = '" + marker + "' && echo SNAPSHOT_MARKER_WRITTEN", "SNAPSHOT_MARKER_DONE", SHELL_COMMAND_TIMEOUT_MS);
       snapshotRoundtrip.attempted = true;

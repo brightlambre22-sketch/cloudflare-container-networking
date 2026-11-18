@@ -101,15 +101,26 @@ export class NodeRegistry extends DurableObject {
       if (request.method === "GET") return Response.json(existing);
 
       if (request.method === "PATCH") {
-        const patch = await request.json().catch(() => ({})) as Partial<
-          Pick<VirtualNodeRecord, "status" | "runtime" | "egress_ip" | "last_health_at" | "error">
-        >;
+        const patch = await request.json().catch(() => null) as Record<string, unknown> | null;
+        if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+          return Response.json({ error: "invalid_patch" }, { status: 400 });
+        }
+        const allowed = new Set(["status", "error"]);
+        if (Object.keys(patch).some((field) => !allowed.has(field))) {
+          return Response.json({ error: "unsupported_patch_field" }, { status: 400 });
+        }
+        if (patch.status !== undefined &&
+            !["offline", "online", "error"].includes(String(patch.status))) {
+          return Response.json({ error: "invalid_node_status" }, { status: 400 });
+        }
+        if (patch.error !== undefined &&
+            !(patch.error === null || (typeof patch.error === "string" && patch.error.length <= 512))) {
+          return Response.json({ error: "invalid_node_error" }, { status: 400 });
+        }
         const updated: VirtualNodeRecord = {
           ...existing,
-          ...patch,
-          node_id: existing.node_id,
-          private_ip: existing.private_ip,
-          created_at: existing.created_at,
+          ...(patch.status !== undefined ? { status: patch.status as NodeStatus } : {}),
+          ...(patch.error !== undefined ? { error: patch.error as string | null } : {}),
           updated_at: new Date().toISOString(),
         };
         await this.ctx.storage.put(key, updated);

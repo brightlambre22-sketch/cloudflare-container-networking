@@ -40,7 +40,7 @@ export class NodeRuntime extends DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const current = await this.state();
+    const current = await this.withRunnerLiveness(await this.state());
 
     if (url.pathname === "/status" && request.method === "GET") {
       return Response.json({

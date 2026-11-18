@@ -2,17 +2,20 @@
 set -eu
 
 # Safe browser/v86 bootstrap. Installs only pinned, verified runner scripts.
-# Usage: browser-bootstrap.sh <cloudflare-api-url> <node-id>
+# Usage: export NODE_CONTROL_TOKEN then run browser-bootstrap.sh <cloudflare-api-url> <node-id>
 
 API_URL="${1:-}"
 NODE_ID="${2:-}"
-PINNED_REF="c052da1b750198d96a6b2149191e62c4848fc948"
+PINNED_REF="a863fb3201beddeb48b06245f99aeabe62e9eb36"
 RAW_BASE="https://raw.githubusercontent.com/brightlambre22-sketch/cloudflare-container-networking/$PINNED_REF/runner/tinycore"
 MYST_VERSION="1.38.5"
 MYST_URL="https://github.com/mysteriumnetwork/node/releases/download/$MYST_VERSION/myst_linux_amd64.tar.gz"
 MYST_SHA256="79b0aa1ca846cfa02ff8a814828a18d9fba739698295054e13cafb6a74907554"
 
-[ -n "$API_URL" ] && [ -n "$NODE_ID" ] || { echo "Usage: browser-bootstrap.sh <https-worker-url> <node-id>" >&2; exit 1; }
+[ -n "$API_URL" ] && [ -n "$NODE_ID" ] || { echo "Usage: export NODE_CONTROL_TOKEN; browser-bootstrap.sh <https-worker-url> <node-id>" >&2; exit 1; }
+: "${NODE_CONTROL_TOKEN:?Export NODE_CONTROL_TOKEN from the trusted provisioning channel}"
+[ "${#NODE_CONTROL_TOKEN}" -ge 64 ] || { echo "NODE_CONTROL_TOKEN must contain at least 64 characters" >&2; exit 1; }
+case "$NODE_CONTROL_TOKEN" in *[!a-fA-F0-9]*) echo "NODE_CONTROL_TOKEN must be hexadecimal" >&2; exit 1;; esac
 case "$API_URL" in https://*) ;; *) echo "API URL must use https://" >&2; exit 1;; esac
 case "$NODE_ID" in *[!a-zA-Z0-9._-]*|'') echo "Invalid node id" >&2; exit 1;; esac
 
@@ -71,7 +74,7 @@ fetch_verified() {
 # SHA-256 values for the exact pinned files.
 fetch_verified configure-node-ips.sh 517a07914d213d7c1e5b7b77b5fe10a3bf8f996f1600eaad515f82374429f5d4
 fetch_verified myst-supervisor.sh 717c3100ca11e525912cd422701174d0cad9cf7db5fc5e92d16cf2a5f67db56a
-fetch_verified cloudflare-runner.sh 09fd7c7d4a4b91e31b85420c840172d640e83e674b6f3236615ec5bfe247b6d9
+fetch_verified cloudflare-runner.sh 293cce24065c24a26c658fe3cd9f5d1e2db68a896567b6c178284c52d0bd7f1e
 
 cat >"$ENV/node.env" <<EOF
 NODE_ID=$NODE_ID
@@ -84,6 +87,16 @@ RUNNER_HEARTBEAT_SECONDS=10
 EOF
 chmod 600 "$ENV/node.env"
 
-wget -q -O /tmp/runtime-start.json   --header='Content-Type: application/json'   --post-data=''   "$API_URL/v1/nodes/$NODE_ID/runtime/start" || true
+# Keep the bearer credential in process memory only. Do not write it to the
+# Tiny Core backup list, guest filesystem, URL, or log.
+if [ -f /var/run/cloudflare-runner.pid ] && kill -0 "$(cat /var/run/cloudflare-runner.pid)" 2>/dev/null; then
+  echo "Cloudflare runner is already running."
+else
+  export NODE_ID
+  export CLOUDFLARE_API_URL="$API_URL"
+  NODE_CONTROL_TOKEN="$NODE_CONTROL_TOKEN" nohup "$ROOT/cloudflare-runner.sh" >>/var/log/cloudflare-runner.log 2>&1 &
+  echo "$!" >/var/run/cloudflare-runner.pid
+fi
 
 echo "Pinned Tiny Core runner installed for $NODE_ID"
+echo "The runner will use the dedicated NODE_CONTROL_TOKEN; operator lifecycle actions remain admin-only."
