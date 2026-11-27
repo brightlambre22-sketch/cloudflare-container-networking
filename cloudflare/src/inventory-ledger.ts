@@ -15,6 +15,7 @@ export class InventoryLedger extends DurableObject {
   private schema() {
     const sql = this.ctx.storage.sql;
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_catalog (product_id TEXT PRIMARY KEY, sku TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', variations_json TEXT NOT NULL DEFAULT '[]', external_url TEXT NOT NULL DEFAULT '', price_cents INTEGER NOT NULL, on_hand INTEGER NOT NULL CHECK(on_hand >= 0), offline_allocated INTEGER NOT NULL DEFAULT 0 CHECK(offline_allocated >= 0), status TEXT NOT NULL DEFAULT 'active', source_updated_at TEXT NOT NULL)");
+    sql.exec("CREATE TABLE IF NOT EXISTS catalog_sync_events (event_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL, synced_count INTEGER NOT NULL, created_at TEXT NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_reservations (id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL CHECK(status IN ('active','committed','released','expired')), expires_at TEXT NOT NULL, created_at TEXT NOT NULL)");
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_reservation_items (checkout_id TEXT NOT NULL, product_id TEXT NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0), unit_price_cents INTEGER NOT NULL, name TEXT NOT NULL, PRIMARY KEY(checkout_id, product_id))");
     sql.exec("CREATE TABLE IF NOT EXISTS inventory_orders (order_id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, acknowledged_at TEXT)");
@@ -45,19 +46,34 @@ export class InventoryLedger extends DurableObject {
       this.ctx.storage.transactionSync(() => {
         for (const table of [
           "inventory_reservation_items", "inventory_reservations", "inventory_orders",
-          "offline_allocation_items", "offline_allocations", "offline_sales", "inventory_catalog",
+          "offline_allocation_items", "offline_allocations", "offline_sales", "catalog_sync_events", "inventory_catalog",
         ]) sql.exec("DELETE FROM " + table);
       });
       return json({ ok: true, purged: true });
     }
 
     if (url.pathname === "/catalog/sync" && request.method === "PUT") {
-      const body = await request.json().catch(() => null) as { products?: unknown } | null;
+      const body = await request.json().catch(() => null) as { event_id?: unknown; products?: unknown } | null;
       if (!Array.isArray(body?.products) || body.products.length > 5000) return json({ error: "invalid_catalog" }, 400);
+      const eventId = typeof body.event_id === "string" ? body.event_id : "";
+      if (eventId && !UUID.test(eventId)) return json({ error: "invalid_catalog_event_id" }, 400);
+      const payloadBytes = new TextEncoder().encode(JSON.stringify(body.products));
+      const digest = await crypto.subtle.digest("SHA-256", payloadBytes);
+      const payloadHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      let duplicate = false;
+      let eventConflict = false;
       let synced = 0;
       try {
       this.ctx.storage.transactionSync(() => {
       this.expireReservations(now);
+      if (eventId) {
+        const priorEvent = sql.exec("SELECT payload_sha256,synced_count FROM catalog_sync_events WHERE event_id=?", eventId).toArray()[0] as { payload_sha256: string; synced_count: number } | undefined;
+        if (priorEvent) {
+          if (priorEvent.payload_sha256 !== payloadHash) eventConflict = true;
+          else { duplicate = true; synced = Number(priorEvent.synced_count); }
+          return;
+        }
+      }
       for (const raw of body.products) {
         if (!raw || typeof raw !== "object") continue;
         const p = raw as Record<string, unknown>;
@@ -85,13 +101,15 @@ export class InventoryLedger extends DurableObject {
           id, sku, name, description, category, imageUrl, variationsJson, externalUrl, price, quantity, status, updated);
         synced++;
       }
+      if (eventId) sql.exec("INSERT INTO catalog_sync_events(event_id,payload_sha256,synced_count,created_at) VALUES(?,?,?,?)", eventId, payloadHash, synced, now);
       });
       } catch (error) {
         const message = String(error);
         if (message.startsWith("catalog_update_conflicts_with_reserved_stock:")) return json({ error: "catalog_update_conflicts_with_reserved_stock", product_id: message.split(":")[1] }, 409);
         throw error;
       }
-      return json({ ok: true, synced });
+      if (eventConflict) return json({ error: "catalog_sync_event_id_conflict" }, 409);
+      return json({ ok: true, synced, ...(duplicate ? { duplicate: true } : {}), ...(eventId ? { event_id: eventId } : {}) });
     }
 
     if (url.pathname === "/catalog" && request.method === "GET") {
